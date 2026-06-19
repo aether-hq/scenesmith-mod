@@ -2,6 +2,7 @@ import logging
 import re
 import shutil
 import time
+import uuid
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
@@ -370,6 +371,11 @@ class AssetManager:
         if len(sanitized) > max_length:
             sanitized = sanitized[:max_length].rstrip("_")
         return sanitized
+
+    @staticmethod
+    def _unique_asset_basename(safe_name: str) -> str:
+        """Return a filesystem basename that remains unique under parallel generation."""
+        return f"{safe_name}_{time.time_ns()}_{uuid.uuid4().hex[:8]}"
 
     def _generate_collision_geometry(self, mesh_path: Path) -> list[trimesh.Trimesh]:
         """Generate collision geometry using the configured convex decomposition method.
@@ -1483,8 +1489,7 @@ class AssetManager:
         """
         item = articulated.item
         safe_name = self._sanitize_filename(item.short_name)
-        timestamp = int(time.time())
-        base_name = f"{safe_name}_{timestamp}"
+        base_name = self._unique_asset_basename(safe_name)
 
         # Create output directory for combined geometry.
         output_dir = self.geometry_dir / base_name
@@ -1578,8 +1583,7 @@ class AssetManager:
         for desc, short_name in zip(object_descriptions, short_names):
             # Use sanitized short name for file naming.
             safe_name = self._sanitize_filename(short_name)
-            timestamp = int(time.time())
-            base_name = f"{safe_name}_{timestamp}"
+            base_name = self._unique_asset_basename(safe_name)
 
             asset_paths.append(
                 AssetPathConfig(
