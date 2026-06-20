@@ -1109,6 +1109,8 @@ class TestAssetManagerDimensionControl(unittest.TestCase):
         mock_scale_mesh.assert_called_once()
         call_args = mock_scale_mesh.call_args
         self.assertEqual(call_args[1]["desired_dimensions"], [1.8, 0.9, 0.75])
+        self.assertFalse(call_args[1]["preserve_aspect_ratio"])
+        self.assertEqual(call_args[1]["desired_dimensions_frame"], "drake_yup_to_zup")
 
 
 if __name__ == "__main__":

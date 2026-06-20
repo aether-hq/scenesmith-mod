@@ -387,6 +387,31 @@ class TestAnalysisResponseParsing(unittest.TestCase):
         assert len(result.items) == 1
         assert result.items[0].object_type == ObjectType.FURNITURE
 
+    def test_parse_ceiling_item_removes_articulated_strategy(self) -> None:
+        """Ceiling assets use generated geometry because articulated retrieval has no ceiling category."""
+        router = AssetRouter(
+            agent_type=AgentType.CEILING_MOUNTED,
+            vlm_service=MagicMock(),
+            cfg=MagicMock(),
+        )
+
+        response = {
+            "items": [
+                {
+                    "description": "adjustable ceiling spotlight",
+                    "short_name": "spotlight",
+                    "dimensions": [0.12, 0.12, 0.15],
+                    "object_type": "CEILING_MOUNTED",
+                    "strategies": ["articulated", "generated"],
+                }
+            ],
+            "original_description": None,
+        }
+
+        result = router._parse_analysis_response(response)
+        assert len(result.items) == 1
+        assert result.items[0].strategies == ["generated"]
+
 
 if __name__ == "__main__":
     unittest.main()

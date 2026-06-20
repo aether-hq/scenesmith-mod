@@ -235,13 +235,26 @@ class AssetRouter:
         for item_data in response.get("items", []):
             try:
                 object_type = ObjectType(item_data["object_type"].lower())
+                strategies = list(item_data["strategies"])
+                if (
+                    self.agent_type == AgentType.CEILING_MOUNTED
+                    and "articulated" in strategies
+                ):
+                    strategies = [s for s in strategies if s != "articulated"]
+                    if not strategies:
+                        strategies = ["generated"]
+                    console_logger.info(
+                        "Removed unsupported articulated strategy from ceiling "
+                        f"asset '{item_data.get('description', '<unknown>')}'"
+                    )
+
                 items.append(
                     AssetItem(
                         description=item_data["description"],
                         short_name=item_data["short_name"],
                         dimensions=item_data["dimensions"],
                         object_type=object_type,
-                        strategies=item_data["strategies"],
+                        strategies=strategies,
                         thin_covering_type=item_data.get("thin_covering_type"),
                     )
                 )

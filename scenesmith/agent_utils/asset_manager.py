@@ -1908,12 +1908,16 @@ class AssetManager:
                 f"Scaling mesh to desired dimensions: {desired_dimensions}"
             )
             final_gltf_path = config.sdf_dir / f"{config.short_name}.gltf"
+            preserve_aspect_ratio = is_hssd
+            desired_dimensions_frame = "mesh" if is_hssd else "drake_yup_to_zup"
             final_gltf_path, applied_scale = scale_mesh_uniformly_to_dimensions(
                 mesh_path=canonical_path,
                 desired_dimensions=desired_dimensions,
                 output_path=final_gltf_path,
                 min_dimension_meters=self.min_mesh_dimension_meters,
                 relative_threshold=self.mesh_relative_dimension_threshold,
+                preserve_aspect_ratio=preserve_aspect_ratio,
+                desired_dimensions_frame=desired_dimensions_frame,
             )
             # HSSD pre-computed surfaces are at original mesh dimensions.
             # They need scale_factor to match the physical scaling applied above.

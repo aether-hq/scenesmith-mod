@@ -86,6 +86,14 @@ Install uv:
 curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
+Install Linux system libraries used by headless Blender rendering:
+```sh
+sudo apt-get update
+sudo apt-get install -y \
+  libgl1 libegl1 libxrender1 libxkbcommon0 libsm6 libxext6 libxi6 \
+  libxxf86vm1 libglib2.0-0
+```
+
 Install the dependencies (including dev tools like pytest) into `.venv`:
 ```sh
 uv sync
