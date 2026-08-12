@@ -8,6 +8,9 @@ layered substrate, and reproducible destruction—is specified in
 [`SEMANTIC-ENVIRONMENTS-SPEC.md`](SEMANTIC-ENVIRONMENTS-SPEC.md), with its
 test-first roadmap in
 [`SEMANTIC-ENVIRONMENTS-DEVELOPMENT-PLAN.md`](SEMANTIC-ENVIRONMENTS-DEVELOPMENT-PLAN.md).
+The semantic cave core plus the first large-cavern aperture/detail/hero slice
+are now implemented; the linked status ledger distinguishes those proofs from
+the remaining chunking, exterior, and destruction work.
 
 Status: core upgrade implemented; advanced hardening/experiments remain
 

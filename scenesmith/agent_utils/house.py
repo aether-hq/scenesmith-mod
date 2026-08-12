@@ -1194,6 +1194,9 @@ class HouseLayout:
     semantic_environment_geometry_path: Path | None = None
     """Compiled SDF path for the semantic environment shell."""
 
+    semantic_detail_geometry_paths: dict[str, Path] = field(default_factory=dict)
+    """Compiled SDF paths for semantic detail fields and hero features."""
+
     platforms: list[PlatformSpec] = field(default_factory=list)
     """Raised/sunken platforms, mezzanines, balconies, bridges, and catwalks."""
 
@@ -1369,6 +1372,26 @@ class HouseLayout:
         paths = write_compiled_structure(compiled, output_dir)
         self.semantic_environment_geometry_path = paths.sdf_path
         return paths
+
+    def compile_semantic_environment_details(self, output_dir: Path) -> dict[str, Path]:
+        """Compile seeded geological details and hero features to SDF assets."""
+
+        if self.semantic_environment is None:
+            raise ValueError("No semantic environment has been defined.")
+        from scenesmith.agent_utils.semantic_environment_details import (
+            compile_environment_details,
+        )
+        from scenesmith.agent_utils.structural_compiler import write_compiled_structure
+
+        compiled = compile_environment_details(self.semantic_environment)
+        paths: dict[str, Path] = {}
+        for structure in compiled.structures:
+            written = write_compiled_structure(
+                structure, output_dir / structure.structure_id
+            )
+            paths[structure.structure_id] = written.sdf_path
+        self.semantic_detail_geometry_paths = paths
+        return dict(paths)
 
     def build_topology(self):
         """Build the capability-aware semantic topology for this layout."""
@@ -1947,6 +1970,10 @@ class HouseLayout:
                 if self.semantic_environment_geometry_path is not None
                 else None
             ),
+            "semantic_detail_geometry_paths": {
+                detail_id: safe_relative_path(path, scene_dir)
+                for detail_id, path in self.semantic_detail_geometry_paths.items()
+            },
             "platforms": [platform.to_dict() for platform in self.platforms],
             "platform_geometry_paths": {
                 platform_id: safe_relative_path(path, scene_dir)
@@ -2071,6 +2098,7 @@ class HouseLayout:
         directive += self._connector_drake_directives(base_dir=base_dir)
         directive += self._structural_mesh_drake_directives(base_dir=base_dir)
         directive += self._semantic_environment_drake_directive(base_dir=base_dir)
+        directive += self._semantic_detail_drake_directives(base_dir=base_dir)
         directive += self._platform_drake_directives(base_dir=base_dir)
         directive += self._heightfield_drake_directives(base_dir=base_dir)
 
@@ -2224,6 +2252,41 @@ class HouseLayout:
     parent: house_frame
     child: structure_semantic_environment::structure_link"""
 
+    def _semantic_detail_drake_directives(self, base_dir: Path | None = None) -> str:
+        """Generate house-frame directives for compiled semantic details."""
+
+        if self.semantic_environment is None or not (
+            self.semantic_environment.detail_fields
+            or self.semantic_environment.hero_features
+        ):
+            return ""
+        expected = {
+            item.field_id for item in self.semantic_environment.detail_fields
+        } | {item.feature_id for item in self.semantic_environment.hero_features}
+        missing = expected - set(self.semantic_detail_geometry_paths)
+        if missing:
+            raise ValueError(
+                "Semantic detail geometry has not been compiled for: "
+                + ", ".join(sorted(missing))
+                + ". Call compile_semantic_environment_details() before exporting."
+            )
+        directives = ""
+        for detail_id in sorted(expected):
+            sdf_path = self.semantic_detail_geometry_paths[detail_id]
+            formatted_path = (
+                f"file://{sdf_path.absolute()}"
+                if base_dir is None
+                else f"package://scene/{os.path.relpath(sdf_path, base_dir)}"
+            )
+            directives += f"""
+- add_model:
+    name: environment_detail_{detail_id}
+    file: {formatted_path}
+- add_weld:
+    parent: house_frame
+    child: environment_detail_{detail_id}::structure_link"""
+        return directives
+
     def _heightfield_drake_directives(self, base_dir: Path | None = None) -> str:
         """Generate model/weld directives for room-local heightfields."""
 
@@ -2323,6 +2386,16 @@ class HouseLayout:
                 if house_dir is not None and not environment_path.is_absolute()
                 else environment_path
             )
+        semantic_detail_geometry_paths = {
+            detail_id: (
+                house_dir / path
+                if house_dir is not None and not Path(path).is_absolute()
+                else Path(path)
+            )
+            for detail_id, path in data.get(
+                "semantic_detail_geometry_paths", {}
+            ).items()
+        }
         platform_geometry_paths = {
             platform_id: (house_dir / path if house_dir is not None else Path(path))
             for platform_id, path in data.get("platform_geometry_paths", {}).items()
@@ -2380,6 +2453,7 @@ class HouseLayout:
             structural_mesh_geometry_paths=structural_mesh_geometry_paths,
             semantic_environment=semantic_environment,
             semantic_environment_geometry_path=semantic_environment_geometry_path,
+            semantic_detail_geometry_paths=semantic_detail_geometry_paths,
             platforms=platforms,
             platform_geometry_paths=platform_geometry_paths,
             heightfields=heightfields,
@@ -2433,6 +2507,10 @@ class HouseLayout:
                 if self.semantic_environment_geometry_path is not None
                 else None
             ),
+            "semantic_detail_geometry_paths": {
+                detail_id: str(path)
+                for detail_id, path in self.semantic_detail_geometry_paths.items()
+            },
             "platforms": [platform.to_dict() for platform in self.platforms],
             "platform_geometry_paths": {
                 platform_id: str(path)
@@ -2802,6 +2880,9 @@ class HouseScene:
             base_dir=self.house_dir
         )
         directive += self.layout._semantic_environment_drake_directive(
+            base_dir=self.house_dir
+        )
+        directive += self.layout._semantic_detail_drake_directives(
             base_dir=self.house_dir
         )
         directive += self.layout._platform_drake_directives(base_dir=self.house_dir)

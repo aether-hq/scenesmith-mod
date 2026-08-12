@@ -16,11 +16,23 @@ from scenesmith.agent_utils.semantic_environment_compiler import (
     compile_semantic_environment,
     semantic_mesh_annotations,
 )
+from scenesmith.agent_utils.semantic_environment_details import (
+    compile_environment_details,
+)
 from scenesmith.agent_utils.semantic_environments import (
     Bounds3D,
     CavernChamberSpec,
+    CavernShape,
+    DetailCollisionPolicy,
+    DetailFieldSpec,
+    DetailSurfaceRole,
     EnvironmentKind,
+    EnvironmentOpeningSpec,
     EnvironmentRegionSpec,
+    FormationType,
+    HeroFeatureSpec,
+    HeroFeatureType,
+    OpeningTarget,
     PassageCrossSectionSpec,
     PassageJunctionSpec,
     PassageNetworkSpec,
@@ -191,6 +203,162 @@ class TestSemanticEnvironmentCompiler(unittest.TestCase):
         roles = {role for patch in compiled.surfaces for role in patch.surface.roles}
         self.assertIn(SurfaceRole.TRAVERSABLE, roles)
         self.assertIn(SurfaceRole.OVERHEAD, roles)
+
+    def test_cav_006_sky_opening_is_a_real_non_watertight_aperture(self) -> None:
+        base = _environment()
+        chamber = CavernChamberSpec(
+            "sky_chamber", "subsurface", (5, 0, 3), (16, 12, 10)
+        )
+        environment = SemanticEnvironmentSpec(
+            regions=base.regions,
+            chambers=(chamber,),
+            openings=(
+                EnvironmentOpeningSpec(
+                    "oculus",
+                    "subsurface",
+                    "sky_chamber",
+                    OpeningTarget.SKY,
+                    (5, 0, 7.5),
+                    (0, 0, 1),
+                    (4, 4),
+                    8,
+                    weather_exposed=True,
+                ),
+            ),
+        )
+
+        compiled = compile_semantic_environment(environment, options=self.options)
+        mesh = trimesh.Trimesh(
+            vertices=compiled.visual_mesh.vertices,
+            faces=compiled.visual_mesh.triangles,
+            process=False,
+        )
+        opening_patches = [
+            patch
+            for patch in compiled.surfaces
+            if patch.surface.metadata["semantic_source_id"] == "oculus"
+        ]
+
+        self.assertFalse(mesh.is_watertight)
+        self.assertTrue(opening_patches)
+        self.assertTrue(
+            all(patch.surface.metadata["sky_exposed"] for patch in opening_patches)
+        )
+        self.assertTrue(
+            all(patch.surface.metadata["weather_exposed"] for patch in opening_patches)
+        )
+
+    def test_cav_010_colossal_cavern_is_compact_and_fully_compilable(self) -> None:
+        """A dragon-scale cavern remains a small semantic declaration."""
+
+        environment = SemanticEnvironmentSpec(
+            regions=(
+                EnvironmentRegionSpec(
+                    "mountain_interior",
+                    EnvironmentKind.SUBTERRANEAN,
+                    Bounds3D((-125, -90, -35), (125, 90, 110)),
+                ),
+            ),
+            chambers=(
+                CavernChamberSpec(
+                    "colossal_chamber",
+                    "mountain_interior",
+                    (0, 0, 20),
+                    (180, 120, 70),
+                    shape=CavernShape.SUPERELLIPSOID,
+                ),
+            ),
+            passage_networks=(
+                PassageNetworkSpec(
+                    "approach_routes",
+                    "mountain_interior",
+                    (
+                        PassageJunctionSpec("entrance", (-115, 0, 0)),
+                        PassageJunctionSpec(
+                            "hall_entry", (-75, 0, 0), chamber_id="colossal_chamber"
+                        ),
+                    ),
+                    (
+                        PassageSegmentSpec(
+                            "approach_tunnel",
+                            "entrance",
+                            "hall_entry",
+                            ((-115, 0, 0), (-75, 0, 0)),
+                            _cross_sections(12, 14),
+                        ),
+                    ),
+                ),
+            ),
+            openings=(
+                EnvironmentOpeningSpec(
+                    "sky_break",
+                    "mountain_interior",
+                    "colossal_chamber",
+                    OpeningTarget.SKY,
+                    (0, 0, 54),
+                    (0, 0, 1),
+                    (24, 18),
+                    30,
+                    weather_exposed=True,
+                ),
+            ),
+            detail_fields=(
+                DetailFieldSpec(
+                    "ceiling_formations",
+                    "mountain_interior",
+                    "colossal_chamber",
+                    FormationType.STALACTITE,
+                    DetailSurfaceRole.OVERHEAD,
+                    60,
+                    (0.8, 0.8, 2.0),
+                    (4.0, 4.0, 18.0),
+                    8675309,
+                    protect_passage_network_ids=("approach_routes",),
+                    route_clearance=6,
+                    collision_policy=DetailCollisionPolicy.COARSE,
+                ),
+            ),
+            hero_features=(
+                HeroFeatureSpec(
+                    "central_rock_spire",
+                    "mountain_interior",
+                    "colossal_chamber",
+                    HeroFeatureType.ROCK_SPIRE,
+                    (30, 10, -5),
+                    (18, 14, 32),
+                ),
+            ),
+        )
+
+        shell = compile_semantic_environment(
+            environment,
+            options=SemanticCompileOptions(voxel_size=5.0, max_cells=200_000),
+        )
+        details = compile_environment_details(environment)
+        mesh = trimesh.Trimesh(
+            vertices=shell.visual_mesh.vertices,
+            faces=shell.visual_mesh.triangles,
+            process=False,
+        )
+        source_ids = {
+            patch.surface.metadata["semantic_source_id"] for patch in shell.surfaces
+        }
+
+        self.assertGreater(mesh.extents[0], 170)
+        self.assertGreater(mesh.extents[1], 110)
+        self.assertFalse(mesh.is_watertight)
+        self.assertEqual(_mesh_component_count(mesh), 1)
+        self.assertIn("colossal_chamber", source_ids)
+        self.assertIn("approach_tunnel", source_ids)
+        self.assertIn("sky_break", source_ids)
+        self.assertEqual(len(details.instances), 61)
+        self.assertEqual(
+            {structure.structure_id for structure in details.structures},
+            {"ceiling_formations", "central_rock_spire"},
+        )
+        self.assertLess(
+            len(json.dumps(environment.to_dict(), separators=(",", ":"))), 5000
+        )
 
     def test_gen_001_declaration_order_does_not_change_mesh(self) -> None:
         first = compile_semantic_environment(_environment(), options=self.options)

@@ -225,6 +225,44 @@ class TestStructuralLayoutAuthoring(unittest.TestCase):
                     ],
                 }
             ],
+            "openings": [
+                {
+                    "id": "sky_break",
+                    "region_id": "subsurface",
+                    "source_chamber_id": "main_chamber",
+                    "target": "sky",
+                    "center": [15, 4, 5.9],
+                    "normal": [0, 0, 1],
+                    "size": [3, 3],
+                    "depth": 8,
+                }
+            ],
+            "detail_fields": [
+                {
+                    "id": "ceiling_teeth",
+                    "region_id": "subsurface",
+                    "target_chamber_id": "main_chamber",
+                    "formation_type": "stalactite",
+                    "surface_role": "overhead",
+                    "count": 8,
+                    "min_size": [0.4, 0.4, 0.8],
+                    "max_size": [1.2, 1.2, 2.5],
+                    "seed": 419,
+                    "protect_passage_network_ids": ["routes"],
+                    "route_clearance": 2,
+                    "collision_policy": "coarse",
+                }
+            ],
+            "hero_features": [
+                {
+                    "id": "stone_marker",
+                    "region_id": "subsurface",
+                    "target_chamber_id": "main_chamber",
+                    "feature_type": "rock_spire",
+                    "anchor": [17, 4, -1],
+                    "size": [2, 2, 4],
+                }
+            ],
         }
 
         result = tools._set_structural_layout_impl(
@@ -235,6 +273,13 @@ class TestStructuralLayoutAuthoring(unittest.TestCase):
         self.assertIsNotNone(layout.semantic_environment)
         assert layout.semantic_environment is not None
         self.assertEqual(layout.semantic_environment.passage_networks[0].cycle_rank, 0)
+        self.assertEqual(
+            layout.semantic_environment.openings[0].opening_id, "sky_break"
+        )
+        self.assertEqual(layout.semantic_environment.detail_fields[0].count, 8)
+        self.assertEqual(
+            layout.semantic_environment.hero_features[0].feature_id, "stone_marker"
+        )
         self.assertIn("1 semantic environment", result.message)
 
     def test_invalid_semantic_environment_update_is_atomic(self) -> None:

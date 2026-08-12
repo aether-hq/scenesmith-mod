@@ -6,6 +6,10 @@ Date: 2026-08-12
 
 Source of truth: [Semantic Environments Specification](SEMANTIC-ENVIRONMENTS-SPEC.md)
 
+Execution status: E0–E2 delivered; the initial E3 aperture/detail/hero slice is
+delivered with dependency-light tests. Stable chunking/LOD and the advanced E3
+policies listed below remain open.
+
 ## 1. Outcome
 
 Promote the prison-escape experiment's hand-authored passage into a general,
@@ -167,6 +171,12 @@ Exit gate:
 Goal: produce the dragon-cavern scale and visual vocabulary while keeping
 routes and topology deterministic.
 
+Current slice (2026-08-12): `PARTIAL_DELIVERED`. A data-only 180×120×70 m
+cavern compiles as one chamber/passage shell with a real sky aperture, 60
+deterministic formations, and an explicit hero spire. Formation masks protect
+full 3D envelopes across 50 seeds, visual-only collision suppression exports
+correctly, and exhausted fields fail with `no_legal_detail_samples`.
+
 Deliverables:
 
 - stable spatial chunking with bounded visual/collision budgets;
@@ -186,6 +196,12 @@ Tests:
 - FORM-001–FORM-007 across at least 50 seeds for mask-sensitive fields;
 - GEN-010 held-out cave compositions;
 - ADV-007 contradictory sky opening and ADV-008 no-legal-sample field.
+
+Implemented evidence currently covers CAV-007, the single-shell/compactness
+portion of CAV-010, FORM-001/FORM-002, deterministic distribution and collision
+parts of FORM-004, 50-seed route/opening/hero exclusions, FORM-007 primitive
+hero composition, and ADV-008. The remaining cases are still required before
+marking all of E3 complete.
 
 Initial large-scene budget:
 
@@ -654,18 +670,21 @@ A phase is complete only when:
 8. no capability is advertised as LLM-authorable until its repeated prompt
    threshold passes.
 
-## 11. Recommended first vertical slice
+## 11. Next development/experiment slice
 
-Start with E0, E1, and the narrowest part of E2:
+Close the remaining E3 risks before starting the exterior compiler:
 
-1. add typed chamber, junction, segment, path, and cross-section records;
-2. add normalized serialization, hashing, references, and diagnostics;
-3. compile one variable-section curved passage and one ellipsoid chamber;
-4. join them physically and emit current `StructuralSurface`/topology products;
-5. implement CAV-001–CAV-004 plus GEN-001–GEN-008;
-6. expose those records through an atomic authoring tool;
-7. rewrite the prison escape tunnel as semantic data and prove its output with
-   the same tests as a newly generated held-out passage.
-
-This slice is small enough to validate the architecture while immediately
-eliminating the example-only tunnel generator as the normal path.
+1. split large implicit scenes into stable spatial chunks while preserving
+   topology, surface provenance, and deterministic hashes;
+2. measure the 180×120×70 m fixture against the 60-second/2-GiB and independent
+   visual/collision budgets on the reference CI host;
+3. add paired-column and clustered-field recipes plus spawn and sightline
+   exclusion masks;
+4. add imported hero-mesh composition and deterministic lighting-anchor
+   queries;
+5. add CAV-011–CAV-014, the remaining FORM cases, five held-out GEN-010
+   compositions, and the contradictory-solid ADV-007 case;
+6. run AUTH-004/AUTH-005 repeated tool trials and publish normalized recipes,
+   diagnostics, compactness, cost, and repair-rate manifests;
+7. only then begin E4 with one cave-mouth-to-heightfield seam reusing the same
+   opening, surface, and detail contracts.

@@ -26,6 +26,10 @@ implemented, validation must return a typed “unsupported geometry” diagnosti
 | 5 — Caverns/terrain | DELIVERED_CORE | replacing freeform shells, heightfields, annotations, embedded passage centerlines; automatic tunnel extraction remains |
 | 6 — Agent tools | INTEGRATED | atomic structural authoring tool and prompt grammar exist; repeated P-series trials are not run |
 | 7 — Export/hardening | PARTIAL | deterministic OBJ/SDF/sidecars pass; Drake/Blender/MuJoCo/USD matrix remains |
+| E0–E2 — Semantic cave core | DELIVERED | canonical regions/chambers/passage graphs, implicit unions, topology adaptation, tool/export integration, and migrated prison example |
+| E3 — Large cavern/detail slice | PARTIAL_DELIVERED | real sky apertures, 180×120×70 m compact fixture, seeded formations, full-envelope masks, hero primitives; stable chunks and advanced field policies remain |
+| E4–E6 — Exteriors/destruction | PLANNED | terrain seams, layered substrate, breach/collapse/fracture/burn/deform operation compilers remain |
+| E7 — Semantic LLM evaluation | PLANNED | public schema exists, but repeated canonical/held-out authoring trials and evidence manifests remain |
 
 Exact evidence and remaining seams are kept in
 [`IMPLEMENTATION-STATUS.md`](IMPLEMENTATION-STATUS.md).

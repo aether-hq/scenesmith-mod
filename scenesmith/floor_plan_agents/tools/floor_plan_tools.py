@@ -345,8 +345,9 @@ class FloorPlanTools(DoorWindowMixin, OpenPlanMixin):
                 structural_json: JSON object with optional arrays: levels, rooms,
                     connectors, platforms, portals, heightfields, and
                     structural_meshes, plus an optional semantic_environment
-                    object containing regions, chambers, junctions, and passage
-                    segments. Room overrides
+                    object containing regions, chambers, passage networks,
+                    physical sky/exterior openings, seeded detail fields, and
+                    explicit hero features. Room overrides
                     identify an existing room by id and may include level_id,
                     elevation, house-frame min-corner `position` [x, y],
                     yaw_degrees, boundary `footprint`, independent
@@ -718,6 +719,7 @@ class FloorPlanTools(DoorWindowMixin, OpenPlanMixin):
         self.layout.structural_meshes = structural_meshes
         self.layout.semantic_environment = semantic_environment
         self.layout.semantic_environment_geometry_path = None
+        self.layout.semantic_detail_geometry_paths.clear()
         self.layout.connector_geometry_paths.clear()
         self.layout.platform_geometry_paths.clear()
         self.layout.heightfield_geometry_paths.clear()

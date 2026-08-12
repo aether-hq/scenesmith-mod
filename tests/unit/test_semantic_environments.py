@@ -6,8 +6,15 @@ import unittest
 from scenesmith.agent_utils.semantic_environments import (
     Bounds3D,
     CavernChamberSpec,
+    DetailFieldSpec,
+    DetailSurfaceRole,
     EnvironmentKind,
+    EnvironmentOpeningSpec,
     EnvironmentRegionSpec,
+    FormationType,
+    HeroFeatureSpec,
+    HeroFeatureType,
+    OpeningTarget,
     PassageCrossSectionSpec,
     PassageJunctionSpec,
     PassageNetworkSpec,
@@ -145,6 +152,57 @@ class TestSemanticEnvironmentModel(unittest.TestCase):
         self.assertEqual(
             SemanticEnvironmentSpec.from_dict(environment.to_dict()), environment
         )
+
+    def test_openings_details_and_heroes_round_trip_as_compact_semantics(self) -> None:
+        chamber = CavernChamberSpec("hall", "underground", (0, 0, 5), (24, 18, 12))
+        environment = SemanticEnvironmentSpec(
+            regions=(_region(),),
+            chambers=(chamber,),
+            openings=(
+                EnvironmentOpeningSpec(
+                    "oculus",
+                    "underground",
+                    "hall",
+                    OpeningTarget.SKY,
+                    (0, 0, 10.5),
+                    (0, 0, 1),
+                    (5, 4),
+                    8,
+                    weather_exposed=True,
+                ),
+            ),
+            detail_fields=(
+                DetailFieldSpec(
+                    "ceiling_teeth",
+                    "underground",
+                    "hall",
+                    FormationType.STALACTITE,
+                    DetailSurfaceRole.OVERHEAD,
+                    24,
+                    (0.3, 0.3, 0.8),
+                    (1.2, 1.2, 4.0),
+                    419,
+                ),
+            ),
+            hero_features=(
+                HeroFeatureSpec(
+                    "perch",
+                    "underground",
+                    "hall",
+                    HeroFeatureType.ROCK_SPIRE,
+                    (4, 2, 0),
+                    (5, 4, 8),
+                    semantic_tags=frozenset({"landmark", "perch"}),
+                ),
+            ),
+        )
+
+        restored = SemanticEnvironmentSpec.from_dict(environment.to_dict())
+
+        self.assertEqual(restored, environment)
+        self.assertTrue(restored.openings[0].sky_exposed)
+        self.assertEqual(restored.detail_fields[0].seed, 419)
+        self.assertLess(len(json.dumps(environment.to_dict())), 4000)
 
     def test_rejects_unknown_region_and_mismatched_path_endpoints(self) -> None:
         with self.assertRaisesRegex(GeometryValidationError, "unknown region"):

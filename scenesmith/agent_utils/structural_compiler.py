@@ -148,6 +148,7 @@ class CompiledStructure:
     surfaces: tuple[CompiledSurfacePatch, ...]
     collision_primitives: tuple[CollisionPrimitive, ...] = ()
     triangle_groups: Mapping[str, tuple[int, ...]] = field(default_factory=dict)
+    collision_enabled: bool = True
 
 
 @dataclass(frozen=True)
@@ -1949,7 +1950,9 @@ def write_compiled_structure(
     visual = ET.SubElement(link, "visual", {"name": "structure_visual"})
     _add_mesh_geometry(visual, mesh_path.name)
 
-    if compiled.collision_primitives:
+    if not compiled.collision_enabled:
+        pass
+    elif compiled.collision_primitives:
         for primitive in compiled.collision_primitives:
             collision = ET.SubElement(
                 link, "collision", {"name": primitive.primitive_id}

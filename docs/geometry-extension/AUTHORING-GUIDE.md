@@ -21,6 +21,101 @@ Invalid coordinates, references, topology, unsafe stair/ramp parameters, and
 unsupported connector solids fail explicitly. They are never flattened into a
 default room.
 
+## Semantic caverns, passages, openings, and detail
+
+Use the optional top-level `semantic_environment` object when the environment
+is best described as navigable voids in rock rather than rooms in a house. The
+LLM authors a compact graph and distributions: regions, ellipsoid or
+superellipsoid chambers, variable-section passage networks, chamber openings,
+seeded detail fields, and a few hero features. SceneSmith derives the unioned
+shell, individual formations, collision, surface roles, and provenance.
+
+The core record shape is:
+
+```json
+{
+  "semantic_environment": {
+    "schema_version": 1,
+    "regions": [{
+      "id": "underpeak",
+      "kind": "subterranean",
+      "bounds": {"minimum": [-120, -80, -40], "maximum": [120, 80, 100]}
+    }],
+    "chambers": [{
+      "id": "colossal_chamber",
+      "region_id": "underpeak",
+      "center": [0, 0, 20],
+      "size": [180, 120, 70],
+      "shape": "superellipsoid"
+    }],
+    "passage_networks": [{
+      "id": "approach_routes",
+      "region_id": "underpeak",
+      "junctions": [
+        {"id": "entrance", "position": [-115, 0, 0]},
+        {"id": "hall_entry", "position": [-75, 0, 0], "chamber_id": "colossal_chamber"}
+      ],
+      "segments": [{
+        "id": "approach_tunnel",
+        "start_junction_id": "entrance",
+        "end_junction_id": "hall_entry",
+        "path": [[-115, 0, 0], [-75, 0, 0]],
+        "profile": "ellipse",
+        "cross_sections": [
+          {"station": 0, "width": 12, "height": 14},
+          {"station": 1, "width": 15, "height": 16.8}
+        ]
+      }]
+    }],
+    "openings": [{
+      "id": "sky_break",
+      "region_id": "underpeak",
+      "source_chamber_id": "colossal_chamber",
+      "target": "sky",
+      "center": [0, 0, 54],
+      "normal": [0, 0, 1],
+      "size": [24, 18],
+      "depth": 30,
+      "weather_exposed": true
+    }],
+    "detail_fields": [{
+      "id": "ceiling_formations",
+      "region_id": "underpeak",
+      "target_chamber_id": "colossal_chamber",
+      "formation_type": "stalactite",
+      "surface_role": "overhead",
+      "count": 60,
+      "min_size": [0.8, 0.8, 2],
+      "max_size": [4, 4, 18],
+      "seed": 8675309,
+      "protect_passage_network_ids": ["approach_routes"],
+      "route_clearance": 6,
+      "collision_policy": "coarse"
+    }],
+    "hero_features": [{
+      "id": "central_rock_spire",
+      "region_id": "underpeak",
+      "target_chamber_id": "colossal_chamber",
+      "feature_type": "rock_spire",
+      "anchor": [30, 10, -5],
+      "size": [18, 14, 32],
+      "collision_policy": "full"
+    }]
+  }
+}
+```
+
+Author the topology and dimensions; do not enumerate formation instances or
+mesh triangles. Formation seeds are required for reproducibility. Protected
+passage IDs reserve the complete 3D formation envelope around each route.
+Openings must start inside their source chamber and extend outward; a `sky`
+target removes real shell collision and adds exposure metadata.
+
+Programmatic users call `HouseLayout.compile_semantic_environment(...)` for
+the joined shell and `compile_semantic_environment_details(...)` for detail
+and hero SDFs before Drake export. The structural authoring tool accepts the
+same object atomically and clears stale compiled products when it changes.
+
 ## Two stacked levels with a stair
 
 The lower ceiling and upper floor have the stair opening independently. The
@@ -178,13 +273,15 @@ capability; a natural passage defaults to `walk`.
 
 - Straight, L, U, and spiral stairs; straight/turning ramps; ladders; embedded
   natural passages/shafts are supported.
-- General nonrectangular portal apertures, standalone tunnel booleans,
+- General nonrectangular room-portal apertures, standalone building booleans,
   parametric vault/dome generators, and elevator cars are not yet compiled.
 - Freeform meshes are the supported escape hatch for caverns, overhangs,
   vaults, domes, arches, and other arbitrary shells.
-- First-class branching passage networks, large generated caverns, exterior
-  terrain, geological detail fields, layered substrate, and reproducible
-  destruction operations are specified but not yet implemented. See
+- First-class branching passage networks, ellipsoid/superellipsoid generated
+  caverns, sky/exterior chamber apertures, seeded geological detail, and hero
+  primitives are implemented. Stable chunking/LOD, paired/clustering and
+  sightline detail policies, exterior terrain seams, layered substrate, and
+  reproducible destruction operations remain specified work. See
   [Semantic Environments Specification](SEMANTIC-ENVIRONMENTS-SPEC.md) rather
   than treating the prison example as their production authoring API.
 - See [IMPLEMENTATION-STATUS.md](IMPLEMENTATION-STATUS.md) for exact evidence

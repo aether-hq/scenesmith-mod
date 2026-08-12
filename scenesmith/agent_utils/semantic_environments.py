@@ -21,6 +21,7 @@ from scenesmith.agent_utils.structural_geometry import (
     ConnectorSpec,
     ConnectorType,
     GeometryValidationError,
+    Point2,
     Point3,
     Transform3D,
 )
@@ -150,6 +151,43 @@ class PassageFloorMode(str, Enum):
     GRADED = "graded"
     STEPS = "steps"
     NON_TRAVERSABLE = "non_traversable"
+
+
+class OpeningShape(str, Enum):
+    ELLIPSE = "ellipse"
+    RECTANGLE = "rectangle"
+
+
+class OpeningTarget(str, Enum):
+    SKY = "sky"
+    EXTERIOR = "exterior"
+
+
+class FormationType(str, Enum):
+    STALACTITE = "stalactite"
+    STALAGMITE = "stalagmite"
+    COLUMN = "column"
+    FLOWSTONE = "flowstone"
+    BOULDER = "boulder"
+    RUBBLE = "rubble"
+    SCREE = "scree"
+
+
+class DetailSurfaceRole(str, Enum):
+    OVERHEAD = "overhead"
+    SUPPORT = "support"
+    BOUNDARY = "boundary"
+
+
+class DetailCollisionPolicy(str, Enum):
+    VISUAL_ONLY = "visual_only"
+    COARSE = "coarse"
+    FULL = "full"
+
+
+class HeroFeatureType(str, Enum):
+    ROCK_SPIRE = "rock_spire"
+    BOULDER = "boulder"
 
 
 @dataclass(frozen=True)
@@ -799,12 +837,350 @@ class PassageNetworkSpec:
 
 
 @dataclass(frozen=True)
+class EnvironmentOpeningSpec:
+    """A physical aperture connecting a chamber to sky or exterior."""
+
+    opening_id: str
+    region_id: str
+    source_chamber_id: str
+    target: OpeningTarget
+    center: Point3
+    normal: Point3
+    size: Point2
+    depth: float
+    shape: OpeningShape = OpeningShape.ELLIPSE
+    passable: bool = False
+    visible: bool = True
+    weather_exposed: bool = False
+
+    def __post_init__(self) -> None:
+        opening_id = _identifier(self.opening_id, "opening_id")
+        object.__setattr__(self, "opening_id", opening_id)
+        object.__setattr__(self, "region_id", _identifier(self.region_id, "region_id"))
+        object.__setattr__(
+            self,
+            "source_chamber_id",
+            _identifier(self.source_chamber_id, "source_chamber_id"),
+        )
+        object.__setattr__(self, "target", OpeningTarget(self.target))
+        object.__setattr__(
+            self, "center", _point(self.center, "center", entity_id=opening_id)
+        )
+        normal = _point(self.normal, "normal", entity_id=opening_id)
+        normal_length = math.sqrt(sum(component * component for component in normal))
+        if normal_length <= GEOMETRY_TOLERANCE:
+            raise GeometryValidationError(
+                "invalid_opening_normal",
+                "normal must have non-zero length",
+                entity_id=opening_id,
+            )
+        object.__setattr__(
+            self, "normal", tuple(component / normal_length for component in normal)
+        )
+        if len(self.size) != 2:
+            raise GeometryValidationError(
+                "invalid_opening_size",
+                "size must contain width and height",
+                entity_id=opening_id,
+            )
+        size = tuple(
+            _finite(value, f"size[{axis}]", entity_id=opening_id)
+            for axis, value in enumerate(self.size)
+        )
+        if any(value <= 0.0 for value in size):
+            raise GeometryValidationError(
+                "invalid_opening_size",
+                "opening size must be positive",
+                entity_id=opening_id,
+            )
+        object.__setattr__(self, "size", size)
+        depth = _finite(self.depth, "depth", entity_id=opening_id)
+        if depth <= 0.0:
+            raise GeometryValidationError(
+                "invalid_opening_depth",
+                "opening depth must be positive",
+                entity_id=opening_id,
+            )
+        object.__setattr__(self, "depth", depth)
+        object.__setattr__(self, "shape", OpeningShape(self.shape))
+        object.__setattr__(self, "passable", bool(self.passable))
+        object.__setattr__(self, "visible", bool(self.visible))
+        object.__setattr__(self, "weather_exposed", bool(self.weather_exposed))
+
+    @property
+    def sky_exposed(self) -> bool:
+        return self.target == OpeningTarget.SKY
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.opening_id,
+            "region_id": self.region_id,
+            "source_chamber_id": self.source_chamber_id,
+            "target": self.target.value,
+            "center": list(self.center),
+            "normal": list(self.normal),
+            "size": list(self.size),
+            "depth": self.depth,
+            "shape": self.shape.value,
+            "passable": self.passable,
+            "visible": self.visible,
+            "weather_exposed": self.weather_exposed,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> "EnvironmentOpeningSpec":
+        _reject_unknown_fields(
+            data,
+            {
+                "id",
+                "region_id",
+                "source_chamber_id",
+                "target",
+                "center",
+                "normal",
+                "size",
+                "depth",
+                "shape",
+                "passable",
+                "visible",
+                "weather_exposed",
+            },
+            entity_id=data.get("id"),
+        )
+        return cls(
+            opening_id=data["id"],
+            region_id=data["region_id"],
+            source_chamber_id=data["source_chamber_id"],
+            target=OpeningTarget(data["target"]),
+            center=tuple(data["center"]),
+            normal=tuple(data["normal"]),
+            size=tuple(data["size"]),
+            depth=data["depth"],
+            shape=OpeningShape(data.get("shape", "ellipse")),
+            passable=bool(data.get("passable", False)),
+            visible=bool(data.get("visible", True)),
+            weather_exposed=bool(data.get("weather_exposed", False)),
+        )
+
+
+@dataclass(frozen=True)
+class DetailFieldSpec:
+    """A deterministic repeated geological-detail recipe."""
+
+    field_id: str
+    region_id: str
+    target_chamber_id: str
+    formation_type: FormationType
+    surface_role: DetailSurfaceRole
+    count: int
+    min_size: Point3
+    max_size: Point3
+    seed: int
+    protect_passage_network_ids: tuple[str, ...] = ()
+    route_clearance: float = 1.0
+    collision_policy: DetailCollisionPolicy = DetailCollisionPolicy.COARSE
+
+    def __post_init__(self) -> None:
+        field_id = _identifier(self.field_id, "field_id")
+        object.__setattr__(self, "field_id", field_id)
+        object.__setattr__(self, "region_id", _identifier(self.region_id, "region_id"))
+        object.__setattr__(
+            self,
+            "target_chamber_id",
+            _identifier(self.target_chamber_id, "target_chamber_id"),
+        )
+        object.__setattr__(self, "formation_type", FormationType(self.formation_type))
+        object.__setattr__(self, "surface_role", DetailSurfaceRole(self.surface_role))
+        count = int(self.count)
+        if count <= 0:
+            raise GeometryValidationError(
+                "invalid_detail_count", "count must be positive", entity_id=field_id
+            )
+        object.__setattr__(self, "count", count)
+        minimum = _positive_point(self.min_size, "min_size", entity_id=field_id)
+        maximum = _positive_point(self.max_size, "max_size", entity_id=field_id)
+        if any(minimum[axis] > maximum[axis] for axis in range(3)):
+            raise GeometryValidationError(
+                "invalid_detail_size",
+                "min_size must not exceed max_size",
+                entity_id=field_id,
+            )
+        object.__setattr__(self, "min_size", minimum)
+        object.__setattr__(self, "max_size", maximum)
+        object.__setattr__(self, "seed", int(self.seed))
+        protected = tuple(
+            sorted(
+                _identifier(identifier, "protect_passage_network_id")
+                for identifier in self.protect_passage_network_ids
+            )
+        )
+        if len(protected) != len(set(protected)):
+            raise GeometryValidationError(
+                "duplicate_protected_network",
+                "protected passage network IDs must be unique",
+                entity_id=field_id,
+            )
+        object.__setattr__(self, "protect_passage_network_ids", protected)
+        clearance = _finite(self.route_clearance, "route_clearance", entity_id=field_id)
+        if clearance < 0.0:
+            raise GeometryValidationError(
+                "invalid_route_clearance",
+                "route_clearance must not be negative",
+                entity_id=field_id,
+            )
+        object.__setattr__(self, "route_clearance", clearance)
+        object.__setattr__(
+            self, "collision_policy", DetailCollisionPolicy(self.collision_policy)
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.field_id,
+            "region_id": self.region_id,
+            "target_chamber_id": self.target_chamber_id,
+            "formation_type": self.formation_type.value,
+            "surface_role": self.surface_role.value,
+            "count": self.count,
+            "min_size": list(self.min_size),
+            "max_size": list(self.max_size),
+            "seed": self.seed,
+            "protect_passage_network_ids": list(self.protect_passage_network_ids),
+            "route_clearance": self.route_clearance,
+            "collision_policy": self.collision_policy.value,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> "DetailFieldSpec":
+        _reject_unknown_fields(
+            data,
+            {
+                "id",
+                "region_id",
+                "target_chamber_id",
+                "formation_type",
+                "surface_role",
+                "count",
+                "min_size",
+                "max_size",
+                "seed",
+                "protect_passage_network_ids",
+                "route_clearance",
+                "collision_policy",
+            },
+            entity_id=data.get("id"),
+        )
+        return cls(
+            field_id=data["id"],
+            region_id=data["region_id"],
+            target_chamber_id=data["target_chamber_id"],
+            formation_type=FormationType(data["formation_type"]),
+            surface_role=DetailSurfaceRole(data["surface_role"]),
+            count=data["count"],
+            min_size=tuple(data["min_size"]),
+            max_size=tuple(data["max_size"]),
+            seed=data["seed"],
+            protect_passage_network_ids=tuple(
+                data.get("protect_passage_network_ids", [])
+            ),
+            route_clearance=data.get("route_clearance", 1.0),
+            collision_policy=DetailCollisionPolicy(
+                data.get("collision_policy", "coarse")
+            ),
+        )
+
+
+@dataclass(frozen=True)
+class HeroFeatureSpec:
+    """One intentionally placed geological landmark."""
+
+    feature_id: str
+    region_id: str
+    target_chamber_id: str
+    feature_type: HeroFeatureType
+    anchor: Point3
+    size: Point3
+    collision_policy: DetailCollisionPolicy = DetailCollisionPolicy.FULL
+    semantic_tags: frozenset[str] = frozenset()
+
+    def __post_init__(self) -> None:
+        feature_id = _identifier(self.feature_id, "feature_id")
+        object.__setattr__(self, "feature_id", feature_id)
+        object.__setattr__(self, "region_id", _identifier(self.region_id, "region_id"))
+        object.__setattr__(
+            self,
+            "target_chamber_id",
+            _identifier(self.target_chamber_id, "target_chamber_id"),
+        )
+        object.__setattr__(self, "feature_type", HeroFeatureType(self.feature_type))
+        object.__setattr__(
+            self, "anchor", _point(self.anchor, "anchor", entity_id=feature_id)
+        )
+        object.__setattr__(
+            self, "size", _positive_point(self.size, "size", entity_id=feature_id)
+        )
+        object.__setattr__(
+            self, "collision_policy", DetailCollisionPolicy(self.collision_policy)
+        )
+        object.__setattr__(
+            self,
+            "semantic_tags",
+            frozenset(
+                str(tag).strip() for tag in self.semantic_tags if str(tag).strip()
+            ),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.feature_id,
+            "region_id": self.region_id,
+            "target_chamber_id": self.target_chamber_id,
+            "feature_type": self.feature_type.value,
+            "anchor": list(self.anchor),
+            "size": list(self.size),
+            "collision_policy": self.collision_policy.value,
+            "semantic_tags": sorted(self.semantic_tags),
+        }
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> "HeroFeatureSpec":
+        _reject_unknown_fields(
+            data,
+            {
+                "id",
+                "region_id",
+                "target_chamber_id",
+                "feature_type",
+                "anchor",
+                "size",
+                "collision_policy",
+                "semantic_tags",
+            },
+            entity_id=data.get("id"),
+        )
+        return cls(
+            feature_id=data["id"],
+            region_id=data["region_id"],
+            target_chamber_id=data["target_chamber_id"],
+            feature_type=HeroFeatureType(data["feature_type"]),
+            anchor=tuple(data["anchor"]),
+            size=tuple(data["size"]),
+            collision_policy=DetailCollisionPolicy(
+                data.get("collision_policy", "full")
+            ),
+            semantic_tags=frozenset(data.get("semantic_tags", [])),
+        )
+
+
+@dataclass(frozen=True)
 class SemanticEnvironmentSpec:
     """Canonical semantic graph for one or more environment regions."""
 
     regions: tuple[EnvironmentRegionSpec, ...]
     chambers: tuple[CavernChamberSpec, ...] = ()
     passage_networks: tuple[PassageNetworkSpec, ...] = ()
+    openings: tuple[EnvironmentOpeningSpec, ...] = ()
+    detail_fields: tuple[DetailFieldSpec, ...] = ()
+    hero_features: tuple[HeroFeatureSpec, ...] = ()
     schema_version: int = SEMANTIC_ENVIRONMENT_SCHEMA_VERSION
 
     def __post_init__(self) -> None:
@@ -818,6 +1194,13 @@ class SemanticEnvironmentSpec:
         networks = tuple(
             sorted(self.passage_networks, key=lambda item: item.network_id)
         )
+        openings = tuple(sorted(self.openings, key=lambda item: item.opening_id))
+        detail_fields = tuple(
+            sorted(self.detail_fields, key=lambda item: item.field_id)
+        )
+        hero_features = tuple(
+            sorted(self.hero_features, key=lambda item: item.feature_id)
+        )
         if not regions:
             raise GeometryValidationError(
                 "empty_environment", "an environment requires at least one region"
@@ -825,8 +1208,12 @@ class SemanticEnvironmentSpec:
         _unique_ids(regions, "region_id", "environment_region")
         _unique_ids(chambers, "chamber_id", "cavern_chamber")
         _unique_ids(networks, "network_id", "passage_network")
+        _unique_ids(openings, "opening_id", "environment_opening")
+        _unique_ids(detail_fields, "field_id", "detail_field")
+        _unique_ids(hero_features, "feature_id", "hero_feature")
         region_by_id = {item.region_id: item for item in regions}
         chamber_by_id = {item.chamber_id: item for item in chambers}
+        network_by_id = {item.network_id: item for item in networks}
         for chamber in chambers:
             region = region_by_id.get(chamber.region_id)
             if region is None:
@@ -889,6 +1276,67 @@ class SemanticEnvironmentSpec:
                         "passage path is outside its region bounds",
                         entity_id=segment.segment_id,
                     )
+
+        for opening in openings:
+            chamber = chamber_by_id.get(opening.source_chamber_id)
+            if opening.region_id not in region_by_id:
+                raise GeometryValidationError(
+                    "unknown_environment_region",
+                    f"unknown region '{opening.region_id}'",
+                    entity_id=opening.opening_id,
+                )
+            if chamber is None:
+                raise GeometryValidationError(
+                    "unknown_cavern_chamber",
+                    f"unknown chamber '{opening.source_chamber_id}'",
+                    entity_id=opening.opening_id,
+                )
+            if chamber.region_id != opening.region_id:
+                raise GeometryValidationError(
+                    "cross_region_opening",
+                    "opening and source chamber must share a region",
+                    entity_id=opening.opening_id,
+                )
+            if chamber.shape in {
+                CavernShape.ELLIPSOID,
+                CavernShape.SUPERELLIPSOID,
+            } and not chamber.contains(opening.center, tolerance=0.1):
+                raise GeometryValidationError(
+                    "disjoint_chamber_opening",
+                    "opening center does not overlap its source chamber",
+                    entity_id=opening.opening_id,
+                )
+        for field_spec in detail_fields:
+            chamber = chamber_by_id.get(field_spec.target_chamber_id)
+            if chamber is None or chamber.region_id != field_spec.region_id:
+                raise GeometryValidationError(
+                    "unknown_detail_target",
+                    "detail target chamber is missing or belongs to another region",
+                    entity_id=field_spec.field_id,
+                )
+            for network_id in field_spec.protect_passage_network_ids:
+                network = network_by_id.get(network_id)
+                if network is None or network.region_id != field_spec.region_id:
+                    raise GeometryValidationError(
+                        "unknown_protected_network",
+                        f"protected network '{network_id}' is missing or cross-region",
+                        entity_id=field_spec.field_id,
+                    )
+        for feature in hero_features:
+            chamber = chamber_by_id.get(feature.target_chamber_id)
+            if chamber is None or chamber.region_id != feature.region_id:
+                raise GeometryValidationError(
+                    "unknown_hero_target",
+                    "hero target chamber is missing or belongs to another region",
+                    entity_id=feature.feature_id,
+                )
+            if not chamber.contains(feature.anchor):
+                raise GeometryValidationError(
+                    "hero_outside_chamber",
+                    "hero anchor must lie inside its target chamber",
+                    entity_id=feature.feature_id,
+                )
+
         for region in regions:
             if region.kind == EnvironmentKind.SUBTERRANEAN and not (
                 any(item.region_id == region.region_id for item in chambers)
@@ -903,6 +1351,9 @@ class SemanticEnvironmentSpec:
         object.__setattr__(self, "regions", regions)
         object.__setattr__(self, "chambers", chambers)
         object.__setattr__(self, "passage_networks", networks)
+        object.__setattr__(self, "openings", openings)
+        object.__setattr__(self, "detail_fields", detail_fields)
+        object.__setattr__(self, "hero_features", hero_features)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -910,12 +1361,24 @@ class SemanticEnvironmentSpec:
             "regions": [item.to_dict() for item in self.regions],
             "chambers": [item.to_dict() for item in self.chambers],
             "passage_networks": [item.to_dict() for item in self.passage_networks],
+            "openings": [item.to_dict() for item in self.openings],
+            "detail_fields": [item.to_dict() for item in self.detail_fields],
+            "hero_features": [item.to_dict() for item in self.hero_features],
         }
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> "SemanticEnvironmentSpec":
         _reject_unknown_fields(
-            data, {"schema_version", "regions", "chambers", "passage_networks"}
+            data,
+            {
+                "schema_version",
+                "regions",
+                "chambers",
+                "passage_networks",
+                "openings",
+                "detail_fields",
+                "hero_features",
+            },
         )
         return cls(
             schema_version=data.get(
@@ -931,6 +1394,18 @@ class SemanticEnvironmentSpec:
             passage_networks=tuple(
                 PassageNetworkSpec.from_dict(item)
                 for item in data.get("passage_networks", [])
+            ),
+            openings=tuple(
+                EnvironmentOpeningSpec.from_dict(item)
+                for item in data.get("openings", [])
+            ),
+            detail_fields=tuple(
+                DetailFieldSpec.from_dict(item)
+                for item in data.get("detail_fields", [])
+            ),
+            hero_features=tuple(
+                HeroFeatureSpec.from_dict(item)
+                for item in data.get("hero_features", [])
             ),
         )
 

@@ -52,11 +52,15 @@ runtime/export path consumes it. `PARTIAL` names the remaining seam explicitly.
 | Ellipsoid/superellipsoid cavern generation | INTEGRATED | rotated analytic chamber fields compile to visual/collision/surface products |
 | Passage graph topology adapter | INTEGRATED | branches/cycles/dead ends plus bound passage edge → `ConnectorSpec` derivation |
 | Generic/LLM-authorability guardrails | IMPLEMENTED | rename/order/translation/subdivision invariance, source sentinel, strict unknown-field rejection |
-| Large cavern chunking and formation fields | NOT IMPLEMENTED | basic large analytic chambers work; stable chunks, hero features, route masks, and seeded detail remain planned |
+| Natural sky/exterior apertures | INTEGRATED | typed chamber openings compile as real non-watertight apertures with exposure/provenance metadata |
+| Seeded geological detail fields | INTEGRATED | versioned deterministic sampler, inward-oriented formations, full-envelope route/opening/hero masks, typed exhaustion diagnostic, collision policy, and HouseLayout export |
+| Semantic hero geological features | INTEGRATED | stable authored anchors compile independently with collision policy and field exclusion |
+| Dragon-scale single cavern | IMPLEMENTED | 180×120×70 m held-out semantic recipe compiles chamber, approach, sky aperture, 60 formations, and hero spire within a compact JSON budget |
+| Stable large-scene chunking and advanced formation policies | NOT IMPLEMENTED | bounded chunk manifests/LOD, paired columns, clustering, spawn/sightline masks, cave-mouth terrain seams, and imported hero composition remain planned |
 | Exterior terrain/environment seams | NOT IMPLEMENTED | existing heightfields are a foundation, not a complete exterior system |
 | Layered substrate and destruction operations | NOT IMPLEMENTED | breach/collapse/fracture/burn/deform operation stack is specified only |
 
-The focused dependency-light regression command passes 194 tests, including
+The focused dependency-light regression command passes 206 tests, including
 the semantic model, compiler, genericity, authoring-tool, and migrated-example
 suites:
 
@@ -69,6 +73,7 @@ suites:
   tests.unit.test_structural_scenarios \
   tests.unit.test_semantic_environments \
   tests.unit.test_semantic_environment_compiler \
+  tests.unit.test_semantic_environment_details \
   tests.unit.test_prison_escape_example \
   tests.unit.test_house \
   tests.unit.test_room_placement \
@@ -105,7 +110,7 @@ repeated prompt trials) also pass.
 | Curved walls/vaults/domes/arches | PARTIAL | circles have bounded tessellation and freeform meshes work; general curve source mapping and parametric vault/arch generators are not built |
 | Portal shape breadth | PARTIAL | rectangular cutouts work; true arched/nonrectangular apertures remain mesh-tier |
 | Headroom/agent-radius clearance | PARTIAL | local predicates and connector centerline sampling are integrated; simulator swept-volume confirmation remains |
-| Cavern/tunnel generation | INTEGRATED | authored chamber/passages compile automatically; loft/vaulted/mesh chamber shapes, roughness, and stable chunking remain |
+| Cavern/tunnel generation | INTEGRATED | authored chamber/passages, real natural apertures, seeded details, and hero primitives compile automatically; loft/vaulted/mesh chamber shapes, roughness, and stable chunking remain |
 | Elevator/lift | UNSUPPORTED | semantic elevator type fails explicitly; static shaft/landing and dynamic-car compilers remain |
 | Shaft connector | PARTIAL | an imported shell may embody a climb-gated shaft; no standalone shaft compiler exists |
 | Natural passage connector | INTEGRATED | passage graphs generate the physical shell and derive embedded connector topology/clearance data |
@@ -124,10 +129,10 @@ required for the Phase 7 simulation gate.
 
 ## Next implementation order
 
-1. extend the completed E0–E2 passage/chamber vertical slice with large-scene
-   chunk manifests and the remaining chamber forms;
-2. add large caverns, openings, formation fields, and held-out genericity/LLM
-   authorability tests;
-3. add exterior seams, layered substrate, and reproducible damage operations;
-4. run Drake/Blender integration on supported infrastructure and the expanded
+1. add stable large-scene chunk manifests/LOD plus loft/vaulted chamber forms;
+2. extend detail fields with paired columns, clustering, spawn/sightline masks,
+   cave-mouth terrain seams, and imported hero composition;
+3. add exterior terrain, layered substrate, and reproducible damage operations;
+4. run repeated LLM authorability trials and publish evidence manifests;
+5. run Drake/Blender integration on supported infrastructure and the expanded
    repeated prompt corpus.

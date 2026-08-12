@@ -1,6 +1,6 @@
 # Semantic Environments Specification
 
-Status: proposed implementation contract
+Status: active implementation contract (E0–E3 partial)
 
 Date: 2026-08-12
 
@@ -76,14 +76,17 @@ queries, and structural OBJ/SDF export. Imported cavern shells can replace a
 room, and an embedded natural-passage centerline can be checked for local
 support and headroom.
 
-The first E0–E2 implementation slice now provides canonical semantic regions,
+The first E0–E3 implementation slice now provides canonical semantic regions,
 ellipsoid/superellipsoid chambers, variable-section passage graphs, four typed
 passage profiles, true implicit branch/chamber union, surface provenance,
-HouseLayout/tool/export integration, and graph-to-connector adaptation. The
-prison example consumes those public primitives. Stable large-cavern chunking,
-formation fields, exterior seams, layered substrate, and structural damage
-operations remain unimplemented; this specification continues to define that
-remaining delta.
+HouseLayout/tool/export integration, graph-to-connector adaptation, real
+sky/exterior chamber apertures, deterministic formation fields with protected
+route/opening/hero masks, and explicit colliding hero primitives. The prison
+example consumes the public passage primitives, and a held-out 180×120×70 m
+cavern proves compact authoring at the intended encounter scale. Stable
+large-scene chunking/LOD, advanced formation policies, exterior seams, layered
+substrate, and structural damage operations remain unimplemented; this
+specification continues to define that remaining delta.
 
 ## 4. Architectural model
 
@@ -194,7 +197,9 @@ connectivity.
 
 ### 5.4 Natural and constructed openings
 
-`OpeningSpec` generalizes the existing rectangular `PortalSpec`:
+`EnvironmentOpeningSpec` is the implemented chamber-to-sky/exterior slice of
+the broader `OpeningSpec` that generalizes the existing rectangular
+`PortalSpec`:
 
 - targets another space/region or the exterior/sky;
 - supports rectangle, ellipse, arch, polygon, and imported aperture profiles;
@@ -250,6 +255,15 @@ clearance intent.
 Generated detail may never silently block a required route, close a portal, or
 create a new topology connection. The compiler enforces masks after sampling
 and reports any dropped samples.
+
+The implemented E3 subset uses explicit `count`, `min_size`, `max_size`,
+`surface_role`, seed, protected passage-network IDs, route clearance, and
+collision policy. It provides stalactite/stalagmite/column-like, flowstone,
+boulder, rubble, and scree meshes plus rock-spire/boulder hero primitives.
+The sampler is versioned and independent of the platform RNG. Its conservative
+3D envelope masks the complete formation, not merely the surface anchor.
+Paired ceiling/floor columns, clustering, spawn/sightline masks, asset
+populations, and imported hero composition remain future extensions.
 
 ### 5.7 Materials and substrate
 
@@ -372,9 +386,8 @@ The tool schema must use bounded enums, explicit units, useful defaults, and
 small composable records. Free-form dictionaries are reserved for metadata,
 not geometry-defining behavior.
 
-An illustrative target recipe for the macro-structure of a dragon cavern is
-deliberately small. Exact serializer field spelling freezes in Phase E1, but
-the authoring granularity is normative:
+An illustrative recipe for the macro-structure of a dragon cavern is
+deliberately small and uses the implemented E3 serializer fields:
 
 ```json
 {
@@ -416,13 +429,13 @@ the authoring granularity is normative:
     }
   ],
   "openings": [
-    {"id": "sky_oculus", "source_id": "dragon_lair", "target": "sky", "shape": "ellipse", "size": [24, 16]}
+    {"id": "sky_oculus", "region_id": "underpeak", "source_chamber_id": "dragon_lair", "target": "sky", "center": [150, 90, 54], "normal": [0, 0, 1], "shape": "ellipse", "size": [24, 16], "depth": 30, "weather_exposed": true}
   ],
   "detail_fields": [
-    {"id": "ceiling_teeth", "type": "stalactite", "target": "dragon_lair:overhead", "density": 0.015, "seed": 419, "exclude": ["approach:protected_routes", "sky_oculus"]}
+    {"id": "ceiling_teeth", "region_id": "underpeak", "target_chamber_id": "dragon_lair", "formation_type": "stalactite", "surface_role": "overhead", "count": 80, "min_size": [0.8, 0.8, 2], "max_size": [4, 4, 18], "seed": 419, "protect_passage_network_ids": ["approach"], "route_clearance": 6, "collision_policy": "coarse"}
   ],
   "hero_features": [
-    {"id": "dragon_perch", "type": "rock_spire", "anchor": [185, 105, 12], "size": [20, 14, 16]}
+    {"id": "dragon_perch", "region_id": "underpeak", "target_chamber_id": "dragon_lair", "feature_type": "rock_spire", "anchor": [185, 105, 12], "size": [20, 14, 16], "collision_policy": "full"}
   ]
 }
 ```

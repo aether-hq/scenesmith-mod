@@ -16,7 +16,9 @@ from typing import Callable, Iterable
 from scenesmith.agent_utils.semantic_environments import (
     CavernChamberSpec,
     CavernShape,
+    EnvironmentOpeningSpec,
     EnvironmentRegionSpec,
+    OpeningShape,
     PassageFloorMode,
     PassageNetworkSpec,
     PassageProfile,
@@ -134,6 +136,54 @@ class _ImplicitPrimitive:
     maximum: Point3
     evaluate: Callable[[Point3], float]
     open_planes: tuple[tuple[Point3, Point3], ...] = ()
+
+
+def _opening_primitive(
+    opening: EnvironmentOpeningSpec, region: EnvironmentRegionSpec
+) -> _ImplicitPrimitive:
+    """Create an outward aperture volume unioned with its source chamber."""
+
+    center = _transform_point(opening.center, region)
+    normal = _normalize(_rotate_rpy(opening.normal, region.transform.rotation_rpy))
+    reference = (0.0, 0.0, 1.0)
+    if abs(_dot(normal, reference)) > 0.95:
+        reference = (1.0, 0.0, 0.0)
+    across = _normalize(_cross(reference, normal))
+    vertical = _normalize(_cross(normal, across))
+    width, height = opening.size
+    half_depth = opening.depth / 2.0
+    volume_center = _add(center, _scale(normal, half_depth))
+    extents = tuple(
+        abs(across[axis]) * width / 2.0
+        + abs(vertical[axis]) * height / 2.0
+        + abs(normal[axis]) * half_depth
+        for axis in range(3)
+    )
+    minimum = tuple(volume_center[axis] - extents[axis] for axis in range(3))
+    maximum = tuple(volume_center[axis] + extents[axis] for axis in range(3))
+
+    def evaluate(point: Point3) -> float:
+        relative = _subtract(point, volume_center)
+        u = _dot(relative, across) / (width / 2.0)
+        v = _dot(relative, vertical) / (height / 2.0)
+        depth = _dot(relative, normal) / half_depth
+        if opening.shape == OpeningShape.ELLIPSE:
+            radial = u * u + v * v - 1.0
+        else:
+            radial = max(abs(u), abs(v)) - 1.0
+        return max(radial, abs(depth) - 1.0)
+
+    return _ImplicitPrimitive(
+        source_id=opening.opening_id,
+        source_kind="environment_opening",
+        floor_mode=None,
+        minimum=minimum,  # type: ignore[arg-type]
+        maximum=maximum,  # type: ignore[arg-type]
+        evaluate=evaluate,
+        open_planes=(
+            (_add(center, _scale(normal, opening.depth)), _scale(normal, -1)),
+        ),
+    )
 
 
 def _interpolate_cross_section(
@@ -346,6 +396,8 @@ def _build_primitives(
         primitives.append(_chamber_primitive(chamber, region_by_id[chamber.region_id]))
     for network in environment.passage_networks:
         primitives.extend(_passage_primitives(network, region_by_id[network.region_id]))
+    for opening in environment.openings:
+        primitives.append(_opening_primitive(opening, region_by_id[opening.region_id]))
     if not primitives:
         raise GeometryValidationError(
             "empty_environment_geometry",
@@ -569,10 +621,18 @@ def _extract_mesh(
             sum(vertices[index][axis] for index in triangle) / 3.0 for axis in range(3)
         )
         primitive = _nearest_primitive(primitives, centroid)  # type: ignore[arg-type]
-        if any(
+        clipped_by_endpoint = any(
             _dot(_subtract(centroid, origin), inward) < 0.0
             for origin, inward in primitive.open_planes
-        ):
+        )
+        clipped_by_aperture = any(
+            candidate.source_kind == "environment_opening"
+            and candidate.evaluate(centroid) <= 0.25
+            and _dot(_subtract(centroid, origin), inward) <= options.voxel_size * 0.55
+            for candidate in primitives
+            for origin, inward in candidate.open_planes
+        )
+        if clipped_by_endpoint or clipped_by_aperture:
             continue
         filtered_triangles.append(triangle)
     if not filtered_triangles:
@@ -639,6 +699,27 @@ def compile_semantic_environment(
                     metadata={
                         "semantic_source_id": primitive.source_id,
                         "semantic_source_kind": primitive.source_kind,
+                        **(
+                            {
+                                "target": opening.target.value,
+                                "sky_exposed": opening.sky_exposed,
+                                "weather_exposed": opening.weather_exposed,
+                                "passable": opening.passable,
+                                "visible": opening.visible,
+                            }
+                            if (
+                                opening := next(
+                                    (
+                                        item
+                                        for item in environment.openings
+                                        if item.opening_id == primitive.source_id
+                                    ),
+                                    None,
+                                )
+                            )
+                            is not None
+                            else {}
+                        ),
                         "auto_classified": True,
                     },
                 ),
