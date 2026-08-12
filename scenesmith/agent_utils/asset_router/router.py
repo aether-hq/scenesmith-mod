@@ -448,13 +448,21 @@ class AssetRouter:
             GeneratedGeometry if successful, None if all strategies/candidates exhausted.
         """
         for strategy in item.strategies:
+            if strategy == "sam3d" and self.cfg.asset_manager.get("backend", "hunyuan3d") != "sam3d":
+                console_logger.warning(
+                    "SAM3D was requested explicitly but this worker's geometry backend is not SAM3D"
+                )
+                continue
             # Get strategy config.
             strategies_cfg = self.cfg.asset_manager.router.strategies
-            if not hasattr(strategies_cfg, strategy):
+            config_strategy = (
+                "generated" if strategy in {"hssd", "objaverse", "sam3d"} else strategy
+            )
+            if not hasattr(strategies_cfg, config_strategy):
                 console_logger.warning(f"Strategy '{strategy}' not in config, skipping")
                 continue
 
-            strategy_cfg = getattr(strategies_cfg, strategy)
+            strategy_cfg = getattr(strategies_cfg, config_strategy)
             if hasattr(strategy_cfg, "enabled") and not strategy_cfg.enabled:
                 console_logger.warning(f"Strategy '{strategy}' disabled, skipping")
                 continue
@@ -466,7 +474,7 @@ class AssetRouter:
             )
 
             # Dispatch to strategy-specific helper.
-            if strategy == "generated":
+            if strategy in {"generated", "hssd", "objaverse", "sam3d"}:
                 result = self._try_generated_strategy(
                     item=item,
                     max_retries=max_retries,
@@ -479,6 +487,9 @@ class AssetRouter:
                     debug_dir=debug_dir,
                     style_context=style_context,
                     scene_id=scene_id,
+                    asset_source_override=(
+                        "generated" if strategy == "sam3d" else strategy
+                    ),
                 )
             elif strategy == "articulated":
                 result = self._try_articulated_strategy(
@@ -1359,6 +1370,7 @@ class AssetRouter:
         debug_dir: Path,
         style_context: str | None = None,
         scene_id: str | None = None,
+        asset_source_override: str | None = None,
     ) -> GeneratedGeometry | None:
         """Try the generated strategy with text-to-3D or library retrieval.
 
@@ -1383,7 +1395,9 @@ class AssetRouter:
             GeneratedGeometry if successful, None if all retries exhausted.
         """
         # Determine asset source (text-to-3D vs library retrieval).
-        asset_source = self.cfg.asset_manager.general_asset_source
+        asset_source = asset_source_override or self.cfg.asset_manager.general_asset_source
+        if asset_source not in {"generated", "hssd", "objaverse"}:
+            raise ValueError(f"Unsupported routed asset source: {asset_source}")
 
         # For library retrieval, pre-fetch candidates (single server call).
         hssd_candidates: list | None = None

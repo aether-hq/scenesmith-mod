@@ -482,7 +482,7 @@ class SceneObject:
     placed directly on the floor, this is None.
     """
 
-    metadata: dict[str, str | float | bool] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
     """Additional metadata for the object (e.g., dimensions, material)."""
 
     bbox_min: np.ndarray | None = None

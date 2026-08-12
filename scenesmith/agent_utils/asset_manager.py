@@ -293,25 +293,33 @@ class AssetManager:
         if self.general_asset_source not in ["generated", "hssd", "objaverse"]:
             raise ValueError(f"Unknown asset source: {self.general_asset_source}")
 
-        # Initialize geometry generation client if source is "generated".
+        # The legacy path uses one globally configured source.  The typed Aether
+        # completion path carries an ordered source chain per asset brief, so a
+        # router-enabled manager needs clients for every routable backend.  Client
+        # construction is connection-free; an unavailable server remains an honest
+        # acquisition failure rather than silently falling back to the global source.
+        router_enabled = cfg.asset_manager.router.enabled
+
+        # Initialize geometry generation client if source is "generated" or typed
+        # routing may request the configured Hunyuan/SAM3D backend.
         self.geometry_client: GeometryGenerationClient | None = None
-        if self.general_asset_source == "generated":
+        if self.general_asset_source == "generated" or router_enabled:
             console_logger.info("Initializing geometry generation client")
             self.geometry_client = GeometryGenerationClient(
                 host=geometry_server_host, port=geometry_server_port
             )
 
-        # Initialize HSSD client if source is "hssd".
+        # Initialize HSSD client if source is "hssd" or typed routing is enabled.
         self.hssd_client: HssdRetrievalClient | None = None
-        if self.general_asset_source == "hssd":
+        if self.general_asset_source == "hssd" or router_enabled:
             console_logger.info("Initializing HSSD retrieval client")
             self.hssd_client = HssdRetrievalClient(
                 host=hssd_server_host, port=hssd_server_port
             )
 
-        # Initialize Objaverse client if source is "objaverse".
+        # Initialize Objaverse client if source is "objaverse" or typed routing is enabled.
         self.objaverse_client: ObjaverseRetrievalClient | None = None
-        if self.general_asset_source == "objaverse":
+        if self.general_asset_source == "objaverse" or router_enabled:
             console_logger.info("Initializing Objaverse retrieval client")
             self.objaverse_client = ObjaverseRetrievalClient(
                 host=objaverse_server_host, port=objaverse_server_port
@@ -1040,6 +1048,36 @@ class AssetManager:
             # This should never happen due to __init__ validation.
             raise ValueError(f"Unknown asset source: {self.general_asset_source}")
 
+    def generate_assets_from_typed_items(
+        self,
+        request: AssetGenerationRequest,
+        items: list["AssetItem"],
+    ) -> AssetGenerationResult:
+        """Acquire already-authored typed items without another semantic analysis pass.
+
+        This is the deterministic entry point used by Aether completion patches.  The
+        caller owns descriptions, dimensions, object types, and ordered source chains;
+        SceneSmith owns retrieval/generation, validation, conversion, and provenance.
+        """
+        if self.router is None:
+            raise RuntimeError("typed asset acquisition requires the SceneSmith asset router")
+        if not items:
+            raise ValueError("typed asset acquisition requires at least one item")
+        if len(items) != len({item.short_name for item in items}):
+            raise ValueError("typed asset short names must be unique")
+        expected_type = request.object_type
+        wrong_types = [
+            item.short_name
+            for item in items
+            if item.object_type not in {expected_type, ObjectType.EITHER}
+        ]
+        if wrong_types:
+            raise ValueError(f"typed assets have wrong object types: {wrong_types}")
+        return self._generate_items_with_validation(
+            unique_items={item.short_name: item for item in items},
+            request=request,
+        )
+
     def _generate_assets_with_router(
         self, request: AssetGenerationRequest
     ) -> AssetGenerationResult:
@@ -1433,6 +1471,8 @@ class AssetManager:
         additional_metadata = {"asset_source": generated.asset_source}
         if generated.hssd_id is not None:
             additional_metadata["hssd_mesh_id"] = generated.hssd_id
+        if generated.objaverse_uid is not None:
+            additional_metadata["objaverse_mesh_id"] = generated.objaverse_uid
 
         # Add thin_covering-specific metadata for physics validation.
         if generated.asset_source == "thin_covering":

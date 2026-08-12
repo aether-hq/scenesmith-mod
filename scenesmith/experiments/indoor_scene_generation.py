@@ -1311,12 +1311,15 @@ class IndoorSceneGenerationExperiment(BaseExperiment):
 
     def _start_geometry_server(self) -> None:
         """Start geometry generation server (if general_asset_source == 'generated')."""
-        # Only start if at least one agent uses generated strategy.
+        # A router-enabled Aether completion job can request a source per typed
+        # asset brief, independently of the legacy global source selection.
         furniture_uses_generated = (
             self.cfg.furniture_agent.asset_manager.general_asset_source == "generated"
+            or self.cfg.furniture_agent.asset_manager.router.enabled
         )
         manipuland_uses_generated = (
             self.cfg.manipuland_agent.asset_manager.general_asset_source == "generated"
+            or self.cfg.manipuland_agent.asset_manager.router.enabled
         )
 
         if not (furniture_uses_generated or manipuland_uses_generated):
@@ -1367,15 +1370,19 @@ class IndoorSceneGenerationExperiment(BaseExperiment):
         # Only start if at least one agent uses HSSD strategy.
         furniture_uses_hssd = (
             self.cfg.furniture_agent.asset_manager.general_asset_source == "hssd"
+            or self.cfg.furniture_agent.asset_manager.router.enabled
         )
         manipuland_uses_hssd = (
             self.cfg.manipuland_agent.asset_manager.general_asset_source == "hssd"
+            or self.cfg.manipuland_agent.asset_manager.router.enabled
         )
         wall_uses_hssd = (
             self.cfg.wall_agent.asset_manager.general_asset_source == "hssd"
+            or self.cfg.wall_agent.asset_manager.router.enabled
         )
         ceiling_uses_hssd = (
             self.cfg.ceiling_agent.asset_manager.general_asset_source == "hssd"
+            or self.cfg.ceiling_agent.asset_manager.router.enabled
         )
 
         if not (
@@ -1426,15 +1433,19 @@ class IndoorSceneGenerationExperiment(BaseExperiment):
         # Only start if at least one agent uses objaverse strategy.
         furniture_uses_objaverse = (
             self.cfg.furniture_agent.asset_manager.general_asset_source == "objaverse"
+            or self.cfg.furniture_agent.asset_manager.router.enabled
         )
         manipuland_uses_objaverse = (
             self.cfg.manipuland_agent.asset_manager.general_asset_source == "objaverse"
+            or self.cfg.manipuland_agent.asset_manager.router.enabled
         )
         wall_uses_objaverse = (
             self.cfg.wall_agent.asset_manager.general_asset_source == "objaverse"
+            or self.cfg.wall_agent.asset_manager.router.enabled
         )
         ceiling_uses_objaverse = (
             self.cfg.ceiling_agent.asset_manager.general_asset_source == "objaverse"
+            or self.cfg.ceiling_agent.asset_manager.router.enabled
         )
 
         if not (
