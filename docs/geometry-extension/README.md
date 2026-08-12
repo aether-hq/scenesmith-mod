@@ -3,6 +3,12 @@
 Current implementation evidence and remaining seams are tracked in
 [`IMPLEMENTATION-STATUS.md`](IMPLEMENTATION-STATUS.md).
 
+The next capability layer—semantic branching caves, large caverns, exteriors,
+layered substrate, and reproducible destruction—is specified in
+[`SEMANTIC-ENVIRONMENTS-SPEC.md`](SEMANTIC-ENVIRONMENTS-SPEC.md), with its
+test-first roadmap in
+[`SEMANTIC-ENVIRONMENTS-DEVELOPMENT-PLAN.md`](SEMANTIC-ENVIRONMENTS-DEVELOPMENT-PLAN.md).
+
 Status: core upgrade implemented; advanced hardening/experiments remain
 
 Date: 2026-08-12
@@ -167,4 +173,6 @@ The upgrade is complete only when:
 - [Structural geometry authoring guide](AUTHORING-GUIDE.md)
 - [Geometry capability and test matrix](GEOMETRY-CAPABILITY-MATRIX.md)
 - [Development and experiment plan](DEVELOPMENT-AND-EXPERIMENT-PLAN.md)
+- [Semantic environments specification](SEMANTIC-ENVIRONMENTS-SPEC.md)
+- [Semantic environments development and test plan](SEMANTIC-ENVIRONMENTS-DEVELOPMENT-PLAN.md)
 - [Implementation status and verified evidence](IMPLEMENTATION-STATUS.md)

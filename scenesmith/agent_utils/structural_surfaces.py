@@ -9,7 +9,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Sequence
 
-from scenesmith.agent_utils.structural_compiler import CompiledSurfacePatch
+from scenesmith.agent_utils.structural_compiler import (
+    CompiledSurfacePatch,
+    TriangleMesh,
+)
 from scenesmith.agent_utils.structural_geometry import (
     GEOMETRY_TOLERANCE,
     Point2,
@@ -431,6 +434,44 @@ def load_surface_patches(path: Path | str) -> tuple[CompiledSurfacePatch, ...]:
     """Load explicit patch boundaries/normals from a compiler sidecar."""
 
     data = json.loads(Path(path).read_text(encoding="utf-8"))
+    if data.get("surface_encoding") == "triangle_mesh_v1":
+        mesh_data = data["surface_mesh"]
+        mesh = TriangleMesh(
+            vertices=tuple(tuple(point) for point in mesh_data["vertices"]),
+            triangles=tuple(tuple(triangle) for triangle in mesh_data["triangles"]),
+        )
+        group_by_triangle = {
+            triangle_index: group_name
+            for group_name, indices in data["triangle_groups"].items()
+            for triangle_index in indices
+        }
+        metadata_by_triangle: list[dict] = [{} for _ in range(len(mesh.triangles))]
+        for run in data.get("surface_metadata_runs", []):
+            for triangle_index in range(run["start"], run["end"]):
+                metadata_by_triangle[triangle_index] = dict(run["metadata"])
+        structure_id = data["structure_id"]
+        return tuple(
+            CompiledSurfacePatch(
+                surface=StructuralSurface(
+                    surface_id=(
+                        f"{structure_id}_{group_by_triangle[triangle_index]}_"
+                        f"{triangle_index:06d}"
+                    ),
+                    roles=frozenset(
+                        SurfaceRole(role)
+                        for role in data["surface_roles"][
+                            group_by_triangle[triangle_index]
+                        ]
+                    ),
+                    source_id=structure_id,
+                    geometry_ref=f"triangle:{triangle_index}",
+                    metadata=metadata_by_triangle[triangle_index],
+                ),
+                boundary=tuple(mesh.vertices[index] for index in triangle),
+                normal=mesh.triangle_normal(triangle_index),
+            )
+            for triangle_index, triangle in enumerate(mesh.triangles)
+        )
     return tuple(
         CompiledSurfacePatch(
             surface=StructuralSurface.from_dict(surface),

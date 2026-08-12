@@ -182,5 +182,10 @@ capability; a natural passage defaults to `walk`.
   parametric vault/dome generators, and elevator cars are not yet compiled.
 - Freeform meshes are the supported escape hatch for caverns, overhangs,
   vaults, domes, arches, and other arbitrary shells.
+- First-class branching passage networks, large generated caverns, exterior
+  terrain, geological detail fields, layered substrate, and reproducible
+  destruction operations are specified but not yet implemented. See
+  [Semantic Environments Specification](SEMANTIC-ENVIRONMENTS-SPEC.md) rather
+  than treating the prison example as their production authoring API.
 - See [IMPLEMENTATION-STATUS.md](IMPLEMENTATION-STATUS.md) for exact evidence
   and environment-blocked integration gates.

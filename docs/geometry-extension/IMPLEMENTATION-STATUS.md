@@ -46,8 +46,19 @@ runtime/export path consumes it. `PARTIAL` names the remaining seam explicitly.
 | Embedded cavern passage/shaft | INTEGRATED | semantic centerline + clearance envelope over imported/room shell; no duplicate model |
 | Text-agent structural authoring | INTEGRATED | atomic `set_structural_layout` tool and prompt routing |
 | Typed invalid/unsupported diagnostics | INTEGRATED | footprint, reference, connector, mesh, portal tests |
+| Semantic chamber/passage graph model | INTEGRATED | canonical JSON/hash, atomic `set_structural_layout`, HouseLayout checkpoint/export integration |
+| Variable-profile passage compiler | INTEGRATED | ellipse/keyhole/slot/arched profiles, variable cross-sections, open boundaries, surface roles |
+| Branch and chamber void union | INTEGRATED | deterministic implicit union; watertight Y-junction, chamber join, provenance and metamorphic tests |
+| Ellipsoid/superellipsoid cavern generation | INTEGRATED | rotated analytic chamber fields compile to visual/collision/surface products |
+| Passage graph topology adapter | INTEGRATED | branches/cycles/dead ends plus bound passage edge → `ConnectorSpec` derivation |
+| Generic/LLM-authorability guardrails | IMPLEMENTED | rename/order/translation/subdivision invariance, source sentinel, strict unknown-field rejection |
+| Large cavern chunking and formation fields | NOT IMPLEMENTED | basic large analytic chambers work; stable chunks, hero features, route masks, and seeded detail remain planned |
+| Exterior terrain/environment seams | NOT IMPLEMENTED | existing heightfields are a foundation, not a complete exterior system |
+| Layered substrate and destruction operations | NOT IMPLEMENTED | breach/collapse/fracture/burn/deform operation stack is specified only |
 
-The focused dependency-light regression command currently passes 170 tests:
+The focused dependency-light regression command passes 194 tests, including
+the semantic model, compiler, genericity, authoring-tool, and migrated-example
+suites:
 
 ```bash
 .venv/bin/python -m unittest \
@@ -56,6 +67,8 @@ The focused dependency-light regression command currently passes 170 tests:
   tests.unit.test_structural_topology \
   tests.unit.test_structural_surfaces \
   tests.unit.test_structural_scenarios \
+  tests.unit.test_semantic_environments \
+  tests.unit.test_semantic_environment_compiler \
   tests.unit.test_prison_escape_example \
   tests.unit.test_house \
   tests.unit.test_room_placement \
@@ -92,10 +105,10 @@ repeated prompt trials) also pass.
 | Curved walls/vaults/domes/arches | PARTIAL | circles have bounded tessellation and freeform meshes work; general curve source mapping and parametric vault/arch generators are not built |
 | Portal shape breadth | PARTIAL | rectangular cutouts work; true arched/nonrectangular apertures remain mesh-tier |
 | Headroom/agent-radius clearance | PARTIAL | local predicates and connector centerline sampling are integrated; simulator swept-volume confirmation remains |
-| Cavern/tunnel generation | PARTIAL | imported shells can replace rooms and combine with built structures; automatic tunnel centerlines/clearance envelopes are not generated |
+| Cavern/tunnel generation | INTEGRATED | authored chamber/passages compile automatically; loft/vaulted/mesh chamber shapes, roughness, and stable chunking remain |
 | Elevator/lift | UNSUPPORTED | semantic elevator type fails explicitly; static shaft/landing and dynamic-car compilers remain |
 | Shaft connector | PARTIAL | an imported shell may embody a climb-gated shaft; no standalone shaft compiler exists |
-| Natural passage connector | PARTIAL | embedded shell routes are integrated with topology and geometric clearance; no standalone passage solid/boolean compiler exists |
+| Natural passage connector | INTEGRATED | passage graphs generate the physical shell and derive embedded connector topology/clearance data |
 | MuJoCo/USD | PARTIAL | generated OBJ/SDF assets are portable; explicit experimental exporter tests remain |
 | Prompt reliability | NOT RUN | requires configured model/API trials and the P-series experiment protocol |
 
@@ -111,10 +124,10 @@ required for the Phase 7 simulation gate.
 
 ## Next implementation order
 
-1. add deterministic general arc/spline source mapping and parametric
-   vault/arch cases;
-2. implement standalone shaft/elevator static geometry and an explicit
-   dynamic-car policy;
-3. add automatic cavern/tunnel centerline and clearance-envelope extraction;
-4. run Drake/Blender integration on supported infrastructure;
-5. execute P-001–P-012 repeated prompt trials and record pass rates.
+1. extend the completed E0–E2 passage/chamber vertical slice with large-scene
+   chunk manifests and the remaining chamber forms;
+2. add large caverns, openings, formation fields, and held-out genericity/LLM
+   authorability tests;
+3. add exterior seams, layered substrate, and reproducible damage operations;
+4. run Drake/Blender integration on supported infrastructure and the expanded
+   repeated prompt corpus.

@@ -21,6 +21,7 @@ from scenesmith.agent_utils.house import (
     Wall,
     WallDirection,
 )
+from scenesmith.agent_utils.semantic_environments import SemanticEnvironmentSpec
 from scenesmith.agent_utils.structural_geometry import (
     ConnectorSpec,
     Footprint2D,
@@ -343,7 +344,9 @@ class FloorPlanTools(DoorWindowMixin, OpenPlanMixin):
             Args:
                 structural_json: JSON object with optional arrays: levels, rooms,
                     connectors, platforms, portals, heightfields, and
-                    structural_meshes. Room overrides
+                    structural_meshes, plus an optional semantic_environment
+                    object containing regions, chambers, junctions, and passage
+                    segments. Room overrides
                     identify an existing room by id and may include level_id,
                     elevation, house-frame min-corner `position` [x, y],
                     yaw_degrees, boundary `footprint`, independent
@@ -544,6 +547,7 @@ class FloorPlanTools(DoorWindowMixin, OpenPlanMixin):
             "portals",
             "heightfields",
             "structural_meshes",
+            "semantic_environment",
         }
         if unknown:
             return self._fail(
@@ -667,6 +671,15 @@ class FloorPlanTools(DoorWindowMixin, OpenPlanMixin):
                 if "structural_meshes" in data
                 else list(self.layout.structural_meshes)
             )
+            semantic_environment = (
+                SemanticEnvironmentSpec.from_dict(data["semantic_environment"])
+                if data.get("semantic_environment") is not None
+                else (
+                    None
+                    if "semantic_environment" in data
+                    else self.layout.semantic_environment
+                )
+            )
 
             candidate = HouseLayout(
                 room_specs=updated_specs,
@@ -676,6 +689,7 @@ class FloorPlanTools(DoorWindowMixin, OpenPlanMixin):
                 platforms=platforms,
                 portals=portals,
                 heightfields=heightfields,
+                semantic_environment=semantic_environment,
             )
             candidate.validate_structure()
             specs_by_id = {spec.room_id: spec for spec in updated_specs}
@@ -702,6 +716,8 @@ class FloorPlanTools(DoorWindowMixin, OpenPlanMixin):
         self.layout.portals = portals
         self.layout.heightfields = heightfields
         self.layout.structural_meshes = structural_meshes
+        self.layout.semantic_environment = semantic_environment
+        self.layout.semantic_environment_geometry_path = None
         self.layout.connector_geometry_paths.clear()
         self.layout.platform_geometry_paths.clear()
         self.layout.heightfield_geometry_paths.clear()
@@ -722,7 +738,8 @@ class FloorPlanTools(DoorWindowMixin, OpenPlanMixin):
                 f"Applied structural layout: {len(levels)} levels, "
                 f"{len(connectors)} connectors, {len(platforms)} platforms, "
                 f"{len(heightfields)} heightfields, {len(structural_meshes)} "
-                f"structural meshes, and {len(portals)} portals."
+                f"structural meshes, {int(semantic_environment is not None)} "
+                f"semantic environment, and {len(portals)} portals."
             ),
         )
 

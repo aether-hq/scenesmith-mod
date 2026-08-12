@@ -54,6 +54,11 @@ Unless a row explicitly opts out, every deterministic case must verify:
 | P1 | Heightfield floors/ceilings | I4 | S2 | Sampled height/normal |
 | P1 | Freeform cavern chamber | I5 | S2 | Mesh + annotated surfaces |
 | P1 | Curved/branching tunnels | I5 | S2 | Portal graph + clearance |
+| P1 | Semantic cavern chamber/passage graph | I5 | S2 | Data-only graph compiles without imported shell |
+| P1 | Large cavern chunking and sky openings | I5 | S2 | Dragon-scale fixture preserves topology/exposure |
+| P1 | Seeded geological detail fields | I5 | S3 | Routes remain clear across seeds |
+| P1 | Layered substrate and authored breach | I5 | S2 | Cut faces expose source layers; collision opens |
+| P1 | Exterior terrain and cave/building seams | I4 | S2 | Shared surfaces/topology across boundary |
 | P1 | Natural vertical passage/shaft | I4 | S2 | 3D traversability class |
 | P1 | Mixed parametric/freeform complex | I5 | S1 | Semantic seam integrity |
 | P2 | Spiral stairs | I3 | S2 | Sweep + head clearance |
@@ -62,7 +67,8 @@ Unless a row explicitly opts out, every deterministic case must verify:
 | P2 | Rough terrain and stepping stones | I3 | S2 | Agent-specific traversability |
 | P2 | Moving/articulated structure | I2 | S1 | State-dependent topology |
 | P3 | Non-Euclidean/teleport adjacency | I1 | S3 | Semantic-only connector |
-| P3 | Dynamic destruction/deformation | I1 | S1 | Explicitly out of first scope |
+| P2 | Reproducible precompiled destruction | I5 | S1 | Ordered operations update every structural product |
+| P3 | Runtime physics-driven destruction | I2 | S1 | Explicitly out of first semantic-environment scope |
 
 ## Detailed deterministic cases
 
@@ -159,7 +165,59 @@ Unless a row explicitly opts out, every deterministic case must verify:
 | G-079 | P2 | I3/S2 | Natural column/island obstacle | Obstacle produces hole/blocked region without corrupting chamber boundary |
 | G-080 | P2 | I3/S1 | Overlapping/near-touching cave shells | Boolean or collision policy produces deterministic diagnostic/result |
 
-### G. Invalid and adversarial geometry
+### G. Semantic caverns and geological detail
+
+These cases prohibit imported chamber/tunnel meshes unless a row explicitly
+names the mesh escape hatch. The production compiler receives only public
+semantic records.
+
+| ID | Pri | I/S | Geometry | Expected checks |
+|---|---|---|---|---|
+| G-081 | P0 | I5/S3 | Variable-section curved passage primitive | Cross-section interpolation, tangent-frame continuity, floor route, and headroom agree |
+| G-082 | P0 | I5/S2 | Semantic Y-junction | One blended physical void; exactly three graph routes; no cap wall or false connection |
+| G-083 | P0 | I5/S2 | Four-way junction with dead end | Node degree and leaf topology preserved in compiled navigation |
+| G-084 | P0 | I5/S2 | Semantic loop plus spur | Cycle rank retained after compilation and serialization |
+| G-085 | P1 | I5/S2 | 180×120×70 m dragon cavern | Chunk budgets, arena support, hero perch, walk/fly routes, deterministic hashes |
+| G-086 | P1 | I5/S3 | Cavern ceiling opening to sky | Physical aperture, sky-exposed surfaces, and no overhead collision in opening |
+| G-087 | P1 | I4/S2 | Degree-5 multilevel passage junction | Stable blend and agent-specific clearance across incident paths |
+| G-088 | P1 | I4/S2 | Overlapping semantic chambers | Explicit union retains provenance; accidental near-touch is diagnosed |
+| G-089 | P2 | I4/S1 | 40-chamber/70-passage network | Compile/memory budgets; graph and chunking invariance |
+| G-090 | P1 | I5/S3 | Seeded stalactite/stalagmite fields | Correct source surfaces; protected routes/portals clear over 50 seeds |
+| G-091 | P1 | I4/S3 | Paired natural columns | Pair/join threshold deterministic; no unsupported floating formation |
+| G-092 | P1 | I4/S3 | Boulder clusters around hero feature | Hero anchor stable; distribution respects route/sightline exclusion masks |
+| G-093 | P1 | I4/S4 | Imported dragon perch in semantic cavern | Explicit augment policy, anchor, collision, and provenance; no topology bypass |
+
+### H. Exteriors and environment seams
+
+| ID | Pri | I/S | Geometry | Expected checks |
+|---|---|---|---|---|
+| G-100 | P1 | I4/S4 | Bounded sloped exterior terrain | Height/normal/support queries agree with compiled surface |
+| G-101 | P1 | I4/S3 | Terraced hillside with path | Traversable patches respect step/slope policy; path continuous |
+| G-102 | P1 | I5/S2 | Semantic cave mouth cut into terrain | One exterior/cavern transition; no wall, gap, or collision lip |
+| G-103 | P1 | I4/S2 | Constructed foundation on sloped terrain | Building pad and foundation support align without float/penetration |
+| G-104 | P2 | I4/S2 | Cliff with switchback route | Cliff blocked, route continuous, open/fall edges annotated |
+| G-105 | P2 | I3/S2 | Sinkhole into lower chamber | No support across void; visibility/fall/topology metadata agree |
+| G-106 | P2 | I3/S2 | Ordered road, trench, and berm features | Feature-stack ordering deterministic and provenance retained |
+| G-107 | P2 | I3/S2 | Seeded surface-cover rocks | Entrances, roads, paths, and building pads remain clear over 50 seeds |
+
+### I. Layered substrate and reproducible destruction
+
+| ID | Pri | I/S | Geometry | Expected checks |
+|---|---|---|---|---|
+| G-110 | P1 | I5/S4 | Paint/plaster/brick wall assembly | Layer order/thickness and face provenance round-trip |
+| G-111 | P1 | I4/S3 | Drywall/stud/insulation assembly | Repeated structural/cavity layers compile deterministically |
+| G-112 | P1 | I4/S3 | Reinforced concrete wall | Concrete and reinforcement remain distinct on cut faces/debris |
+| G-113 | P1 | I5/S2 | Walkable breach through layered wall | Visual/collision cut, substrate exposure, measured portal, and navigation agree |
+| G-114 | P1 | I5/S2 | Small non-passable hole and cracks | Visible damage creates no walk topology edge |
+| G-115 | P1 | I4/S2 | Breach-derived rubble field | Debris derives from removed layers and respects route mask |
+| G-116 | P2 | I5/S1 | Partial ceiling collapse | Removed support invalidated; collision/navigation/debris agree |
+| G-117 | P2 | I5/S1 | Column removal below platform | Support dependency follows authored collapse/invalid-state policy |
+| G-118 | P2 | I4/S2 | Structural and visual fractures | Collision changes only for structural policy |
+| G-119 | P2 | I4/S3 | Burned layered wall | Material state changes; topology unchanged unless explicitly structural |
+| G-120 | P2 | I3/S2 | Bounded deformation | Displacement budget and provenance survive retessellation |
+| G-121 | P2 | I4/S1 | Overlapping ordered damage operations | Stable list order, combined geometry, and multi-operation provenance |
+
+### J. Invalid and adversarial geometry
 
 | ID | Pri | I/S | Input | Required behavior |
 |---|---|---|---|---|
@@ -179,6 +237,14 @@ Unless a row explicitly opts out, every deterministic case must verify:
 | X-014 | P1 | I5/S2 | Semantic connection with no collision-free path | Mark topology/geometric inconsistency; do not report fully reachable |
 | X-015 | P2 | I4/S2 | Duplicate/overlapping structural faces | De-duplicate or reject according to tolerance policy |
 | X-016 | P2 | I3/S1 | Geometry above complexity budget | Stop with budget diagnostic and simplification suggestion |
+| X-017 | P0 | I5/S3 | Passage references missing junction | Reject with segment ID and exact field path |
+| X-018 | P0 | I5/S3 | Touching passage shells without shared junction | Keep disconnected and diagnose ambiguous near-touch |
+| X-019 | P1 | I5/S2 | Sky opening covered by roof/terrain solid | Reject sky-exposure claim with blocking solid IDs |
+| X-020 | P1 | I4/S3 | Detail exclusions consume eligible region | Emit no instances plus typed exhaustion diagnostic |
+| X-021 | P1 | I5/S2 | Damage target or material assembly missing | Reject before producing mutated derived geometry |
+| X-022 | P1 | I5/S1 | Boolean produces nonmanifold/sliver result | Deterministically repair within policy or fail with operation and target IDs |
+| X-023 | P2 | I4/S1 | Cyclic support dependency | Reject or require explicit stable-group policy |
+| X-024 | P2 | I4/S2 | Requested real-time destruction | Return typed unsupported result; never pretend precompiled damage is dynamic |
 
 ## Prompt-to-structure cases
 
@@ -200,6 +266,14 @@ not a single golden mesh.
 | P-010 | P1 | Branching lava tubes with a loop | Branch and cycle topology; clearance; no false connections |
 | P-011 | P2 | Spiral tower interior | Rotated/curved boundary; spiral connector; repeated levels |
 | P-012 | P2 | Cliff dwelling with irregular terraces | Heightfield/freeform exterior; stepped support patches; bridges |
+| P-013 | P0 | Branching rescue cave with a dead end | Semantic chamber/passage graph; branch degree; protected main route; no mesh fallback |
+| P-014 | P1 | Giant dragon cavern with formations and perch | ≥100 m extent; arena support; high ceiling; seeded fields; hero anchor; compact recipe |
+| P-015 | P1 | Dragon cavern with opening to sky | P-014 plus real aperture and sky-exposure semantics |
+| P-016 | P1 | Exterior hillside leading into cave | Terrain path; cave mouth seam; exterior-to-subterranean route |
+| P-017 | P1 | Dug breach through layered prison wall | Material assembly; structural damage operation; substrate cut faces; rubble; passability |
+| P-018 | P2 | Bomb-damaged apartment corridor | Ordered damage stack; one blocked/one open route; support/collision agreement |
+| P-019 | P2 | Ruined temple inside cavern | Cave, constructed walls/platforms, material damage, and hero features compose |
+| P-020 | P2 | Collapsed mine with climb-only alternate route | Collapse blocks walk route; climb route remains capability-gated |
 
 ## Cross-product suites
 
@@ -219,6 +293,13 @@ unbounded Cartesian product:
 | C-08 | heightfield × imported structure × USD/MuJoCo export |
 | C-09 | legacy rectangle × new multilevel neighbor × old checkpoint load |
 | C-10 | invalid freeform mesh × repair mode × strict mode |
+| C-11 | semantic cave graph × sky opening × terrain cover |
+| C-12 | large cavern × formation fields × protected walk/fly routes |
+| C-13 | terrain cave mouth × semantic passage × constructed room portal |
+| C-14 | layered wall × breach × rubble field × navigation update |
+| C-15 | ceiling collapse × support graph × multilevel connector |
+| C-16 | imported hero mesh × semantic cavern × seeded detail exclusion |
+| C-17 | exterior terrain × damaged building × cave below foundation |
 
 ## Capability completion rule
 
@@ -233,3 +314,5 @@ A matrix row is marked complete only after all applicable layers pass:
 | Simulation | Drake load and collision smoke test |
 | Export | Blender and selected MuJoCo/USD round trip |
 | Agent | prompt/tool call produces required predicates in repeated trials |
+| Genericity | public data-only fixture plus rename/transform/scale/order metamorphic checks and source sentinel |
+| Authorability | compact recipe budget, no opaque geometry, held-out prompt predicates, and bounded repair pass |

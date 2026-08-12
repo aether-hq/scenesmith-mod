@@ -1,0 +1,447 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>The Long Way Out — Interactive SceneSmith Demo</title>
+  <meta name="description" content="First-person walkthrough of SceneSmith's underground prison escape geometry showcase.">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='4' fill='%23121619'/%3E%3Ccircle cx='16' cy='16' r='7' fill='%23ffd36a'/%3E%3C/svg%3E">
+  <style>
+    :root {
+      color-scheme: dark;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      --amber: #ffd36a;
+      --ink: #0d1012;
+      --panel: rgba(13, 16, 18, 0.86);
+      --line: rgba(255, 255, 255, 0.16);
+    }
+    * { box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background: var(--ink); }
+    canvas { display: block; }
+    button { font: inherit; }
+    #stage { position: fixed; inset: 0; }
+    #loading {
+      position: fixed; inset: 0; z-index: 20; display: grid; place-items: center;
+      background: #0d1012; transition: opacity 320ms ease;
+    }
+    #loading.done { opacity: 0; pointer-events: none; }
+    .loader { width: min(420px, 82vw); }
+    .eyebrow { color: var(--amber); font: 700 11px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .18em; text-transform: uppercase; }
+    .loader h1 { margin: 10px 0 16px; font-size: clamp(28px, 5vw, 52px); line-height: .95; }
+    .track { height: 2px; background: #292d30; overflow: hidden; }
+    #progress { width: 6%; height: 100%; background: var(--amber); transition: width 160ms ease; }
+    #loading-status { margin-top: 12px; color: #979b9d; font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; }
+    #intro {
+      position: fixed; inset: 0; z-index: 12; display: grid; place-items: center;
+      background: radial-gradient(circle at 64% 42%, rgba(83, 55, 36, .25), rgba(6, 8, 9, .82) 52%, rgba(6, 8, 9, .96));
+      transition: opacity 240ms ease;
+    }
+    #intro.hidden { opacity: 0; pointer-events: none; }
+    .intro-card { width: min(700px, calc(100vw - 40px)); border-top: 1px solid var(--amber); padding-top: 28px; }
+    .intro-card h1 { margin: 12px 0 10px; font-size: clamp(44px, 8vw, 86px); line-height: .86; letter-spacing: -.055em; }
+    .intro-card p { max-width: 590px; color: #b8b9b6; font-size: 16px; line-height: 1.55; }
+    .intro-actions { display: flex; align-items: center; gap: 18px; margin-top: 26px; flex-wrap: wrap; }
+    #enter {
+      border: 0; padding: 13px 19px; color: #16130d; background: var(--amber); font-weight: 800;
+      cursor: pointer; text-transform: uppercase; letter-spacing: .08em; font-size: 12px;
+    }
+    .hint { color: #777d7f; font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; }
+    #hud { position: fixed; inset: 0; z-index: 8; pointer-events: none; opacity: 0; transition: opacity 200ms ease; }
+    #hud.visible { opacity: 1; }
+    #crosshair { position: absolute; left: 50%; top: 50%; width: 16px; height: 16px; transform: translate(-50%, -50%); }
+    #crosshair::before, #crosshair::after { content: ""; position: absolute; background: rgba(255,255,255,.72); }
+    #crosshair::before { width: 16px; height: 1px; left: 0; top: 7px; }
+    #crosshair::after { width: 1px; height: 16px; left: 7px; top: 0; }
+    .topbar { position: absolute; top: 22px; left: 26px; right: 26px; display: flex; justify-content: space-between; align-items: flex-start; }
+    .scene-title { padding-left: 12px; border-left: 2px solid var(--amber); }
+    .scene-title strong { display: block; font-size: 14px; letter-spacing: .03em; }
+    .scene-title span, #telemetry { color: #94999b; font: 11px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; }
+    #telemetry { text-align: right; padding: 8px 10px; background: var(--panel); border: 1px solid var(--line); }
+    #controls {
+      position: absolute; left: 26px; bottom: 24px; display: grid; grid-template-columns: repeat(3, auto); gap: 6px 13px;
+      padding: 12px 14px; background: var(--panel); border: 1px solid var(--line); color: #9ea2a2;
+      font: 11px/1.35 ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+    #controls b { color: #f0efe9; font-weight: 700; }
+    #bookmarks { position: absolute; right: 26px; bottom: 24px; display: flex; gap: 7px; pointer-events: auto; }
+    #bookmarks button {
+      min-width: 38px; height: 38px; padding: 0 11px; border: 1px solid var(--line); color: #c8c7c1; background: var(--panel); cursor: pointer;
+      font-size: 11px; text-transform: uppercase; letter-spacing: .06em;
+    }
+    #bookmarks button:hover { border-color: var(--amber); color: var(--amber); }
+    #mode { color: var(--amber); }
+    #map {
+      position: fixed; z-index: 9; right: 26px; top: 94px; width: min(440px, calc(100vw - 52px));
+      background: rgba(13,16,18,.92); border: 1px solid var(--line); padding: 9px; pointer-events: none;
+      opacity: 0; transform: translateY(-8px); transition: opacity 160ms ease, transform 160ms ease;
+    }
+    #map.visible { opacity: 1; transform: none; }
+    #map img { display: block; width: 100%; height: auto; }
+    #error { position: fixed; inset: auto 24px 24px; z-index: 30; padding: 14px 16px; display: none; color: #ffd9d4; background: #491d19; border: 1px solid #a95248; white-space: pre-wrap; }
+    @media (max-width: 700px) {
+      #controls { display: none; }
+      #bookmarks { left: 18px; right: auto; bottom: 18px; flex-wrap: wrap; }
+      .topbar { left: 18px; right: 18px; }
+      #telemetry { display: none; }
+    }
+  </style>
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.180.0/examples/jsm/"
+      }
+    }
+  </script>
+</head>
+<body>
+  <div id="stage"></div>
+  <div id="loading">
+    <div class="loader">
+      <div class="eyebrow">SceneSmith structural demo</div>
+      <h1>Loading<br>The Long Way Out</h1>
+      <div class="track"><div id="progress"></div></div>
+      <div id="loading-status">Preparing renderer…</div>
+    </div>
+  </div>
+  <div id="intro" class="hidden">
+    <div class="intro-card">
+      <div class="eyebrow">Underground prison · detention level −5 m</div>
+      <h1>The Long<br>Way Out</h1>
+      <p>A wall has been breached behind the old cells. Follow seventy metres of hand-cut tunnel through the rock—or leave the floor and fly through the generated architecture.</p>
+      <div class="intro-actions">
+        <button id="enter">Enter the prison</button>
+        <span class="hint">Headphones recommended · click captures mouse</span>
+      </div>
+    </div>
+  </div>
+  <div id="hud">
+    <div id="crosshair"></div>
+    <div class="topbar">
+      <div class="scene-title"><strong>THE LONG WAY OUT</strong><span>SceneSmith general-geometry walkthrough</span></div>
+      <div id="telemetry"><span id="mode">WALK</span><br><span id="position">x 0.0 · z 0.0</span></div>
+    </div>
+    <div id="controls">
+      <b>W A S D</b><span>move</span><span></span>
+      <b>mouse</b><span>look</span><span></span>
+      <b>F</b><span>walk / fly</span><span></span>
+      <b>space ⇧</b><span>up / down</span><span>fly</span>
+      <b>M</b><span>map</span><span></span>
+      <b>1—4</b><span>teleport</span><span></span>
+      <b>esc</b><span>release mouse</span><span></span>
+    </div>
+    <div id="bookmarks">
+      <button data-place="prison">1 Prison</button>
+      <button data-place="breach">2 Breach</button>
+      <button data-place="tunnel">3 Tunnel</button>
+      <button data-place="cavern">4 Cavern</button>
+    </div>
+  </div>
+  <div id="map"><img src="generated/preview.svg" alt="Plan and longitudinal section"></div>
+  <div id="error"></div>
+
+  <script type="module">
+    import * as THREE from 'three';
+    import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
+    import { OBJLoader } from 'three/addons/loaders/OBJLoader.js';
+
+    const stage = document.querySelector('#stage');
+    const loading = document.querySelector('#loading');
+    const progress = document.querySelector('#progress');
+    const loadingStatus = document.querySelector('#loading-status');
+    const intro = document.querySelector('#intro');
+    const hud = document.querySelector('#hud');
+    const map = document.querySelector('#map');
+    const modeLabel = document.querySelector('#mode');
+    const positionLabel = document.querySelector('#position');
+    const errorPanel = document.querySelector('#error');
+
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x090b0c);
+    scene.fog = new THREE.FogExp2(0x090b0c, 0.018);
+
+    const camera = new THREE.PerspectiveCamera(68, innerWidth / innerHeight, 0.05, 240);
+    const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+    renderer.setPixelRatio(Math.min(devicePixelRatio, 1.8));
+    renderer.setSize(innerWidth, innerHeight);
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.08;
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    stage.appendChild(renderer.domElement);
+
+    const controls = new PointerLockControls(camera, renderer.domElement);
+    controls.pointerSpeed = 0.72;
+    controls.minPolarAngle = 0.14;
+    controls.maxPolarAngle = Math.PI - 0.14;
+
+    const collisionMeshes = [];
+    const clock = new THREE.Clock();
+    const raycaster = new THREE.Raycaster();
+    const keys = new Set();
+    const eyeHeight = 1.68;
+    const bodyRadius = 0.34;
+    let mode = 'walk';
+    let sceneReady = false;
+    let lightsEnabled = true;
+    let pointLights = [];
+
+    const bookmarks = {
+      prison: { position: [-3.7, 1.68, 2.0], yaw: -Math.PI / 2 },
+      breach: { position: [4.8, 1.68, 0.0], yaw: -Math.PI / 2 },
+      tunnel: { position: [38.0, -1.15, -3.0], yaw: -Math.PI / 2 },
+      cavern: { position: [69.0, -3.18, -7.2], yaw: -Math.PI / 2 }
+    };
+
+    function teleport(name) {
+      const destination = bookmarks[name];
+      camera.position.fromArray(destination.position);
+      camera.rotation.set(0, destination.yaw, 0);
+    }
+    teleport('prison');
+
+    function material(options) {
+      return new THREE.MeshStandardMaterial({
+        side: THREE.DoubleSide,
+        flatShading: true,
+        roughness: 0.9,
+        ...options
+      });
+    }
+
+    const assets = [
+      {
+        name: 'prison architecture',
+        url: 'generated/structures/rooms/prison_block/room_geometry_prison_block.obj',
+        material: material({ color: 0x555b5d, roughness: 0.97 }),
+        collide: true
+      },
+      {
+        name: 'escape tunnel',
+        url: 'generated/structures/meshes/escape_tunnel_shell/escape_tunnel_shell.obj',
+        material: material({ color: 0x5a3927, roughness: 1.0 }),
+        collide: true
+      },
+      {
+        name: 'prison details',
+        url: 'generated/details/prison/prison_details.obj',
+        material: material({ color: 0x4c555a, metalness: 0.68, roughness: 0.42 }),
+        collide: true
+      },
+      {
+        name: 'ceiling fixtures',
+        url: 'generated/details/lights/ceiling_lights.obj',
+        material: material({ color: 0xffd36a, emissive: 0xffa62b, emissiveIntensity: 4.2, roughness: 0.3 }),
+        collide: false
+      }
+    ];
+
+    function sceneToThree(position) {
+      return new THREE.Vector3(position[0], position[2], -position[1]);
+    }
+
+    async function loadAsset(asset, index) {
+      loadingStatus.textContent = `Loading ${asset.name}…`;
+      const object = await new OBJLoader().loadAsync(asset.url);
+      object.rotation.x = -Math.PI / 2;
+      object.updateMatrixWorld(true);
+      object.traverse(child => {
+        if (!child.isMesh) return;
+        child.material = asset.material;
+        child.geometry.computeVertexNormals();
+        child.castShadow = asset.name !== 'escape tunnel';
+        child.receiveShadow = true;
+        if (asset.collide) collisionMeshes.push(child);
+      });
+      scene.add(object);
+      progress.style.width = `${16 + ((index + 1) / assets.length) * 56}%`;
+    }
+
+    async function addLighting() {
+      loadingStatus.textContent = 'Mounting authored lights…';
+      const manifest = await fetch('generated/manifest.json').then(response => {
+        if (!response.ok) throw new Error(`manifest request failed: ${response.status}`);
+        return response.json();
+      });
+      scene.add(new THREE.HemisphereLight(0x526477, 0x191008, 0.52));
+      pointLights = manifest.lighting.mounts.map((mount, index) => {
+        const light = new THREE.PointLight(index < 3 ? 0xffca79 : 0xffa84d, index < 3 ? 26 : 34, index < 3 ? 11 : 13, 1.8);
+        light.position.copy(sceneToThree(mount.position));
+        light.castShadow = index === 1 || index === 4 || index === 7;
+        light.shadow.mapSize.set(512, 512);
+        light.shadow.bias = -0.002;
+        light.userData.baseIntensity = light.intensity;
+        light.userData.phase = index * 1.77;
+        scene.add(light);
+        return light;
+      });
+      const breachGlow = new THREE.PointLight(0x8dc8d8, 18, 14, 2);
+      breachGlow.position.set(8.5, 1.6, 0);
+      scene.add(breachGlow);
+      const outletGlow = new THREE.PointLight(0x9cc8b7, 70, 30, 2);
+      outletGlow.position.set(77, 0.5, -8);
+      scene.add(outletGlow);
+      progress.style.width = '88%';
+    }
+
+    function addDust() {
+      const count = 1300;
+      const positions = new Float32Array(count * 3);
+      for (let index = 0; index < count; index++) {
+        const along = Math.random();
+        positions[index * 3] = -7 + along * 87;
+        positions[index * 3 + 1] = -4 + Math.random() * 11;
+        positions[index * 3 + 2] = -14 + Math.random() * 24;
+      }
+      const geometry = new THREE.BufferGeometry();
+      geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+      const points = new THREE.Points(
+        geometry,
+        new THREE.PointsMaterial({ color: 0xc9ad82, size: 0.018, transparent: true, opacity: 0.34, depthWrite: false })
+      );
+      points.name = 'airborne dust';
+      scene.add(points);
+    }
+
+    function showError(error) {
+      console.error(error);
+      errorPanel.style.display = 'block';
+      errorPanel.textContent = `Could not start the walkthrough.\n${error.message}\n\nRun it through serve_demo.py rather than opening viewer.html as a file.`;
+      loading.classList.add('done');
+    }
+
+    async function loadScene() {
+      if (!renderer.capabilities.isWebGL2) throw new Error('This demo requires WebGL 2.');
+      progress.style.width = '12%';
+      for (let index = 0; index < assets.length; index++) await loadAsset(assets[index], index);
+      await addLighting();
+      addDust();
+      progress.style.width = '100%';
+      loadingStatus.textContent = 'Route clear. Scene ready.';
+      sceneReady = true;
+      setTimeout(() => {
+        loading.classList.add('done');
+        intro.classList.remove('hidden');
+      }, 360);
+    }
+
+    function getMovement(delta) {
+      const forward = new THREE.Vector3();
+      camera.getWorldDirection(forward);
+      const right = new THREE.Vector3().crossVectors(forward, camera.up).normalize();
+      if (mode === 'walk') forward.y = 0;
+      forward.normalize();
+      const move = new THREE.Vector3();
+      if (keys.has('KeyW')) move.add(forward);
+      if (keys.has('KeyS')) move.sub(forward);
+      if (keys.has('KeyD')) move.add(right);
+      if (keys.has('KeyA')) move.sub(right);
+      if (mode === 'fly') {
+        if (keys.has('Space')) move.y += 1;
+        if (keys.has('ShiftLeft') || keys.has('ShiftRight')) move.y -= 1;
+      }
+      if (move.lengthSq() === 0) return move;
+      const sprint = keys.has('ControlLeft') || keys.has('ControlRight');
+      return move.normalize().multiplyScalar((mode === 'fly' ? 8.5 : sprint ? 7.0 : 3.8) * delta);
+    }
+
+    function nearestHit(origin, direction, far) {
+      raycaster.set(origin, direction);
+      raycaster.near = 0.01;
+      raycaster.far = far;
+      return raycaster.intersectObjects(collisionMeshes, false)[0] ?? null;
+    }
+
+    function moveCamera(delta) {
+      const movement = getMovement(delta);
+      if (movement.lengthSq() === 0) return;
+      if (mode === 'fly') {
+        camera.position.add(movement);
+        return;
+      }
+      const horizontal = movement.clone();
+      horizontal.y = 0;
+      const distance = horizontal.length();
+      if (distance === 0) return;
+      const direction = horizontal.clone().normalize();
+      const bodyOrigin = camera.position.clone();
+      bodyOrigin.y -= eyeHeight * 0.42;
+      const wallHit = nearestHit(bodyOrigin, direction, distance + bodyRadius);
+      if (wallHit && wallHit.distance <= distance + bodyRadius) return;
+
+      const candidate = camera.position.clone().add(horizontal);
+      const floorOrigin = candidate.clone();
+      floorOrigin.y += 1.25;
+      const floorHit = nearestHit(floorOrigin, new THREE.Vector3(0, -1, 0), eyeHeight + 3.0);
+      if (floorHit) {
+        candidate.y = floorHit.point.y + eyeHeight;
+        camera.position.copy(candidate);
+      }
+    }
+
+    function setMode(nextMode) {
+      mode = nextMode;
+      modeLabel.textContent = mode.toUpperCase();
+      if (mode === 'walk') {
+        const floorOrigin = camera.position.clone();
+        floorOrigin.y += 2;
+        const floorHit = nearestHit(floorOrigin, new THREE.Vector3(0, -1, 0), 8);
+        if (floorHit) camera.position.y = floorHit.point.y + eyeHeight;
+      }
+    }
+
+    function animate() {
+      requestAnimationFrame(animate);
+      const delta = Math.min(clock.getDelta(), 0.05);
+      if (controls.isLocked && sceneReady) moveCamera(delta);
+      const elapsed = clock.elapsedTime;
+      for (const light of pointLights) {
+        const flicker = 0.94 + Math.sin(elapsed * 7.1 + light.userData.phase) * 0.025 + Math.sin(elapsed * 17.3 + light.userData.phase) * 0.012;
+        light.intensity = lightsEnabled ? light.userData.baseIntensity * flicker : 0;
+      }
+      positionLabel.textContent = `x ${camera.position.x.toFixed(1)} · elevation ${camera.position.y.toFixed(1)}`;
+      renderer.render(scene, camera);
+    }
+
+    document.querySelector('#enter').addEventListener('click', () => controls.lock());
+    renderer.domElement.addEventListener('click', () => {
+      if (sceneReady && intro.classList.contains('hidden')) controls.lock();
+    });
+    controls.addEventListener('lock', () => {
+      intro.classList.add('hidden');
+      hud.classList.add('visible');
+    });
+    controls.addEventListener('unlock', () => {
+      intro.classList.remove('hidden');
+      hud.classList.remove('visible');
+      keys.clear();
+    });
+    addEventListener('keydown', event => {
+      keys.add(event.code);
+      if (event.repeat) return;
+      if (event.code === 'KeyF') setMode(mode === 'walk' ? 'fly' : 'walk');
+      if (event.code === 'KeyM') map.classList.toggle('visible');
+      if (event.code === 'KeyL') lightsEnabled = !lightsEnabled;
+      const bookmark = { Digit1: 'prison', Digit2: 'breach', Digit3: 'tunnel', Digit4: 'cavern' }[event.code];
+      if (bookmark) teleport(bookmark);
+    });
+    addEventListener('keyup', event => keys.delete(event.code));
+    document.querySelectorAll('#bookmarks button').forEach(button => {
+      button.addEventListener('click', () => {
+        teleport(button.dataset.place);
+        controls.lock();
+      });
+    });
+    addEventListener('resize', () => {
+      camera.aspect = innerWidth / innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(innerWidth, innerHeight);
+      renderer.setPixelRatio(Math.min(devicePixelRatio, 1.8));
+    });
+
+    loadScene().catch(showError);
+    animate();
+  </script>
+</body>
+</html>

@@ -19,11 +19,11 @@ directives:
     parent: room_prison_block_frame
     child: room_geometry_prison_block::room_geometry_body_link
 - add_model:
-    name: structure_escape_tunnel_shell
+    name: structure_semantic_environment
     file: package://scene/structures/meshes/escape_tunnel_shell/escape_tunnel_shell.sdf
 - add_weld:
-    parent: room_prison_block_frame
-    child: structure_escape_tunnel_shell::structure_link
+    parent: house_frame
+    child: structure_semantic_environment::structure_link
 - add_model:
     name: prison_details
     file: package://scene/details/prison/prison_details.sdf

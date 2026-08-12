@@ -50,79 +50,79 @@
         "surface_id": "room_geometry_prison_block_ceiling"
       },
       {
-        "clearance_to_edge": 0.050984129267247255,
+        "clearance_to_edge": 1.7772239894833365e-16,
         "id": "escape_light_04",
         "inward_normal": [
-          -0.0397504938730676,
-          -0.005781890016568633,
-          -0.9991929082938307
+          -0.05418343499440355,
+          0.07231711764343747,
+          -0.9959088260819624
         ],
         "position": [
-          13.497217465428886,
-          0.4995952676988401,
-          2.831248969712996
+          13.496207159550393,
+          0.5050621982350408,
+          2.778689562466745
         ],
-        "surface_id": "escape_tunnel_shell_tunnel_overhead_000025"
+        "surface_id": "escape_tunnel_shell_auto_attachment_overhead_008786"
       },
       {
-        "clearance_to_edge": 0.08096869507154889,
+        "clearance_to_edge": 3.1401849173675503e-16,
         "id": "escape_light_05",
         "inward_normal": [
-          -0.15514682833677243,
-          -0.004773748569085612,
-          -0.987879887932556
+          -0.09722193162757356,
+          0.062108149601643604,
+          -0.9933229453524485
         ],
         "position": [
-          25.489139722016425,
-          1.4996658376001633,
-          1.8826220685663768
+          25.493194464786068,
+          1.504347570472115,
+          1.8422817093027333
         ],
-        "surface_id": "escape_tunnel_shell_tunnel_overhead_000056"
+        "surface_id": "escape_tunnel_shell_auto_attachment_overhead_008484"
       },
       {
-        "clearance_to_edge": 0.045825453926814474,
+        "clearance_to_edge": 0.1065184359935146,
         "id": "escape_light_06",
         "inward_normal": [
-          -0.12378894278781472,
-          -0.026526202023828785,
-          -0.9919539597429239
+          -0.12164529014264831,
+          0.008559300384460969,
+          -0.9925367306871014
         ],
         "position": [
-          39.491334774004855,
-          3.3481431658583323,
-          0.771057449389021
+          39.491484829690016,
+          3.3505991510269126,
+          0.7663280696587413
         ],
-        "surface_id": "escape_tunnel_shell_tunnel_overhead_000088"
+        "surface_id": "escape_tunnel_shell_auto_attachment_overhead_007973"
       },
       {
-        "clearance_to_edge": 0.07928670947236902,
+        "clearance_to_edge": 0.10626986393111157,
         "id": "escape_light_07",
         "inward_normal": [
-          -0.09423961348800818,
-          -0.008750821251456358,
-          -0.9955110840051234
+          -0.0588585287440002,
+          0.02869395417889501,
+          -0.9978538623404086
         ],
         "position": [
-          53.493403227055836,
-          4.649387442512398,
-          -0.008483455475085139
+          53.49587990298792,
+          4.652008576792523,
+          -0.05879471796462015
         ],
-        "surface_id": "escape_tunnel_shell_tunnel_overhead_000120"
+        "surface_id": "escape_tunnel_shell_auto_attachment_overhead_006542"
       },
       {
-        "clearance_to_edge": 0.20805636320821938,
+        "clearance_to_edge": 0.10619144396553905,
         "id": "escape_light_08",
         "inward_normal": [
-          0.07991941011764388,
-          0.0033299754199978666,
-          -0.9967957660173673
+          0.11067924397944355,
+          0.08084884807138805,
+          -0.9905622487848347
         ],
         "position": [
-          67.00559435870824,
-          7.6502330982794,
-          0.1891942530572066
+          67.00774754707857,
+          7.655659419364998,
+          0.10840734423024251
         ],
-        "surface_id": "escape_tunnel_shell_tunnel_overhead_000153"
+        "surface_id": "escape_tunnel_shell_auto_attachment_overhead_006981"
       }
     ]
   },
@@ -130,10 +130,12 @@
   "tunnel": {
     "centerline_length_m": 70.18888640425128,
     "end_elevation_m": -5.0,
+    "environment_hash": "a2d13fecade6c3edf434c4ddfd237a112a64d34fe07f3fe541951ebdf1de33d3",
     "minimum_clearance_height_m": 3.0,
     "minimum_width_m": 3.4,
     "sections": 12,
-    "visual_triangles": 176
+    "semantic_source_id": "long_way_out",
+    "visual_triangles": 8875
   },
   "verification": {
     "blocked_connectors": [],

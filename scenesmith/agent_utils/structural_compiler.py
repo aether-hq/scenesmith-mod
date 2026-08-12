@@ -1977,7 +1977,7 @@ def write_compiled_structure(
     ET.indent(sdf, space="  ")
     ET.ElementTree(sdf).write(sdf_path, encoding="utf-8", xml_declaration=True)
 
-    surface_data = {
+    surface_data: dict[str, object] = {
         "schema_version": 1,
         "structure_id": compiled.structure_id,
         "mesh": mesh_path.name,
@@ -1988,15 +1988,77 @@ def write_compiled_structure(
             group_name: list(indices)
             for group_name, indices in compiled.triangle_groups.items()
         },
-        "surfaces": [
+    }
+    triangle_group_by_index = {
+        triangle_index: group_name
+        for group_name, indices in compiled.triangle_groups.items()
+        for triangle_index in indices
+    }
+    compact_triangle_surfaces = len(compiled.surfaces) == len(
+        compiled.visual_mesh.triangles
+    ) and all(
+        patch.surface.source_id == compiled.structure_id
+        and patch.surface.transform == Transform3D()
+        and patch.surface.geometry_ref == f"triangle:{triangle_index}"
+        and patch.boundary
+        == tuple(
+            compiled.visual_mesh.vertices[index]
+            for index in compiled.visual_mesh.triangles[triangle_index]
+        )
+        and triangle_group_by_index.get(triangle_index) is not None
+        and patch.surface.surface_id
+        == (
+            f"{compiled.structure_id}_"
+            f"{triangle_group_by_index[triangle_index]}_{triangle_index:06d}"
+        )
+        for triangle_index, patch in enumerate(compiled.surfaces)
+    )
+    if compact_triangle_surfaces:
+        metadata_runs: list[dict[str, object]] = []
+        for triangle_index, patch in enumerate(compiled.surfaces):
+            metadata = dict(patch.surface.metadata)
+            if metadata_runs and metadata_runs[-1]["metadata"] == metadata:
+                metadata_runs[-1]["end"] = triangle_index + 1
+            else:
+                metadata_runs.append(
+                    {
+                        "start": triangle_index,
+                        "end": triangle_index + 1,
+                        "metadata": metadata,
+                    }
+                )
+        surface_data.update(
+            {
+                "schema_version": 2,
+                "surface_encoding": "triangle_mesh_v1",
+                "surface_mesh": {
+                    "vertices": [
+                        list(vertex) for vertex in compiled.visual_mesh.vertices
+                    ],
+                    "triangles": [
+                        list(triangle) for triangle in compiled.visual_mesh.triangles
+                    ],
+                },
+                "surface_roles": {
+                    group_name: sorted(
+                        role.value
+                        for role in compiled.surfaces[indices[0]].surface.roles
+                    )
+                    for group_name, indices in compiled.triangle_groups.items()
+                    if indices
+                },
+                "surface_metadata_runs": metadata_runs,
+            }
+        )
+    else:
+        surface_data["surfaces"] = [
             {
                 **patch.surface.to_dict(),
                 "boundary": [list(point) for point in patch.boundary],
                 "normal": list(patch.normal),
             }
             for patch in compiled.surfaces
-        ],
-    }
+        ]
     surfaces_path.write_text(
         json.dumps(surface_data, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",

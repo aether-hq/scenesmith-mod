@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
 """Generate a lit underground-prison escape tunnel showcase.
 
-The scene is deterministic and uses SceneSmith's v2 structural model directly:
+The scene is deterministic and uses SceneSmith's semantic environment model:
 
 * a polygon room whose east wall contains a real collision/visual cutout;
-* a 69 m irregular, descending freeform tunnel with annotated floor, walls,
-  and overhead surfaces;
+* a 69 m irregular, descending variable-profile passage compiled from a graph;
 * an embedded natural-passage connector sampled for support and headroom; and
 * light fixtures mounted by querying the compiled overhead surface patches.
 """
@@ -17,54 +16,119 @@ import json
 import math
 import xml.etree.ElementTree as ET
 
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Sequence
 
 from scenesmith.agent_utils.house import HouseLayout, PlacedRoom, RoomSpec
-from scenesmith.agent_utils.structural_compiler import (
-    CompiledStructure,
-    TriangleMesh,
-    compile_structural_mesh,
-    write_compiled_structure,
+from scenesmith.agent_utils.semantic_environments import (
+    Bounds3D,
+    EnvironmentKind,
+    EnvironmentRegionSpec,
+    PassageCrossSectionSpec,
+    PassageJunctionSpec,
+    PassageNetworkSpec,
+    PassageSegmentSpec,
+    SemanticEnvironmentSpec,
 )
+from scenesmith.agent_utils.structural_compiler import TriangleMesh
 from scenesmith.agent_utils.structural_geometry import (
-    ConnectorEndpoint,
-    ConnectorSpec,
-    ConnectorType,
     Footprint2D,
     LevelSpec,
-    MeshSurfaceAnnotation,
     PortalSpec,
     PortalType,
-    StructuralMeshSpec,
-    SurfaceRole,
 )
 
 Point3 = tuple[float, float, float]
 Triangle = tuple[int, int, int]
 
 
-@dataclass(frozen=True)
-class TunnelSection:
-    center: Point3
-    width: float
-    height: float
+TUNNEL_PATH: tuple[Point3, ...] = (
+    (7.0, 0.0, 0.0),
+    (11.0, 0.2, -0.2),
+    (16.0, 0.8, -0.7),
+    (22.0, 1.8, -1.3),
+    (29.0, 1.2, -2.0),
+    (36.0, 2.5, -2.7),
+    (43.0, 4.2, -3.3),
+    (50.0, 3.8, -3.9),
+    (57.0, 5.5, -4.4),
+    (64.0, 7.5, -4.8),
+    (70.0, 7.8, -5.0),
+    (76.0, 8.0, -5.0),
+)
+TUNNEL_DIMENSIONS = (
+    (3.4, 3.0),
+    (3.8, 3.2),
+    (4.3, 3.5),
+    (4.8, 3.8),
+    (4.2, 3.4),
+    (5.0, 4.0),
+    (4.5, 3.7),
+    (5.4, 4.3),
+    (5.1, 4.1),
+    (6.0, 4.8),
+    (7.2, 5.5),
+    (8.5, 6.2),
+)
 
 
-TUNNEL_SECTIONS = (
-    TunnelSection((7.0, 0.0, 0.0), 3.4, 3.0),
-    TunnelSection((11.0, 0.2, -0.2), 3.8, 3.2),
-    TunnelSection((16.0, 0.8, -0.7), 4.3, 3.5),
-    TunnelSection((22.0, 1.8, -1.3), 4.8, 3.8),
-    TunnelSection((29.0, 1.2, -2.0), 4.2, 3.4),
-    TunnelSection((36.0, 2.5, -2.7), 5.0, 4.0),
-    TunnelSection((43.0, 4.2, -3.3), 4.5, 3.7),
-    TunnelSection((50.0, 3.8, -3.9), 5.4, 4.3),
-    TunnelSection((57.0, 5.5, -4.4), 5.1, 4.1),
-    TunnelSection((64.0, 7.5, -4.8), 6.0, 4.8),
-    TunnelSection((70.0, 7.8, -5.0), 7.2, 5.5),
-    TunnelSection((76.0, 8.0, -5.0), 8.5, 6.2),
+def _cross_sections() -> tuple[PassageCrossSectionSpec, ...]:
+    spans = tuple(
+        math.dist(first, second) for first, second in zip(TUNNEL_PATH, TUNNEL_PATH[1:])
+    )
+    total = sum(spans)
+    distance = 0.0
+    stations = [0.0]
+    for span in spans:
+        distance += span
+        stations.append(distance / total)
+    return tuple(
+        PassageCrossSectionSpec(station, width, height)
+        for station, (width, height) in zip(stations, TUNNEL_DIMENSIONS)
+    )
+
+
+TUNNEL_CROSS_SECTIONS = _cross_sections()
+TUNNEL_ENVIRONMENT = SemanticEnvironmentSpec(
+    regions=(
+        EnvironmentRegionSpec(
+            "underground_escape",
+            EnvironmentKind.SUBTERRANEAN,
+            Bounds3D((-5, -15, -15), (90, 25, 20)),
+            detail_seed=417,
+        ),
+    ),
+    passage_networks=(
+        PassageNetworkSpec(
+            "escape_routes",
+            "underground_escape",
+            (
+                PassageJunctionSpec(
+                    "breach",
+                    TUNNEL_PATH[0],
+                    space_id="prison_block",
+                    level_id="detention",
+                    open_boundary=True,
+                ),
+                PassageJunctionSpec(
+                    "outlet",
+                    TUNNEL_PATH[-1],
+                    space_id="escape_outlet",
+                    level_id="lower_escape",
+                    open_boundary=True,
+                ),
+            ),
+            (
+                PassageSegmentSpec(
+                    "long_way_out",
+                    "breach",
+                    "outlet",
+                    TUNNEL_PATH,
+                    TUNNEL_CROSS_SECTIONS,
+                ),
+            ),
+        ),
+    ),
 )
 
 
@@ -136,87 +200,12 @@ def _oriented_box(
     return TriangleMesh(vertices, triangles)
 
 
-def _section_across(sections: Sequence[TunnelSection], index: int) -> Point3:
-    previous = sections[max(0, index - 1)].center
-    following = sections[min(len(sections) - 1, index + 1)].center
+def _section_across(path: Sequence[Point3], index: int) -> Point3:
+    previous = path[max(0, index - 1)]
+    following = path[min(len(path) - 1, index + 1)]
     dx, dy = following[0] - previous[0], following[1] - previous[1]
     length = math.hypot(dx, dy)
     return (-dy / length, dx / length, 0.0)
-
-
-def build_tunnel_mesh(
-    sections: Sequence[TunnelSection] = TUNNEL_SECTIONS,
-) -> tuple[TriangleMesh, tuple[MeshSurfaceAnnotation, ...]]:
-    """Build an open-ended octagonal tunnel shell with explicit semantics."""
-
-    vertices: list[Point3] = []
-    for index, section in enumerate(sections):
-        across = _section_across(sections, index)
-        x, y, floor_z = section.center
-        offsets = (
-            (-0.50, 0.00),
-            (0.50, 0.00),
-            (0.53, 0.20),
-            (0.50, 0.68),
-            (0.28, 1.00),
-            (-0.28, 1.00),
-            (-0.50, 0.68),
-            (-0.53, 0.20),
-        )
-        for across_fraction, height_fraction in offsets:
-            vertices.append(
-                (
-                    x + across[0] * across_fraction * section.width,
-                    y + across[1] * across_fraction * section.width,
-                    floor_z + height_fraction * section.height,
-                )
-            )
-
-    triangles: list[Triangle] = []
-    floor_indices: list[int] = []
-    overhead_indices: list[int] = []
-    wall_indices: list[int] = []
-    ring_size = 8
-    for section_index in range(len(sections) - 1):
-        current = section_index * ring_size
-        following = (section_index + 1) * ring_size
-        for side in range(ring_size):
-            next_side = (side + 1) % ring_size
-            first_index = len(triangles)
-            # Winding faces the tunnel interior: floor normals point up,
-            # ceiling normals down, and side normals toward the centerline.
-            triangles.extend(
-                (
-                    (current + side, following + next_side, current + next_side),
-                    (current + side, following + side, following + next_side),
-                )
-            )
-            target = (
-                floor_indices
-                if side == 0
-                else overhead_indices if side == 4 else wall_indices
-            )
-            target.extend((first_index, first_index + 1))
-
-    mesh = TriangleMesh(tuple(vertices), tuple(triangles))
-    annotations = (
-        MeshSurfaceAnnotation(
-            "tunnel_floor",
-            tuple(floor_indices),
-            frozenset({SurfaceRole.SUPPORT, SurfaceRole.TRAVERSABLE}),
-        ),
-        MeshSurfaceAnnotation(
-            "tunnel_overhead",
-            tuple(overhead_indices),
-            frozenset({SurfaceRole.OVERHEAD, SurfaceRole.ATTACHMENT}),
-        ),
-        MeshSurfaceAnnotation(
-            "tunnel_walls",
-            tuple(wall_indices),
-            frozenset({SurfaceRole.BOUNDARY, SurfaceRole.ATTACHMENT}),
-        ),
-    )
-    return mesh, annotations
 
 
 def _build_prison_details() -> TriangleMesh:
@@ -310,12 +299,12 @@ def _sample_light_mounts(layout: HouseLayout) -> tuple[list[dict], TriangleMesh]
         (0.0, -1.8, 0.5),
         (4.5, -1.8, 0.5),
     ]
-    for first, second in zip(TUNNEL_SECTIONS[1::2], TUNNEL_SECTIONS[2::2]):
+    for first, second in zip(TUNNEL_PATH[1::2], TUNNEL_PATH[2::2]):
         requested.append(
             (
-                (first.center[0] + second.center[0]) / 2.0,
-                (first.center[1] + second.center[1]) / 2.0,
-                (first.center[2] + second.center[2]) / 2.0 + 1.0,
+                (first[0] + second[0]) / 2.0,
+                (first[1] + second[1]) / 2.0,
+                (first[2] + second[2]) / 2.0 + 1.0,
             )
         )
 
@@ -368,18 +357,19 @@ def _write_preview(path: Path, light_mounts: Sequence[dict]) -> None:
 
     left_edge: list[tuple[float, float]] = []
     right_edge: list[tuple[float, float]] = []
-    for index, section in enumerate(TUNNEL_SECTIONS):
-        across = _section_across(TUNNEL_SECTIONS, index)
+    for index, (point, dimensions) in enumerate(zip(TUNNEL_PATH, TUNNEL_DIMENSIONS)):
+        across = _section_across(TUNNEL_PATH, index)
+        width, _ = dimensions
         left_edge.append(
             (
-                section.center[0] - across[0] * section.width / 2,
-                section.center[1] - across[1] * section.width / 2,
+                point[0] - across[0] * width / 2,
+                point[1] - across[1] * width / 2,
             )
         )
         right_edge.append(
             (
-                section.center[0] + across[0] * section.width / 2,
-                section.center[1] + across[1] * section.width / 2,
+                point[0] + across[0] * width / 2,
+                point[1] + across[1] * width / 2,
             )
         )
     tunnel_plan = left_edge + list(reversed(right_edge))
@@ -388,12 +378,11 @@ def _write_preview(path: Path, light_mounts: Sequence[dict]) -> None:
         return " ".join(f"{px(x):.1f},{py(y):.1f}" for x, y in points)
 
     floor_section = " ".join(
-        f"{px(section.center[0]):.1f},{sy(section.center[2]):.1f}"
-        for section in TUNNEL_SECTIONS
+        f"{px(point[0]):.1f},{sy(point[2]):.1f}" for point in TUNNEL_PATH
     )
     ceiling_section = " ".join(
-        f"{px(section.center[0]):.1f},{sy(section.center[2] + section.height):.1f}"
-        for section in TUNNEL_SECTIONS
+        f"{px(point[0]):.1f},{sy(point[2] + dimensions[1]):.1f}"
+        for point, dimensions in zip(TUNNEL_PATH, TUNNEL_DIMENSIONS)
     )
     light_circles_plan = "\n".join(
         f'<circle cx="{px(item["position"][0]):.1f}" '
@@ -472,14 +461,6 @@ def _write_preview(path: Path, light_mounts: Sequence[dict]) -> None:
 def generate_scene(output_dir: Path) -> dict:
     output_dir = output_dir.resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
-    source_dir = output_dir / "source_assets"
-    source_dir.mkdir(parents=True, exist_ok=True)
-
-    tunnel_mesh, annotations = build_tunnel_mesh()
-    tunnel_source = source_dir / "escape_tunnel_source.obj"
-    tunnel_source.write_text(
-        tunnel_mesh.to_obj(object_name="escape_tunnel_source"), encoding="utf-8"
-    )
 
     room_footprint = Footprint2D.rectangle(14.0, 10.0)
     breach = PortalSpec(
@@ -492,28 +473,8 @@ def generate_scene(output_dir: Path) -> dict:
         boundary_edge_index=1,
         position_along=5.0,
     )
-    passage = ConnectorSpec(
-        connector_id="escape_tunnel_route",
-        connector_type=ConnectorType.NATURAL_PASSAGE,
-        start=ConnectorEndpoint("prison_block", "detention", TUNNEL_SECTIONS[0].center),
-        end=ConnectorEndpoint(
-            "escape_outlet", "lower_escape", TUNNEL_SECTIONS[-1].center
-        ),
-        width=min(section.width for section in TUNNEL_SECTIONS),
-        clearance_height=min(section.height for section in TUNNEL_SECTIONS),
-        parameters={
-            "geometry_embedded": True,
-            "waypoints": [list(section.center) for section in TUNNEL_SECTIONS[1:-1]],
-        },
-    )
-    tunnel_spec = StructuralMeshSpec(
-        mesh_id="escape_tunnel_shell",
-        space_id="prison_block",
-        mesh_path=str(tunnel_source),
-        unit_scale=1.0,
-        annotations=annotations,
-        require_watertight=False,
-        normal_orientation="unspecified",
+    passage = TUNNEL_ENVIRONMENT.passage_networks[0].to_connector_spec(
+        "long_way_out", connector_id="escape_tunnel_route"
     )
     layout = HouseLayout(
         wall_height=3.6,
@@ -553,13 +514,18 @@ def generate_scene(output_dir: Path) -> dict:
             )
         ],
         connectors=[passage],
-        structural_meshes=[tunnel_spec],
+        semantic_environment=TUNNEL_ENVIRONMENT,
         portals=[breach],
     )
     layout.validate_structure()
     layout.compile_polygon_rooms(output_dir / "structures" / "rooms")
     layout.compile_connectors(output_dir / "structures" / "connectors")
-    layout.compile_structural_meshes(output_dir / "structures" / "meshes")
+    environment_paths = layout.compile_semantic_environment(
+        output_dir / "structures" / "meshes" / "escape_tunnel_shell",
+        voxel_size=1.0,
+        structure_id="escape_tunnel_shell",
+    )
+    surface_data = json.loads(environment_paths.surfaces_path.read_text())
 
     blocked = layout.geometrically_blocked_connectors(
         agent_height=1.9,
@@ -618,9 +584,6 @@ def generate_scene(output_dir: Path) -> dict:
     )
 
     layout_data = layout.to_dict(scene_dir=output_dir)
-    layout_data["structural_meshes"][0]["mesh_path"] = str(
-        tunnel_source.relative_to(output_dir)
-    )
     (output_dir / "structural_layout.json").write_text(
         json.dumps(layout_data, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
@@ -634,14 +597,16 @@ def generate_scene(output_dir: Path) -> dict:
         },
         "tunnel": {
             "centerline_length_m": sum(
-                math.dist(first.center, second.center)
-                for first, second in zip(TUNNEL_SECTIONS, TUNNEL_SECTIONS[1:])
+                math.dist(first, second)
+                for first, second in zip(TUNNEL_PATH, TUNNEL_PATH[1:])
             ),
-            "sections": len(TUNNEL_SECTIONS),
+            "sections": len(TUNNEL_CROSS_SECTIONS),
             "minimum_width_m": passage.width,
             "minimum_clearance_height_m": passage.clearance_height,
             "end_elevation_m": passage.end.position[2],
-            "visual_triangles": len(tunnel_mesh.triangles),
+            "visual_triangles": surface_data["visual_triangles"],
+            "semantic_source_id": "long_way_out",
+            "environment_hash": TUNNEL_ENVIRONMENT.content_hash(),
         },
         "lighting": {
             "fixture_count": len(light_mounts),

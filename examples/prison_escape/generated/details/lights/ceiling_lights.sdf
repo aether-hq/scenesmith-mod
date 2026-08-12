@@ -60,7 +60,7 @@
       </attenuation>
     </light>
     <light name="escape_light_04" type="point">
-      <pose>13.4972 0.499595 2.83125 0 0 0</pose>
+      <pose>13.4962 0.505062 2.77869 0 0 0</pose>
       <cast_shadows>true</cast_shadows>
       <diffuse>1 0.72 0.38 1</diffuse>
       <specular>0.45 0.32 0.18 1</specular>
@@ -72,7 +72,7 @@
       </attenuation>
     </light>
     <light name="escape_light_05" type="point">
-      <pose>25.4891 1.49967 1.88262 0 0 0</pose>
+      <pose>25.4932 1.50435 1.84228 0 0 0</pose>
       <cast_shadows>true</cast_shadows>
       <diffuse>1 0.72 0.38 1</diffuse>
       <specular>0.45 0.32 0.18 1</specular>
@@ -84,7 +84,7 @@
       </attenuation>
     </light>
     <light name="escape_light_06" type="point">
-      <pose>39.4913 3.34814 0.771057 0 0 0</pose>
+      <pose>39.4915 3.3506 0.766328 0 0 0</pose>
       <cast_shadows>true</cast_shadows>
       <diffuse>1 0.72 0.38 1</diffuse>
       <specular>0.45 0.32 0.18 1</specular>
@@ -96,7 +96,7 @@
       </attenuation>
     </light>
     <light name="escape_light_07" type="point">
-      <pose>53.4934 4.64939 -0.00848346 0 0 0</pose>
+      <pose>53.4959 4.65201 -0.0587947 0 0 0</pose>
       <cast_shadows>true</cast_shadows>
       <diffuse>1 0.72 0.38 1</diffuse>
       <specular>0.45 0.32 0.18 1</specular>
@@ -108,7 +108,7 @@
       </attenuation>
     </light>
     <light name="escape_light_08" type="point">
-      <pose>67.0056 7.65023 0.189194 0 0 0</pose>
+      <pose>67.0077 7.65566 0.108407 0 0 0</pose>
       <cast_shadows>true</cast_shadows>
       <diffuse>1 0.72 0.38 1</diffuse>
       <specular>0.45 0.32 0.18 1</specular>

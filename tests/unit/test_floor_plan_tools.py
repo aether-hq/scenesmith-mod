@@ -180,6 +180,90 @@ class TestStructuralLayoutAuthoring(unittest.TestCase):
         self.assertTrue(connector.parameters["geometry_embedded"])
         self.assertEqual(connector.required_capabilities, frozenset({"walk"}))
 
+    def test_structural_tool_accepts_llm_authorable_semantic_environment(self) -> None:
+        layout, tools = self._create_two_room_layout()
+        environment = {
+            "schema_version": 1,
+            "regions": [
+                {
+                    "id": "subsurface",
+                    "kind": "subterranean",
+                    "bounds": {"minimum": [-10, -10, -8], "maximum": [30, 20, 15]},
+                }
+            ],
+            "chambers": [
+                {
+                    "id": "main_chamber",
+                    "region_id": "subsurface",
+                    "center": [15, 4, 2],
+                    "size": [12, 10, 8],
+                }
+            ],
+            "passage_networks": [
+                {
+                    "id": "routes",
+                    "region_id": "subsurface",
+                    "junctions": [
+                        {"id": "entry", "position": [0, 0, 0]},
+                        {
+                            "id": "hall",
+                            "position": [12, 3, 0],
+                            "chamber_id": "main_chamber",
+                        },
+                    ],
+                    "segments": [
+                        {
+                            "id": "approach",
+                            "start_junction_id": "entry",
+                            "end_junction_id": "hall",
+                            "path": [[0, 0, 0], [5, 0, -1], [12, 3, 0]],
+                            "cross_sections": [
+                                {"station": 0, "width": 3, "height": 3},
+                                {"station": 1, "width": 6, "height": 5},
+                            ],
+                        }
+                    ],
+                }
+            ],
+        }
+
+        result = tools._set_structural_layout_impl(
+            json.dumps({"semantic_environment": environment})
+        )
+
+        self.assertTrue(result.success, result.message)
+        self.assertIsNotNone(layout.semantic_environment)
+        assert layout.semantic_environment is not None
+        self.assertEqual(layout.semantic_environment.passage_networks[0].cycle_rank, 0)
+        self.assertIn("1 semantic environment", result.message)
+
+    def test_invalid_semantic_environment_update_is_atomic(self) -> None:
+        layout, tools = self._create_two_room_layout()
+        original_specs = [spec.to_dict() for spec in layout.room_specs]
+
+        result = tools._set_structural_layout_impl(
+            json.dumps(
+                {
+                    "semantic_environment": {
+                        "regions": [
+                            {
+                                "id": "empty",
+                                "kind": "subterranean",
+                                "bounds": {
+                                    "minimum": [0, 0, 0],
+                                    "maximum": [1, 1, 1],
+                                },
+                            }
+                        ]
+                    }
+                }
+            )
+        )
+
+        self.assertFalse(result.success)
+        self.assertIsNone(layout.semantic_environment)
+        self.assertEqual([spec.to_dict() for spec in layout.room_specs], original_specs)
+
     def test_structural_position_overlap_is_rejected_atomically(self) -> None:
         layout, tools = self._create_two_room_layout()
         original_positions = [room.position for room in layout.placed_rooms]

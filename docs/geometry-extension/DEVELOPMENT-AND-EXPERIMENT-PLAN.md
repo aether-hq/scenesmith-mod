@@ -6,6 +6,11 @@ The upgrade proceeds from semantic representation to deterministic geometry,
 then downstream consumers, then agentic generation. This order isolates geometry
 bugs from VLM variability and allows fast tests to guard every later stage.
 
+Phases 0–7 below cover the delivered general-geometry foundation. The roadmap
+for first-class branching cave graphs, large generated caverns, exteriors,
+geological detail, layered substrate, and reproducible destruction continues in
+[Semantic Environments Development and Experiment Plan](SEMANTIC-ENVIRONMENTS-DEVELOPMENT-PLAN.md).
+
 No phase may silently flatten unsupported input. Until a capability is
 implemented, validation must return a typed “unsupported geometry” diagnostic.
 

@@ -21,6 +21,10 @@ class TestPrisonEscapeExample(unittest.TestCase):
             self.assertEqual(manifest["verification"]["blocked_connectors"], [])
             self.assertIn("escape_outlet", manifest["verification"]["walk_reachable"])
             self.assertEqual(manifest["wall_breach"]["width_m"], 3.6)
+            self.assertEqual(
+                manifest["tunnel"]["semantic_source_id"], "long_way_out"
+            )
+            self.assertEqual(len(manifest["tunnel"]["environment_hash"]), 64)
 
             for relative_path in (
                 "prison_escape.dmd.yaml",
@@ -35,6 +39,20 @@ class TestPrisonEscapeExample(unittest.TestCase):
 
             exported = json.loads((output_dir / "manifest.json").read_text())
             self.assertEqual(exported, manifest)
+            layout = json.loads((output_dir / "structural_layout.json").read_text())
+            self.assertIsNotNone(layout["semantic_environment"])
+            self.assertEqual(layout["structural_meshes"], [])
+
+    def test_web_viewer_references_generated_architecture(self) -> None:
+        example_dir = Path(__file__).parents[2] / "examples" / "prison_escape"
+        viewer = (example_dir / "viewer.html").read_text(encoding="utf-8")
+
+        self.assertIn("PointerLockControls", viewer)
+        self.assertIn("room_geometry_prison_block.obj", viewer)
+        self.assertIn("escape_tunnel_shell.obj", viewer)
+        self.assertIn("ceiling_lights.obj", viewer)
+        self.assertIn("generated/manifest.json", viewer)
+        self.assertIn("mode === 'walk' ? 'fly' : 'walk'", viewer)
 
 
 if __name__ == "__main__":
