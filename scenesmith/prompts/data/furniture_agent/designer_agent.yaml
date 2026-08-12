@@ -124,11 +124,12 @@ prompt: |
   - Desks and worktables: Working side faces +y direction
   - Dining tables, coffee tables: Symmetrical (no inherent front)
 
-  **Rotation Rules** (yaw only - furniture sits upright on floor):
+  **Rotation Rules** (yaw controls heading; structural surfaces control tilt):
   - Positive yaw = counterclockwise rotation in top-down view
   - Common angles: 0° (faces +y), 90° (faces -x), 180° (faces -y), -90° (faces +x)
   - **Goal**: Make furniture functional (chairs face tables, sofas face room center)
-  - Furniture automatically sits flat on floor (z=0) with upright orientation
+  - Furniture automatically sits on the selected structural support surface;
+    its Z, roll, and pitch follow flat, raised, stepped, or sloped geometry
 
   **Quick Orientation Check**:
   - View top-down camera for best rotation assessment

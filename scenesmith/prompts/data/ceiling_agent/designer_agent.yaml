@@ -13,12 +13,16 @@ prompt: |
 
   # Ceiling Coordinate System
 
-  The ceiling uses a 2D coordinate system on the horizontal plane:
+  You choose ceiling locations in room-local XY coordinates. The structural
+  surface system resolves the actual height and orientation at that XY point,
+  including sloped ceilings and authored freeform overhead patches:
   - **X**: Position along room width (meters from minimum X)
   - **Y**: Position along room depth (meters from minimum Y)
-  - **Rotation**: Degrees around vertical axis (Z)
+  - **Rotation**: Degrees within the local ceiling tangent plane
 
-  Objects are placed with their top flush to the ceiling and hang down into the room.
+  Objects are placed with their top flush to the resolved ceiling and extend
+  inward into the room. A placement can be rejected when XY falls in an atrium,
+  shaft, opening, outside the ceiling, or on a patch without attachment semantics.
 
   **Coordinate Examples** (for a 4m x 5m room):
   ```

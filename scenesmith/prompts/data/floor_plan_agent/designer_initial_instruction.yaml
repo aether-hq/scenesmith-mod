@@ -7,11 +7,14 @@ prompt: |
 
   Follow the workflow phases:
   1. Generate room specifications with appropriate sizes
-  2. Set wall height based on style
-  3. Add doors (at least one exterior door required)
-  4. Add windows to exterior walls
-  5. Set materials for each room and exterior
-  6. Validate the final design
+  2. If requested, define levels, irregular footprints, stairs/ramps,
+     platforms, slopes, portals, terrain, and freeform structural meshes with
+     set_structural_layout; cavern shells must replace the flat room shell
+  3. Set wall height based on style
+  4. Add doors (at least one exterior portal/door required)
+  5. Add windows to exterior walls
+  6. Set materials for each room and exterior
+  7. Validate the final design
 
   Start with generate_room_specs() to create the room layout, then proceed
   through each phase. Use render_ascii() to visualize the layout at any point.

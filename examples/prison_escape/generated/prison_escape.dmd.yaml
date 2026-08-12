@@ -1,0 +1,38 @@
+directives:
+- add_frame:
+    name: house_frame
+    X_PF:
+      base_frame: world
+      translation: [0, 0, 0]
+- add_frame:
+    name: room_prison_block_frame
+    X_PF:
+      base_frame: house_frame
+      translation: [0.0, 0.0, 0.0]
+      rotation: !AngleAxis
+        angle_deg: 0.0
+        axis: [0, 0, 1]
+- add_model:
+    name: room_geometry_prison_block
+    file: package://scene/structures/rooms/prison_block/room_geometry_prison_block.sdf
+- add_weld:
+    parent: room_prison_block_frame
+    child: room_geometry_prison_block::room_geometry_body_link
+- add_model:
+    name: structure_escape_tunnel_shell
+    file: package://scene/structures/meshes/escape_tunnel_shell/escape_tunnel_shell.sdf
+- add_weld:
+    parent: room_prison_block_frame
+    child: structure_escape_tunnel_shell::structure_link
+- add_model:
+    name: prison_details
+    file: package://scene/details/prison/prison_details.sdf
+- add_weld:
+    parent: house_frame
+    child: prison_details::props_link
+- add_model:
+    name: ceiling_lights
+    file: package://scene/details/lights/ceiling_lights.sdf
+- add_weld:
+    parent: house_frame
+    child: ceiling_lights::lights_link

@@ -1,0 +1,123 @@
+<?xml version='1.0' encoding='utf-8'?>
+<sdf version="1.12">
+  <model name="ceiling_lights">
+    <static>true</static>
+    <link name="lights_link">
+      <visual name="ceiling_lights_visual">
+        <geometry>
+          <mesh>
+            <uri>ceiling_lights.obj</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>1 0.72 0.25 1</ambient>
+          <diffuse>1 0.72 0.25 1</diffuse>
+          <emissive>1 0.72 0.25 1</emissive>
+        </material>
+      </visual>
+      <collision name="ceiling_lights_collision">
+        <geometry>
+          <mesh>
+            <uri>ceiling_lights.obj</uri>
+          </mesh>
+        </geometry>
+      </collision>
+    </link>
+    <light name="escape_light_01" type="point">
+      <pose>-4.5 -1.8 3.53 0 0 0</pose>
+      <cast_shadows>true</cast_shadows>
+      <diffuse>1 0.72 0.38 1</diffuse>
+      <specular>0.45 0.32 0.18 1</specular>
+      <attenuation>
+        <range>11</range>
+        <constant>0.7</constant>
+        <linear>0.08</linear>
+        <quadratic>0.015</quadratic>
+      </attenuation>
+    </light>
+    <light name="escape_light_02" type="point">
+      <pose>0 -1.8 3.53 0 0 0</pose>
+      <cast_shadows>true</cast_shadows>
+      <diffuse>1 0.72 0.38 1</diffuse>
+      <specular>0.45 0.32 0.18 1</specular>
+      <attenuation>
+        <range>11</range>
+        <constant>0.7</constant>
+        <linear>0.08</linear>
+        <quadratic>0.015</quadratic>
+      </attenuation>
+    </light>
+    <light name="escape_light_03" type="point">
+      <pose>4.5 -1.8 3.53 0 0 0</pose>
+      <cast_shadows>true</cast_shadows>
+      <diffuse>1 0.72 0.38 1</diffuse>
+      <specular>0.45 0.32 0.18 1</specular>
+      <attenuation>
+        <range>11</range>
+        <constant>0.7</constant>
+        <linear>0.08</linear>
+        <quadratic>0.015</quadratic>
+      </attenuation>
+    </light>
+    <light name="escape_light_04" type="point">
+      <pose>13.4972 0.499595 2.83125 0 0 0</pose>
+      <cast_shadows>true</cast_shadows>
+      <diffuse>1 0.72 0.38 1</diffuse>
+      <specular>0.45 0.32 0.18 1</specular>
+      <attenuation>
+        <range>11</range>
+        <constant>0.7</constant>
+        <linear>0.08</linear>
+        <quadratic>0.015</quadratic>
+      </attenuation>
+    </light>
+    <light name="escape_light_05" type="point">
+      <pose>25.4891 1.49967 1.88262 0 0 0</pose>
+      <cast_shadows>true</cast_shadows>
+      <diffuse>1 0.72 0.38 1</diffuse>
+      <specular>0.45 0.32 0.18 1</specular>
+      <attenuation>
+        <range>11</range>
+        <constant>0.7</constant>
+        <linear>0.08</linear>
+        <quadratic>0.015</quadratic>
+      </attenuation>
+    </light>
+    <light name="escape_light_06" type="point">
+      <pose>39.4913 3.34814 0.771057 0 0 0</pose>
+      <cast_shadows>true</cast_shadows>
+      <diffuse>1 0.72 0.38 1</diffuse>
+      <specular>0.45 0.32 0.18 1</specular>
+      <attenuation>
+        <range>11</range>
+        <constant>0.7</constant>
+        <linear>0.08</linear>
+        <quadratic>0.015</quadratic>
+      </attenuation>
+    </light>
+    <light name="escape_light_07" type="point">
+      <pose>53.4934 4.64939 -0.00848346 0 0 0</pose>
+      <cast_shadows>true</cast_shadows>
+      <diffuse>1 0.72 0.38 1</diffuse>
+      <specular>0.45 0.32 0.18 1</specular>
+      <attenuation>
+        <range>11</range>
+        <constant>0.7</constant>
+        <linear>0.08</linear>
+        <quadratic>0.015</quadratic>
+      </attenuation>
+    </light>
+    <light name="escape_light_08" type="point">
+      <pose>67.0056 7.65023 0.189194 0 0 0</pose>
+      <cast_shadows>true</cast_shadows>
+      <diffuse>1 0.72 0.38 1</diffuse>
+      <specular>0.45 0.32 0.18 1</specular>
+      <attenuation>
+        <range>11</range>
+        <constant>0.7</constant>
+        <linear>0.08</linear>
+        <quadratic>0.015</quadratic>
+      </attenuation>
+    </light>
+  </model>
+</sdf>

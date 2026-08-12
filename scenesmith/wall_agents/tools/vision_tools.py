@@ -329,17 +329,19 @@ class WallVisionTools:
                 )
             obj_min, obj_max = world_bounds
 
-            # Get wall position.
+            # Measure the AABB corners against the actual wall plane. This also
+            # works for diagonal and tilted structural attachment patches.
             wall_pos = surface.transform.translation()
-
-            # Check distance based on wall direction.
-            # North/South walls are at constant Y, East/West at constant X.
-            if surface.wall_direction in (WallDirection.NORTH, WallDirection.SOUTH):
-                wall_y = wall_pos[1]
-                dist = min(abs(obj_min[1] - wall_y), abs(obj_max[1] - wall_y))
-            else:  # EAST, WEST
-                wall_x = wall_pos[0]
-                dist = min(abs(obj_min[0] - wall_x), abs(obj_max[0] - wall_x))
+            wall_normal = surface.transform.rotation().matrix()[:, 1]
+            corners = (
+                np.array([x, y, z])
+                for x in (obj_min[0], obj_max[0])
+                for y in (obj_min[1], obj_max[1])
+                for z in (obj_min[2], obj_max[2])
+            )
+            dist = min(
+                abs(float(np.dot(corner - wall_pos, wall_normal))) for corner in corners
+            )
 
             if dist <= threshold_m:
                 nearby_ids.append(obj.object_id)

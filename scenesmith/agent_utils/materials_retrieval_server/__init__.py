@@ -30,14 +30,6 @@ Usage:
     # python -m scenesmith.agent_utils.materials_retrieval_server.standalone_server
 """
 
-from .client import MaterialsRetrievalClient
-from .dataclasses import (
-    MaterialRetrievalResult,
-    MaterialsRetrievalServerRequest,
-    MaterialsRetrievalServerResponse,
-)
-from .server_manager import MaterialsRetrievalServer
-
 __all__ = [
     "MaterialsRetrievalClient",
     "MaterialRetrievalResult",
@@ -45,3 +37,33 @@ __all__ = [
     "MaterialsRetrievalServerRequest",
     "MaterialsRetrievalServerResponse",
 ]
+
+
+def __getattr__(name: str):
+    """Lazily load the CLIP/Flask server only when it is actually requested."""
+
+    if name == "MaterialsRetrievalClient":
+        from .client import MaterialsRetrievalClient
+
+        return MaterialsRetrievalClient
+    if name == "MaterialsRetrievalServer":
+        from .server_manager import MaterialsRetrievalServer
+
+        return MaterialsRetrievalServer
+    if name in {
+        "MaterialRetrievalResult",
+        "MaterialsRetrievalServerRequest",
+        "MaterialsRetrievalServerResponse",
+    }:
+        from .dataclasses import (
+            MaterialRetrievalResult,
+            MaterialsRetrievalServerRequest,
+            MaterialsRetrievalServerResponse,
+        )
+
+        return {
+            "MaterialRetrievalResult": MaterialRetrievalResult,
+            "MaterialsRetrievalServerRequest": MaterialsRetrievalServerRequest,
+            "MaterialsRetrievalServerResponse": MaterialsRetrievalServerResponse,
+        }[name]
+    raise AttributeError(name)

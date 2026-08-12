@@ -178,6 +178,54 @@ prompt: |
   - `add_adjacency()`/`remove_adjacency()` for wall connections
   {% endif %}
   - `validate()` after major changes
+
+  ## Phase 1.5: Structural Geometry (MANDATORY when requested)
+
+  Inspect the house description for any geometry that is not a single flat,
+  rectangular floor: multiple stories or basements, stacked rooms, stairs,
+  ramps, split levels, raised/sunken platforms, mezzanines, balconies,
+  bridges/catwalks, atria/courtyards/shafts, L/U-shaped or rotated rooms,
+  sloped floors/ceilings, rough terrain, caverns, or tunnels.
+
+  If any appear, call `set_structural_layout()` immediately after the base
+  rooms exist. Supply explicit levels and room level assignments, polygon
+  footprints (including holes), house-frame room `position` [x, y] values,
+  elevation profiles, connectors, platforms,
+  portals, or heightfields as appropriate. Never approximate one of these as
+  a flat rectangle or same-level doorway. Cross-level reachability requires a
+  connector. Courtyards, atria, pits, and shafts require a footprint hole or
+  explicit unsupported region so no floor collision fills the void.
+  Use independent `floor_footprint` and `ceiling_footprint` holes for stairs
+  and other openings through only one slab. The outer loop must match the room
+  boundary. Do not reuse one hole for both slabs unless the void truly passes
+  through the floor and roof (for example, an open courtyard or full shaft).
+  Rooms that stack vertically normally use the same `position`; positions are
+  min-corner coordinates in the house frame, not room centers.
+  When a heightfield is the actual terrain/floor rather than an overlay, set
+  `replaces_floor: true`; otherwise the default flat floor intentionally remains.
+  For an imported cavern/tunnel/freeform shell, add a `structural_meshes`
+  entry with explicit `mesh_path`, `unit_scale`, transform/winding policy, and
+  `replaces_room_shell: true`. This prevents generation of a rectangular room
+  around the mesh. Use false only when the mesh is intentionally additive. If
+  that imported shell already contains a natural tunnel or vertical chimney,
+  describe its centerline with a `natural_passage` or `shaft` connector and
+  set `parameters.geometry_embedded: true`; the connector supplies topology
+  and clearance semantics without adding duplicate geometry. Never set this
+  flag unless the traversable/clear volume is physically present in the mesh.
+
+  Use the serialized v2 type names exactly: `stairs_straight`, `stairs_l`,
+  `stairs_u`, `stairs_spiral`, `ramp`, `ladder`, `natural_passage`, or `shaft`;
+  elevation profile types
+  `planar` or `sloped`.
+  Straight stairs require `parameters.riser_count`. L/U stairs require
+  `parameters.waypoints` and `parameters.riser_counts`. A turning ramp uses
+  `parameters.waypoints`. Spiral stairs require `center`, `turns`, `direction`,
+  and `riser_count`. Ladders use climb capability and may specify `rung_count`
+  and `yaw_degrees`. Add an exterior `door`, `open`, or `cave_mouth`
+  portal and validate capability-aware reachability.
+  Circular rooms may use `footprint: {circle: {radius: ..., center: [...],
+  chord_tolerance: 0.02}}`; other curves should be supplied as deterministic
+  polygon samples until a richer curve path is available.
   {% if mode == "house" %}
 
   ## Phase 2: Open Connections (if needed)

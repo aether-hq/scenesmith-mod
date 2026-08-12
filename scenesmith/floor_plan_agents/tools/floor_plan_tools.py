@@ -6,6 +6,7 @@ including rooms, doors, windows, and materials.
 
 import json
 import logging
+import math
 
 from dataclasses import dataclass, field
 from typing import Literal
@@ -20,6 +21,17 @@ from scenesmith.agent_utils.house import (
     Wall,
     WallDirection,
 )
+from scenesmith.agent_utils.structural_geometry import (
+    ConnectorSpec,
+    Footprint2D,
+    HeightfieldSpec,
+    LevelSpec,
+    PlatformSpec,
+    PortalSpec,
+    PortalType,
+    StructuralMeshSpec,
+)
+from scenesmith.agent_utils.structural_topology import EXTERIOR_NODE, StructuralTopology
 from scenesmith.floor_plan_agents.tools.ascii_generator import generate_ascii_floor_plan
 from scenesmith.floor_plan_agents.tools.door_window_mixin import DoorWindowMixin
 from scenesmith.floor_plan_agents.tools.materials_resolver import (
@@ -31,8 +43,11 @@ from scenesmith.floor_plan_agents.tools.room_placement import (
     PlacementConfig,
     PlacementError,
     ScoringWeights,
+    create_placed_room,
     get_shared_edge,
     place_rooms,
+    rooms_overlap,
+    update_wall_connectivity,
     validate_connectivity,
 )
 
@@ -318,6 +333,35 @@ class FloorPlanTools(DoorWindowMixin, OpenPlanMixin):
             return self._set_wall_height_impl(height_meters=height_meters)
 
         @function_tool
+        def set_structural_layout(structural_json: str) -> Result:
+            """Add levels, arbitrary footprints, slopes, connectors, and platforms.
+
+            Call after generate_room_specs when the prompt is multilevel, sloped,
+            non-rectangular, has stairs/ramps, or includes mezzanines/terrain.
+            This operation is atomic: invalid geometry leaves the layout unchanged.
+
+            Args:
+                structural_json: JSON object with optional arrays: levels, rooms,
+                    connectors, platforms, portals, heightfields, and
+                    structural_meshes. Room overrides
+                    identify an existing room by id and may include level_id,
+                    elevation, house-frame min-corner `position` [x, y],
+                    yaw_degrees, boundary `footprint`, independent
+                    `floor_footprint`/`ceiling_footprint` slab holes, floor_profile,
+                    or ceiling_profile. Connector/portal/platform/heightfield objects
+                    use the version-2 serialized structural schema. A structural
+                    mesh with `replaces_room_shell: true` becomes the room itself
+                    rather than being added inside a rectangular shell. A
+                    natural_passage or shaft connector may set
+                    `parameters.geometry_embedded: true` when the imported room
+                    mesh already embodies its full physical route.
+
+            Returns:
+                Result indicating whether the complete structural spec validated.
+            """
+            return self._set_structural_layout_impl(structural_json)
+
+        @function_tool
         def add_door(
             wall_id: str, position: str, width: float = 0.9, height: float = 2.1
         ) -> Result:
@@ -469,6 +513,7 @@ class FloorPlanTools(DoorWindowMixin, OpenPlanMixin):
             "add_open_connection": add_open_connection,
             "remove_open_connection": remove_open_connection,
             "set_wall_height": set_wall_height,
+            "set_structural_layout": set_structural_layout,
             "add_door": add_door,
             "remove_door": remove_door,
             "add_window": add_window,
@@ -480,6 +525,206 @@ class FloorPlanTools(DoorWindowMixin, OpenPlanMixin):
             "validate": validate,
             "render_ascii": render_ascii,
         }
+
+    def _set_structural_layout_impl(self, structural_json: str) -> Result:
+        """Atomically apply version-2 structural authoring data to the layout."""
+
+        console_logger.info("Tool called: set_structural_layout")
+        try:
+            data = json.loads(structural_json)
+        except json.JSONDecodeError as exc:
+            return self._fail(f"Invalid structural JSON: {exc}")
+        if not isinstance(data, dict):
+            return self._fail("structural_json must be a JSON object")
+        unknown = set(data) - {
+            "levels",
+            "rooms",
+            "connectors",
+            "platforms",
+            "portals",
+            "heightfields",
+            "structural_meshes",
+        }
+        if unknown:
+            return self._fail(
+                "Unknown structural fields: " + ", ".join(sorted(unknown))
+            )
+
+        try:
+            levels = (
+                [LevelSpec.from_dict(level) for level in data["levels"]]
+                if "levels" in data
+                else list(self.layout.levels)
+            )
+            room_overrides = data.get("rooms", [])
+            if not isinstance(room_overrides, list):
+                raise ValueError("rooms must be an array")
+            overrides_by_id = {}
+            for override in room_overrides:
+                room_id = str(override.get("id", "")).strip()
+                if not room_id:
+                    raise ValueError("each room override requires id")
+                if room_id in overrides_by_id:
+                    raise ValueError(f"duplicate room override '{room_id}'")
+                overrides_by_id[room_id] = override
+
+            def parse_footprint(footprint_data: dict) -> Footprint2D:
+                if "circle" in footprint_data:
+                    circle = footprint_data["circle"]
+                    return Footprint2D.circle(
+                        radius=circle["radius"],
+                        chord_tolerance=circle.get("chord_tolerance", 0.02),
+                        center=tuple(circle.get("center", (0.0, 0.0))),
+                    )
+                return Footprint2D.from_dict(footprint_data)
+
+            known_room_ids = {room.room_id for room in self.layout.room_specs}
+            unknown_rooms = set(overrides_by_id) - known_room_ids
+            if unknown_rooms:
+                raise ValueError(
+                    "room overrides reference unknown rooms: "
+                    + ", ".join(sorted(unknown_rooms))
+                )
+
+            updated_specs = []
+            for spec in self.layout.room_specs:
+                override = overrides_by_id.get(spec.room_id)
+                if override is None:
+                    updated_specs.append(RoomSpec.from_dict(spec.to_dict()))
+                    continue
+                allowed_room_fields = {
+                    "id",
+                    "level_id",
+                    "elevation",
+                    "yaw_degrees",
+                    "position",
+                    "footprint",
+                    "floor_footprint",
+                    "ceiling_footprint",
+                    "floor_profile",
+                    "ceiling_profile",
+                }
+                extra = set(override) - allowed_room_fields
+                if extra:
+                    raise ValueError(
+                        f"room '{spec.room_id}' has unknown fields: "
+                        + ", ".join(sorted(extra))
+                    )
+                state = spec.to_dict()
+                state["level_id"] = override.get("level_id", spec.level_id)
+                state["elevation"] = override.get("elevation", spec.elevation)
+                state["yaw"] = math.radians(
+                    float(override.get("yaw_degrees", math.degrees(spec.yaw)))
+                )
+                if "position" in override:
+                    state["position"] = override["position"]
+                if "footprint" in override:
+                    footprint_data = override["footprint"]
+                    footprint = parse_footprint(footprint_data)
+                    state["footprint"] = footprint.to_dict()
+                    min_x, min_y, max_x, max_y = footprint.bounds
+                    state["length"] = max_x - min_x
+                    state["width"] = max_y - min_y
+                if "floor_footprint" in override:
+                    state["floor_footprint"] = parse_footprint(
+                        override["floor_footprint"]
+                    ).to_dict()
+                if "ceiling_footprint" in override:
+                    state["ceiling_footprint"] = parse_footprint(
+                        override["ceiling_footprint"]
+                    ).to_dict()
+                if "floor_profile" in override:
+                    state["floor_profile"] = override["floor_profile"]
+                if "ceiling_profile" in override:
+                    state["ceiling_profile"] = override["ceiling_profile"]
+                updated_specs.append(RoomSpec.from_dict(state))
+
+            connectors = (
+                [ConnectorSpec.from_dict(item) for item in data["connectors"]]
+                if "connectors" in data
+                else list(self.layout.connectors)
+            )
+            platforms = (
+                [PlatformSpec.from_dict(item) for item in data["platforms"]]
+                if "platforms" in data
+                else list(self.layout.platforms)
+            )
+            portals = (
+                [PortalSpec.from_dict(item) for item in data["portals"]]
+                if "portals" in data
+                else list(self.layout.portals)
+            )
+            heightfields = (
+                [HeightfieldSpec.from_dict(item) for item in data["heightfields"]]
+                if "heightfields" in data
+                else list(self.layout.heightfields)
+            )
+            structural_meshes = (
+                [
+                    StructuralMeshSpec.from_dict(item)
+                    for item in data["structural_meshes"]
+                ]
+                if "structural_meshes" in data
+                else list(self.layout.structural_meshes)
+            )
+
+            candidate = HouseLayout(
+                room_specs=updated_specs,
+                levels=levels,
+                connectors=connectors,
+                structural_meshes=structural_meshes,
+                platforms=platforms,
+                portals=portals,
+                heightfields=heightfields,
+            )
+            candidate.validate_structure()
+            specs_by_id = {spec.room_id: spec for spec in updated_specs}
+            candidate_placed_rooms = []
+            for placed in self.layout.placed_rooms:
+                spec = specs_by_id[placed.room_id]
+                override = overrides_by_id.get(placed.room_id, {})
+                position = spec.position if "position" in override else placed.position
+                candidate_placed_rooms.append(create_placed_room(spec, position))
+            for index, room in enumerate(candidate_placed_rooms):
+                for other in candidate_placed_rooms[index + 1 :]:
+                    if rooms_overlap(room, other):
+                        raise ValueError(
+                            f"rooms '{room.room_id}' and '{other.room_id}' overlap "
+                            f"on level '{room.level_id}'"
+                        )
+        except (TypeError, ValueError, KeyError) as exc:
+            return self._fail(f"Invalid structural layout: {exc}")
+
+        self.layout.levels = levels
+        self.layout.room_specs = updated_specs
+        self.layout.connectors = connectors
+        self.layout.platforms = platforms
+        self.layout.portals = portals
+        self.layout.heightfields = heightfields
+        self.layout.structural_meshes = structural_meshes
+        self.layout.connector_geometry_paths.clear()
+        self.layout.platform_geometry_paths.clear()
+        self.layout.heightfield_geometry_paths.clear()
+        self.layout.structural_mesh_geometry_paths.clear()
+        self.layout.invalidate_all_room_geometries()
+
+        self.layout.placed_rooms = candidate_placed_rooms
+        update_wall_connectivity(candidate_placed_rooms)
+        # Rebuild compatibility walls after transforms/dimensions change, then
+        # restore any pre-existing cardinal openings that still fit.
+        self._reapply_openings_to_walls()
+        ascii_result = generate_ascii_floor_plan(candidate_placed_rooms)
+        self.layout.boundary_labels = ascii_result.boundary_labels
+
+        return Result(
+            success=True,
+            message=(
+                f"Applied structural layout: {len(levels)} levels, "
+                f"{len(connectors)} connectors, {len(platforms)} platforms, "
+                f"{len(heightfields)} heightfields, {len(structural_meshes)} "
+                f"structural meshes, and {len(portals)} portals."
+            ),
+        )
 
     def _generate_room_specs_impl(self, room_specs_json: str) -> RoomSpecsResult:
         """Create rooms with the specified dimensions and adjacencies.
@@ -1252,6 +1497,11 @@ class FloorPlanTools(DoorWindowMixin, OpenPlanMixin):
         layout_status = "ok"
         connectivity_status = "ok"
 
+        try:
+            self.layout.validate_structure()
+        except ValueError as exc:
+            layout_status = f"error: structural geometry invalid: {exc}"
+
         # Check layout.
         if not self.layout.placement_valid:
             layout_status = "error: room placement not completed or invalid"
@@ -1259,7 +1509,41 @@ class FloorPlanTools(DoorWindowMixin, OpenPlanMixin):
             layout_status = "error: no rooms placed"
 
         # Check connectivity.
-        if self.layout.placed_rooms:
+        if self.layout.placed_rooms and (
+            self.layout.connectors or self.layout.portals or self.layout.platforms
+        ):
+            topology_portals = list(self.layout.portals)
+            topology_portals.extend(
+                PortalSpec(
+                    portal_id=f"legacy_door_{door.id}",
+                    portal_type=PortalType.DOOR,
+                    source_space_id=door.room_a,
+                    target_space_id=door.room_b,
+                    width=door.width,
+                    height=door.height,
+                )
+                for door in self.layout.doors
+            )
+            topology = StructuralTopology.build(
+                space_ids=self.layout.room_ids,
+                portals=topology_portals,
+                connectors=self.layout.connectors,
+            )
+            if EXTERIOR_NODE not in topology.nodes:
+                connectivity_status = "error: no exterior door or portal"
+                self.layout.connectivity_valid = False
+            else:
+                reachable = topology.reachable(EXTERIOR_NODE, capabilities={"walk"})
+                unreachable = sorted(set(self.layout.room_ids) - set(reachable))
+                if unreachable:
+                    connectivity_status = (
+                        "error: structurally unreachable rooms: "
+                        + ", ".join(unreachable)
+                    )
+                    self.layout.connectivity_valid = False
+                else:
+                    self.layout.connectivity_valid = True
+        elif self.layout.placed_rooms:
             is_valid, msg = validate_connectivity(
                 self.layout.placed_rooms,
                 self.layout.doors,

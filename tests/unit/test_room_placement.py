@@ -9,6 +9,7 @@ from scenesmith.agent_utils.house import (
     RoomSpec,
     WallDirection,
 )
+from scenesmith.agent_utils.structural_geometry import Footprint2D
 from scenesmith.floor_plan_agents.tools.room_placement import (
     PlacementConfig,
     PlacementError,
@@ -53,6 +54,87 @@ class TestSingleRoom(unittest.TestCase):
 
         assert result[0].width == 4.0  # X dimension (from length).
         assert result[0].depth == 3.0  # Y dimension (from width).
+
+
+class TestMultilevelPlacement(unittest.TestCase):
+    """Tests for level-aware legacy rectangular placement."""
+
+    def test_stacked_rooms_can_share_xy_without_overlap(self):
+        rooms = place_rooms(
+            [
+                RoomSpec("lower", width=4.0, length=5.0, level_id="ground"),
+                RoomSpec(
+                    "upper",
+                    width=4.0,
+                    length=5.0,
+                    level_id="upper",
+                    elevation=3.0,
+                ),
+            ]
+        )
+
+        lower = find_room(rooms=rooms, room_id="lower")
+        upper = find_room(rooms=rooms, room_id="upper")
+        assert lower.position == upper.position == (0.0, 0.0)
+        assert upper.elevation == 3.0
+        assert not rooms_overlap(lower, upper)
+        assert not rooms_share_edge(lower, upper)
+
+    def test_cross_level_planar_connection_is_rejected(self):
+        with self.assertRaisesRegex(PlacementError, "structural connector"):
+            place_rooms(
+                [
+                    RoomSpec("lower", level_id="ground"),
+                    RoomSpec(
+                        "upper",
+                        level_id="upper",
+                        connections={"lower": ConnectionType.DOOR},
+                    ),
+                ]
+            )
+
+    def test_polygon_input_is_not_silently_flattened(self):
+        with self.assertRaisesRegex(PlacementError, "arbitrary footprint"):
+            place_rooms(
+                [
+                    RoomSpec(
+                        "gallery",
+                        footprint=Footprint2D(
+                            outer=(
+                                (0, 0),
+                                (4, 0),
+                                (4, 1),
+                                (1, 1),
+                                (1, 4),
+                                (0, 4),
+                            )
+                        ),
+                    )
+                ]
+            )
+
+    def test_polygon_hole_does_not_false_positive_as_room_overlap(self):
+        courtyard = Footprint2D(
+            outer=((0, 0), (6, 0), (6, 6), (0, 6)),
+            holes=(((2, 2), (2, 4), (4, 4), (4, 2)),),
+        )
+        surrounding_room = PlacedRoom(
+            "surrounding",
+            (0, 0),
+            6,
+            6,
+            footprint=courtyard,
+        )
+        courtyard_room = PlacedRoom("courtyard", (2.2, 2.2), 1.6, 1.6)
+
+        self.assertFalse(rooms_overlap(surrounding_room, courtyard_room))
+
+    def test_polygon_overlap_uses_real_footprint_not_only_bounds(self):
+        triangle = Footprint2D(outer=((0, 0), (4, 0), (0, 4)))
+        first = PlacedRoom("first", (0, 0), 4, 4, footprint=triangle)
+        second = PlacedRoom("second", (0.5, 0.5), 4, 4, footprint=triangle)
+
+        self.assertTrue(rooms_overlap(first, second))
 
 
 class TestTwoRooms(unittest.TestCase):

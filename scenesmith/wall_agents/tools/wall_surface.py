@@ -4,7 +4,7 @@ Provides WallSurface for representing placeable wall areas and extraction
 functions to create them from room geometry.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 
@@ -57,6 +57,9 @@ class WallSurface:
 
     excluded_regions: list[tuple[float, float, float, float]]
     """Doors/windows as (x_min, z_min, x_max, z_max) in wall-local coordinates."""
+
+    boundary_polygon: list[tuple[float, float]] = field(default_factory=list)
+    """Optional exact wall-local (X, Z) panel boundary for irregular walls."""
 
     @property
     def length(self) -> float:
@@ -115,8 +118,12 @@ class WallSurface:
         Returns:
             True if point is valid for placement, False otherwise.
         """
-        # Check wall bounds.
+        # Check wall bounds and, for structural panels, the exact local polygon.
         if not (0 <= position_x <= self.length and 0 <= position_z <= self.height):
+            return False
+        if self.boundary_polygon and not _point_in_polygon(
+            (position_x, position_z), self.boundary_polygon
+        ):
             return False
 
         # Check excluded regions (doors/windows).
@@ -157,6 +164,16 @@ class WallSurface:
             return False, f"Object extends beyond wall width (0 to {self.length:.2f}m)"
         if obj_z_min < 0 or obj_z_max > self.height:
             return False, f"Object extends beyond wall height (0 to {self.height:.2f}m)"
+        if self.boundary_polygon and not all(
+            _point_in_polygon(corner, self.boundary_polygon)
+            for corner in (
+                (obj_x_min, obj_z_min),
+                (obj_x_min, obj_z_max),
+                (obj_x_max, obj_z_min),
+                (obj_x_max, obj_z_max),
+            )
+        ):
+            return False, "Object extends beyond the authored wall panel boundary"
 
         # Check excluded regions (doors/windows).
         for x_min, z_min, x_max, z_max in self.excluded_regions:
@@ -184,6 +201,7 @@ class WallSurface:
             "bounding_box_max": self.bounding_box_max,
             "transform": _rigid_transform_to_list(self.transform),
             "excluded_regions": list(self.excluded_regions),
+            "boundary_polygon": [list(point) for point in self.boundary_polygon],
         }
 
     @classmethod
@@ -197,7 +215,34 @@ class WallSurface:
             bounding_box_max=data["bounding_box_max"],
             transform=_list_to_rigid_transform(data["transform"]),
             excluded_regions=[tuple(r) for r in data["excluded_regions"]],
+            boundary_polygon=[
+                tuple(point) for point in data.get("boundary_polygon", [])
+            ],
         )
+
+
+def _point_in_polygon(
+    point: tuple[float, float], polygon: list[tuple[float, float]]
+) -> bool:
+    """Boundary-inclusive ray test for a simple wall-local polygon."""
+
+    x, z = point
+    inside = False
+    previous = polygon[-1]
+    for current in polygon:
+        x1, z1 = previous
+        x2, z2 = current
+        cross = (x - x1) * (z2 - z1) - (z - z1) * (x2 - x1)
+        dot = (x - x1) * (x2 - x1) + (z - z1) * (z2 - z1)
+        squared_length = (x2 - x1) ** 2 + (z2 - z1) ** 2
+        if abs(cross) <= 1e-8 and -1e-8 <= dot <= squared_length + 1e-8:
+            return True
+        if (z1 > z) != (z2 > z):
+            crossing_x = x1 + (z - z1) * (x2 - x1) / (z2 - z1)
+            if crossing_x > x:
+                inside = not inside
+        previous = current
+    return inside
 
 
 def _rigid_transform_to_list(transform: RigidTransform) -> list[float]:
@@ -323,6 +368,12 @@ def extract_wall_surfaces(
     if placed_room is None:
         raise ValueError(f"Room '{room_id}' not found in house layout")
 
+    room_geometry = house_layout.get_room_geometry(room_id)
+    if room_geometry is not None:
+        structural_surfaces = _extract_structural_wall_surfaces(room_geometry)
+        if structural_surfaces:
+            return structural_surfaces
+
     # Compute offset to transform from house coords to room-local coords.
     # House coords: room corner at placed_room.position.
     # Room-local coords: room center at origin.
@@ -343,6 +394,87 @@ def extract_wall_surfaces(
         wall_surfaces.append(surface)
 
     return wall_surfaces
+
+
+def _extract_structural_wall_surfaces(
+    room_geometry: RoomGeometry,
+) -> list[WallSurface]:
+    """Adapt arbitrary authored attachment patches to the wall-agent contract."""
+
+    from scenesmith.agent_utils.structural_geometry import SurfaceRole
+    from scenesmith.agent_utils.structural_surfaces import load_surface_patches
+
+    sidecar_paths = [
+        path
+        for path in (
+            room_geometry.structural_surface_path,
+            *room_geometry.additional_structural_surface_paths,
+        )
+        if path is not None and path.exists()
+    ]
+    patches = [
+        patch
+        for path in sidecar_paths
+        for patch in load_surface_patches(path)
+        if SurfaceRole.BOUNDARY in patch.surface.roles
+        and SurfaceRole.ATTACHMENT in patch.surface.roles
+    ]
+    surfaces: list[WallSurface] = []
+    for patch in patches:
+        inward = np.asarray(patch.normal, dtype=float)
+        inward /= np.linalg.norm(inward)
+        outward = -inward
+        world_up = np.array([0.0, 0.0, 1.0])
+        local_z = world_up - inward * float(np.dot(world_up, inward))
+        local_z_norm = float(np.linalg.norm(local_z))
+        if local_z_norm <= 1e-8:
+            # A horizontal attachment patch belongs to floor/ceiling tooling.
+            continue
+        local_z /= local_z_norm
+        local_x = np.cross(outward, local_z)
+        local_x /= np.linalg.norm(local_x)
+
+        base = np.asarray(patch.boundary[0], dtype=float)
+        projected = [
+            (
+                float(np.dot(np.asarray(point) - base, local_x)),
+                float(np.dot(np.asarray(point) - base, local_z)),
+            )
+            for point in patch.boundary
+        ]
+        min_x = min(point[0] for point in projected)
+        min_z = min(point[1] for point in projected)
+        max_x = max(point[0] for point in projected)
+        max_z = max(point[1] for point in projected)
+        if max_x - min_x <= 1e-8 or max_z - min_z <= 1e-8:
+            continue
+        origin = base + local_x * min_x + local_z * min_z
+        boundary = [(x - min_x, z - min_z) for x, z in projected]
+        rotation = RotationMatrix(np.column_stack((local_x, outward, local_z)))
+
+        xy_normal = inward[:2]
+        directions = tuple(WallDirection)
+        direction = max(
+            directions,
+            key=lambda candidate: float(
+                np.dot(xy_normal, np.asarray(candidate.get_inward_normal()))
+            ),
+        )
+        surfaces.append(
+            WallSurface(
+                surface_id=UniqueID(patch.surface.surface_id),
+                wall_id=patch.surface.surface_id,
+                # Nearest cardinal direction is retained only as a legacy view
+                # hint; the actual arbitrary plane is encoded by transform.
+                wall_direction=direction,
+                bounding_box_min=[0.0, 0.0, 0.0],
+                bounding_box_max=[max_x - min_x, 0.0, max_z - min_z],
+                transform=RigidTransform(R=rotation, p=origin),
+                excluded_regions=[],
+                boundary_polygon=boundary,
+            )
+        )
+    return surfaces
 
 
 def _create_wall_surface(

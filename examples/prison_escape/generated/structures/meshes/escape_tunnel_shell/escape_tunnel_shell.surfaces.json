@@ -1,0 +1,8653 @@
+{
+  "bounds": [
+    [
+      6.91001241427,
+      -1.80609029836,
+      -5.0
+    ],
+    [
+      76.1500833102,
+      12.5024993059,
+      3.0
+    ]
+  ],
+  "collision_triangles": 176,
+  "mesh": "escape_tunnel_shell.obj",
+  "schema_version": 1,
+  "structure_id": "escape_tunnel_shell",
+  "surfaces": [
+    {
+      "boundary": [
+        [
+          7.0848939488,
+          -1.69787897609,
+          0.0
+        ],
+        [
+          10.8317743985,
+          2.09253801732,
+          -0.2
+        ],
+        [
+          6.9151060512,
+          1.69787897609,
+          0.0
+        ]
+      ],
+      "geometry_ref": "triangle:0",
+      "id": "escape_tunnel_shell_tunnel_floor_000000",
+      "metadata": {
+        "annotation_id": "tunnel_floor",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        0.05074221277752589,
+        0.0025371106387417964,
+        0.9987085615493877
+      ],
+      "roles": [
+        "support",
+        "traversable"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          7.0848939488,
+          -1.69787897609,
+          0.0
+        ],
+        [
+          11.1682256015,
+          -1.69253801732,
+          -0.2
+        ],
+        [
+          10.8317743985,
+          2.09253801732,
+          -0.2
+        ]
+      ],
+      "geometry_ref": "triangle:1",
+      "id": "escape_tunnel_shell_tunnel_floor_000001",
+      "metadata": {
+        "annotation_id": "tunnel_floor",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        0.04891483045023161,
+        0.004347984927887109,
+        0.9987934893605845
+      ],
+      "roles": [
+        "support",
+        "traversable"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          6.9151060512,
+          1.69787897609,
+          0.0
+        ],
+        [
+          10.8216808624,
+          2.20609029836,
+          0.44
+        ],
+        [
+          6.91001241427,
+          1.79975171466,
+          0.6
+        ]
+      ],
+      "geometry_ref": "triangle:2",
+      "id": "escape_tunnel_shell_tunnel_walls_000002",
+      "metadata": {
+        "annotation_id": "tunnel_walls",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        0.1086339771912553,
+        -0.9799030892160777,
+        0.1672979221161985
+      ],
+      "roles": [
+        "attachment",
+        "boundary"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          6.9151060512,
+          1.69787897609,
+          0.0
+        ],
+        [
+          10.8317743985,
+          2.09253801732,
+          -0.2
+        ],
+        [
+          10.8216808624,
+          2.20609029836,
+          0.44
+        ]
+      ],
+      "geometry_ref": "triangle:3",
+      "id": "escape_tunnel_shell_tunnel_walls_000003",
+      "metadata": {
+        "annotation_id": "tunnel_walls",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        0.10756220271254065,
+        -0.9786166318830005,
+        0.1753278652969866
+      ],
+      "roles": [
+        "attachment",
+        "boundary"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          6.91001241427,
+          1.79975171466,
+          0.6
+        ],
+        [
+          10.8317743985,
+          2.09253801732,
+          1.976
+        ],
+        [
+          6.9151060512,
+          1.69787897609,
+          2.04
+        ]
+      ],
+      "geometry_ref": "triangle:4",
+      "id": "escape_tunnel_shell_tunnel_walls_000004",
+      "metadata": {
+        "annotation_id": "tunnel_walls",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        0.09886468872906648,
+        -0.9925953516018484,
+        -0.07057082471466372
+      ],
+      "roles": [
+        "attachment",
+        "boundary"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          6.91001241427,
+          1.79975171466,
+          0.6
+        ],
+        [
+          10.8216808624,
+          2.20609029836,
+          0.44
+        ],
+        [
+          10.8317743985,
+          2.09253801732,
+          1.976
+        ]
+      ],
+      "geometry_ref": "triangle:5",
+      "id": "escape_tunnel_shell_tunnel_walls_000005",
+      "metadata": {
+        "annotation_id": "tunnel_walls",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        0.10004385008972248,
+        -0.9922266598003453,
+        -0.07401002392024288
+      ],
+      "roles": [
+        "attachment",
+        "boundary"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          6.9151060512,
+          1.69787897609,
+          2.04
+        ],
+        [
+          10.9057936631,
+          1.2598212897,
+          3.0
+        ],
+        [
+          6.95245938867,
+          0.950812226612,
+          3.0
+        ]
+      ],
+      "geometry_ref": "triangle:6",
+      "id": "escape_tunnel_shell_tunnel_walls_000006",
+      "metadata": {
+        "annotation_id": "tunnel_walls",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        0.06147917086705579,
+        -0.786539109641113,
+        -0.6144725710350826
+      ],
+      "roles": [
+        "attachment",
+        "boundary"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          6.9151060512,
+          1.69787897609,
+          2.04
+        ],
+        [
+          10.8317743985,
+          2.09253801732,
+          1.976
+        ],
+        [
+          10.9057936631,
+          1.2598212897,
+          3.0
+        ]
+      ],
+      "geometry_ref": "triangle:7",
+      "id": "escape_tunnel_shell_tunnel_walls_000007",
+      "metadata": {
+        "annotation_id": "tunnel_walls",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        0.06742478737516051,
+        -0.7716913544492117,
+        -0.6324131177606579
+      ],
+      "roles": [
+        "attachment",
+        "boundary"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          6.95245938867,
+          0.950812226612,
+          3.0
+        ],
+        [
+          11.0942063369,
+          -0.859821289697,
+          3.0
+        ],
+        [
+          7.04754061133,
+          -0.950812226612,
+          3.0
+        ]
+      ],
+      "geometry_ref": "triangle:8",
+      "id": "escape_tunnel_shell_tunnel_overhead_000008",
+      "metadata": {
+        "annotation_id": "tunnel_overhead",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        0.0,
+        0.0,
+        -1.0
+      ],
+      "roles": [
+        "attachment",
+        "overhead"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          6.95245938867,
+          0.950812226612,
+          3.0
+        ],
+        [
+          10.9057936631,
+          1.2598212897,
+          3.0
+        ],
+        [
+          11.0942063369,
+          -0.859821289697,
+          3.0
+        ]
+      ],
+      "geometry_ref": "triangle:9",
+      "id": "escape_tunnel_shell_tunnel_overhead_000009",
+      "metadata": {
+        "annotation_id": "tunnel_overhead",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        0.0,
+        0.0,
+        -1.0
+      ],
+      "roles": [
+        "attachment",
+        "overhead"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          7.04754061133,
+          -0.950812226612,
+          3.0
+        ],
+        [
+          11.1682256015,
+          -1.69253801732,
+          1.976
+        ],
+        [
+          7.0848939488,
+          -1.69787897609,
+          2.04
+        ]
+      ],
+      "geometry_ref": "triangle:10",
+      "id": "escape_tunnel_shell_tunnel_walls_000010",
+      "metadata": {
+        "annotation_id": "tunnel_walls",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        -0.010661231822128628,
+        0.7889468500567935,
+        -0.6143689493468059
+      ],
+      "roles": [
+        "attachment",
+        "boundary"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          7.04754061133,
+          -0.950812226612,
+          3.0
+        ],
+        [
+          11.0942063369,
+          -0.859821289697,
+          3.0
+        ],
+        [
+          11.1682256015,
+          -1.69253801732,
+          1.976
+        ]
+      ],
+      "geometry_ref": "triangle:11",
+      "id": "escape_tunnel_shell_tunnel_walls_000011",
+      "metadata": {
+        "annotation_id": "tunnel_walls",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        -0.017428739319569453,
+        0.7751132633163288,
+        -0.6315818775715798
+      ],
+      "roles": [
+        "attachment",
+        "boundary"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          7.0848939488,
+          -1.69787897609,
+          2.04
+        ],
+        [
+          11.1783191376,
+          -1.80609029836,
+          0.44
+        ],
+        [
+          7.08998758573,
+          -1.79975171466,
+          0.6
+        ]
+      ],
+      "geometry_ref": "triangle:12",
+      "id": "escape_tunnel_shell_tunnel_walls_000012",
+      "metadata": {
+        "annotation_id": "tunnel_walls",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        -0.0012153796924255457,
+        0.9975058903254973,
+        -0.07057281075697903
+      ],
+      "roles": [
+        "attachment",
+        "boundary"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          7.0848939488,
+          -1.69787897609,
+          2.04
+        ],
+        [
+          11.1682256015,
+          -1.69253801732,
+          1.976
+        ],
+        [
+          11.1783191376,
+          -1.80609029836,
+          0.44
+        ]
+      ],
+      "geometry_ref": "triangle:13",
+      "id": "escape_tunnel_shell_tunnel_walls_000013",
+      "metadata": {
+        "annotation_id": "tunnel_walls",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        -0.0024602176599425175,
+        0.9972743227907466,
+        -0.07374193129640302
+      ],
+      "roles": [
+        "attachment",
+        "boundary"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          7.08998758573,
+          -1.79975171466,
+          0.6
+        ],
+        [
+          11.1682256015,
+          -1.69253801732,
+          -0.2
+        ],
+        [
+          7.0848939488,
+          -1.69787897609,
+          0.0
+        ]
+      ],
+      "geometry_ref": "triangle:14",
+      "id": "escape_tunnel_shell_tunnel_walls_000014",
+      "metadata": {
+        "annotation_id": "tunnel_walls",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        0.006906303802819545,
+        0.985876537709729,
+        0.1673312743071669
+      ],
+      "roles": [
+        "attachment",
+        "boundary"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          7.08998758573,
+          -1.79975171466,
+          0.6
+        ],
+        [
+          11.1783191376,
+          -1.80609029836,
+          0.44
+        ],
+        [
+          11.1682256015,
+          -1.69253801732,
+          -0.2
+        ]
+      ],
+      "geometry_ref": "triangle:15",
+      "id": "escape_tunnel_shell_tunnel_walls_000015",
+      "metadata": {
+        "annotation_id": "tunnel_walls",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        0.008358210921479082,
+        0.9846105081925993,
+        0.1745631331836811
+      ],
+      "roles": [
+        "attachment",
+        "boundary"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          11.1682256015,
+          -1.69253801732,
+          -0.2
+        ],
+        [
+          15.6905293317,
+          2.92761084446,
+          -0.7
+        ],
+        [
+          10.8317743985,
+          2.09253801732,
+          -0.2
+        ]
+      ],
+      "geometry_ref": "triangle:16",
+      "id": "escape_tunnel_shell_tunnel_floor_000016",
+      "metadata": {
+        "annotation_id": "tunnel_floor",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        0.10083780682505693,
+        0.008963360604564118,
+        0.9948625004900854
+      ],
+      "roles": [
+        "support",
+        "traversable"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          11.1682256015,
+          -1.69253801732,
+          -0.2
+        ],
+        [
+          16.3094706683,
+          -1.32761084446,
+          -0.7
+        ],
+        [
+          15.6905293317,
+          2.92761084446,
+          -0.7
+        ]
+      ],
+      "geometry_ref": "triangle:17",
+      "id": "escape_tunnel_shell_tunnel_floor_000017",
+      "metadata": {
+        "annotation_id": "tunnel_floor",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        0.0958067055063184,
+        0.013935520801590415,
+        0.9953024045183525
+      ],
+      "roles": [
+        "support",
+        "traversable"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          10.8317743985,
+          2.09253801732,
+          -0.2
+        ],
+        [
+          15.6719610916,
+          3.05526749513,
+          1.11022302463e-16
+        ],
+        [
+          10.8216808624,
+          2.20609029836,
+          0.44
+        ]
+      ],
+      "geometry_ref": "triangle:18",
+      "id": "escape_tunnel_shell_tunnel_walls_000018",
+      "metadata": {
+        "annotation_id": "tunnel_walls",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        0.18514721585319846,
+        -0.967092491506061,
+        0.17450679452218598
+      ],
+      "roles": [
+        "attachment",
+        "boundary"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          10.8317743985,
+          2.09253801732,
+          -0.2
+        ],
+        [
+          15.6905293317,
+          2.92761084446,
+          -0.7
+        ],
+        [
+          15.6719610916,
+          3.05526749513,
+          1.11022302463e-16
+        ]
+      ],
+      "geometry_ref": "triangle:19",
+      "id": "escape_tunnel_shell_tunnel_walls_000019",
+      "metadata": {
+        "annotation_id": "tunnel_walls",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        0.1846553234624632,
+        -0.9659810365536443,
+        0.18106089731281008
+      ],
+      "roles": [
+        "attachment",
+        "boundary"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          10.8216808624,
+          2.20609029836,
+          0.44
+        ],
+        [
+          15.6905293317,
+          2.92761084446,
+          1.68
+        ],
+        [
+          10.8317743985,
+          2.09253801732,
+          1.976
+        ]
+      ],
+      "geometry_ref": "triangle:20",
+      "id": "escape_tunnel_shell_tunnel_walls_000020",
+      "metadata": {
+        "annotation_id": "tunnel_walls",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        0.1645558685728377,
+        -0.9836032990628798,
+        -0.07379645107224371
+      ],
+      "roles": [
+        "attachment",
+        "boundary"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          10.8216808624,
+          2.20609029836,
+          0.44
+        ],
+        [
+          15.6719610916,
+          3.05526749513,
+          1.11022302463e-16
+        ],
+        [
+          15.6905293317,
+          2.92761084446,
+          1.68
+        ]
+      ],
+      "geometry_ref": "triangle:21",
+      "id": "escape_tunnel_shell_tunnel_walls_000021",
+      "metadata": {
+        "annotation_id": "tunnel_walls",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        0.16520778400755465,
+        -0.9832841536330442,
+        -0.0765418925651911
+      ],
+      "roles": [
+        "attachment",
+        "boundary"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          10.8317743985,
+          2.09253801732,
+          1.976
+        ],
+        [
+          15.8266964258,
+          1.9914620729,
+          2.8
+        ],
+        [
+          10.9057936631,
+          1.2598212897,
+          3.0
+        ]
+      ],
+      "geometry_ref": "triangle:22",
+      "id": "escape_tunnel_shell_tunnel_walls_000022",
+      "metadata": {
+        "annotation_id": "tunnel_walls",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        0.08873212920368576,
+        -0.7696385878690611,
+        -0.6322839973539564
+      ],
+      "roles": [
+        "attachment",
+        "boundary"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          10.8317743985,
+          2.09253801732,
+          1.976
+        ],
+        [
+          15.6905293317,
+          2.92761084446,
+          1.68
+        ],
+        [
+          15.8266964258,
+          1.9914620729,
+          2.8
+        ]
+      ],
+      "geometry_ref": "triangle:23",
+      "id": "escape_tunnel_shell_tunnel_walls_000023",
+      "metadata": {
+        "annotation_id": "tunnel_walls",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        0.09107818183380438,
+        -0.758606369760849,
+        -0.645152029022706
+      ],
+      "roles": [
+        "attachment",
+        "boundary"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          10.9057936631,
+          1.2598212897,
+          3.0
+        ],
+        [
+          16.1733035742,
+          -0.391462072899,
+          2.8
+        ],
+        [
+          11.0942063369,
+          -0.859821289697,
+          3.0
+        ]
+      ],
+      "geometry_ref": "triangle:24",
+      "id": "escape_tunnel_shell_tunnel_overhead_000024",
+      "metadata": {
+        "annotation_id": "tunnel_overhead",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        -0.03902694729465346,
+        -0.0034690619831429883,
+        -0.9992321366898772
+      ],
+      "roles": [
+        "attachment",
+        "overhead"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          10.9057936631,
+          1.2598212897,
+          3.0
+        ],
+        [
+          15.8266964258,
+          1.9914620729,
+          2.8
+        ],
+        [
+          16.1733035742,
+          -0.391462072899,
+          2.8
+        ]
+      ],
+      "geometry_ref": "triangle:25",
+      "id": "escape_tunnel_shell_tunnel_overhead_000025",
+      "metadata": {
+        "annotation_id": "tunnel_overhead",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        -0.0397504938730676,
+        -0.005781890016568633,
+        -0.9991929082938307
+      ],
+      "roles": [
+        "attachment",
+        "overhead"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          11.0942063369,
+          -0.859821289697,
+          3.0
+        ],
+        [
+          16.3094706683,
+          -1.32761084446,
+          1.68
+        ],
+        [
+          11.1682256015,
+          -1.69253801732,
+          1.976
+        ]
+      ],
+      "geometry_ref": "triangle:26",
+      "id": "escape_tunnel_shell_tunnel_walls_000026",
+      "metadata": {
+        "annotation_id": "tunnel_walls",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        -0.09101316744974286,
+        0.7693976758678728,
+        -0.6322529713017415
+      ],
+      "roles": [
+        "attachment",
+        "boundary"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          11.0942063369,
+          -0.859821289697,
+          3.0
+        ],
+        [
+          16.1733035742,
+          -0.391462072899,
+          2.8
+        ],
+        [
+          16.3094706683,
+          -1.32761084446,
+          1.68
+        ]
+      ],
+      "geometry_ref": "triangle:27",
+      "id": "escape_tunnel_shell_tunnel_walls_000027",
+      "metadata": {
+        "annotation_id": "tunnel_walls",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        -0.09530787920928323,
+        0.758046910398711,
+        -0.645198643671542
+      ],
+      "roles": [
+        "attachment",
+        "boundary"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          11.1682256015,
+          -1.69253801732,
+          1.976
+        ],
+        [
+          16.3280389084,
+          -1.45526749513,
+          1.11022302463e-16
+        ],
+        [
+          11.1783191376,
+          -1.80609029836,
+          0.44
+        ]
+      ],
+      "geometry_ref": "triangle:28",
+      "id": "escape_tunnel_shell_tunnel_walls_000028",
+      "metadata": {
+        "annotation_id": "tunnel_walls",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        -0.07407347749276838,
+        0.994502885470501,
+        -0.07400763962575728
+      ],
+      "roles": [
+        "attachment",
+        "boundary"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          11.1682256015,
+          -1.69253801732,
+          1.976
+        ],
+        [
+          16.3094706683,
+          -1.32761084446,
+          1.68
+        ],
+        [
+          16.3280389084,
+          -1.45526749513,
+          1.11022302463e-16
+        ]
+      ],
+      "geometry_ref": "triangle:29",
+      "id": "escape_tunnel_shell_tunnel_walls_000029",
+      "metadata": {
+        "annotation_id": "tunnel_walls",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        -0.07497000337702002,
+        0.9942564343349116,
+        -0.07637827817696054
+      ],
+      "roles": [
+        "attachment",
+        "boundary"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          11.1783191376,
+          -1.80609029836,
+          0.44
+        ],
+        [
+          16.3094706683,
+          -1.32761084446,
+          -0.7
+        ],
+        [
+          11.1682256015,
+          -1.69253801732,
+          -0.2
+        ]
+      ],
+      "geometry_ref": "triangle:30",
+      "id": "escape_tunnel_shell_tunnel_walls_000030",
+      "metadata": {
+        "annotation_id": "tunnel_walls",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        -0.052736830094812705,
+        0.9831086844114053,
+        0.17526021050548474
+      ],
+      "roles": [
+        "attachment",
+        "boundary"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          11.1783191376,
+          -1.80609029836,
+          0.44
+        ],
+        [
+          16.3280389084,
+          -1.45526749513,
+          1.11022302463e-16
+        ],
+        [
+          16.3094706683,
+          -1.32761084446,
+          -0.7
+        ]
+      ],
+      "geometry_ref": "triangle:31",
+      "id": "escape_tunnel_shell_tunnel_walls_000031",
+      "metadata": {
+        "annotation_id": "tunnel_walls",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        -0.05149244200777188,
+        0.9822277524199868,
+        0.1804914701365614
+      ],
+      "roles": [
+        "attachment",
+        "boundary"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          16.3094706683,
+          -1.32761084446,
+          -0.7
+        ],
+        [
+          21.9261887781,
+          4.19886471138,
+          -1.3
+        ],
+        [
+          15.6905293317,
+          2.92761084446,
+          -0.7
+        ]
+      ],
+      "geometry_ref": "triangle:32",
+      "id": "escape_tunnel_shell_tunnel_floor_000032",
+      "metadata": {
+        "annotation_id": "tunnel_floor",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        0.09303575300368873,
+        0.013532473164824862,
+        0.9955708015169388
+      ],
+      "roles": [
+        "support",
+        "traversable"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          16.3094706683,
+          -1.32761084446,
+          -0.7
+        ],
+        [
+          22.0738112219,
+          -0.598864711384,
+          -1.3
+        ],
+        [
+          21.9261887781,
+          4.19886471138,
+          -1.3
+        ]
+      ],
+      "geometry_ref": "triangle:33",
+      "id": "escape_tunnel_shell_tunnel_floor_000033",
+      "metadata": {
+        "annotation_id": "tunnel_floor",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        0.10313149999712246,
+        0.0031732769234752525,
+        0.9946626684569551
+      ],
+      "roles": [
+        "support",
+        "traversable"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          15.6905293317,
+          2.92761084446,
+          -0.7
+        ],
+        [
+          21.9217601048,
+          4.34279659407,
+          -0.54
+        ],
+        [
+          15.6719610916,
+          3.05526749513,
+          1.11022302463e-16
+        ]
+      ],
+      "geometry_ref": "triangle:34",
+      "id": "escape_tunnel_shell_tunnel_walls_000034",
+      "metadata": {
+        "annotation_id": "tunnel_walls",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        0.2134081562809274,
+        -0.9600969748498562,
+        0.18075054001836313
+      ],
+      "roles": [
+        "attachment",
+        "boundary"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          15.6905293317,
+          2.92761084446,
+          -0.7
+        ],
+        [
+          21.9261887781,
+          4.19886471138,
+          -1.3
+        ],
+        [
+          21.9217601048,
+          4.34279659407,
+          -0.54
+        ]
+      ],
+      "geometry_ref": "triangle:35",
+      "id": "escape_tunnel_shell_tunnel_walls_000035",
+      "metadata": {
+        "annotation_id": "tunnel_walls",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        0.2132613270588231,
+        -0.95970427130029,
+        0.18299540439335957
+      ],
+      "roles": [
+        "attachment",
+        "boundary"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          15.6719610916,
+          3.05526749513,
+          1.11022302463e-16
+        ],
+        [
+          21.9261887781,
+          4.19886471138,
+          1.284
+        ],
+        [
+          15.6905293317,
+          2.92761084446,
+          1.68
+        ]
+      ],
+      "geometry_ref": "triangle:36",
+      "id": "escape_tunnel_shell_tunnel_walls_000036",
+      "metadata": {
+        "annotation_id": "tunnel_walls",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        0.1945106616606794,
+        -0.9779160484666345,
+        -0.07645786193536731
+      ],
+      "roles": [
+        "attachment",
+        "boundary"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          15.6719610916,
+          3.05526749513,
+          1.11022302463e-16
+        ],
+        [
+          21.9217601048,
+          4.34279659407,
+          -0.54
+        ],
+        [
+          21.9261887781,
+          4.19886471138,
+          1.284
+        ]
+      ],
+      "geometry_ref": "triangle:37",
+      "id": "escape_tunnel_shell_tunnel_walls_000037",
+      "metadata": {
+        "annotation_id": "tunnel_walls",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        0.19472646723650125,
+        -0.9777807850377515,
+        -0.07762950063313788
+      ],
+      "roles": [
+        "attachment",
+        "boundary"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          15.6905293317,
+          2.92761084446,
+          1.68
+        ],
+        [
+          21.9586657157,
+          3.14336423838,
+          2.5
+        ],
+        [
+          15.8266964258,
+          1.9914620729,
+          2.8
+        ]
+      ],
+      "geometry_ref": "triangle:38",
+      "id": "escape_tunnel_shell_tunnel_walls_000038",
+      "metadata": {
+        "annotation_id": "tunnel_walls",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        0.11043401730695455,
+        -0.7559311856077021,
+        -0.6452692232294837
+      ],
+      "roles": [
+        "attachment",
+        "boundary"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          15.6905293317,
+          2.92761084446,
+          1.68
+        ],
+        [
+          21.9261887781,
+          4.19886471138,
+          1.284
+        ],
+        [
+          21.9586657157,
+          3.14336423838,
+          2.5
+        ]
+      ],
+      "geometry_ref": "triangle:39",
+      "id": "escape_tunnel_shell_tunnel_walls_000039",
+      "metadata": {
+        "annotation_id": "tunnel_walls",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        0.11122542144244052,
+        -0.749028440621309,
+        -0.6531349789785889
+      ],
+      "roles": [
+        "attachment",
+        "boundary"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          15.8266964258,
+          1.9914620729,
+          2.8
+        ],
+        [
+          22.0413342843,
+          0.456635761625,
+          2.5
+        ],
+        [
+          16.1733035742,
+          -0.391462072899,
+          2.8
+        ]
+      ],
+      "geometry_ref": "triangle:40",
+      "id": "escape_tunnel_shell_tunnel_overhead_000040",
+      "metadata": {
+        "annotation_id": "tunnel_overhead",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        -0.05000787477757984,
+        -0.007273872693244854,
+        -0.9987223354047272
+      ],
+      "roles": [
+        "attachment",
+        "overhead"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          15.8266964258,
+          1.9914620729,
+          2.8
+        ],
+        [
+          21.9586657157,
+          3.14336423838,
+          2.5
+        ],
+        [
+          22.0413342843,
+          0.456635761625,
+          2.5
+        ]
+      ],
+      "geometry_ref": "triangle:41",
+      "id": "escape_tunnel_shell_tunnel_overhead_000041",
+      "metadata": {
+        "annotation_id": "tunnel_overhead",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        -0.04858526638117592,
+        -0.0014949312747942975,
+        -0.9988179198788706
+      ],
+      "roles": [
+        "attachment",
+        "overhead"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          16.1733035742,
+          -0.391462072899,
+          2.8
+        ],
+        [
+          22.0738112219,
+          -0.598864711384,
+          1.284
+        ],
+        [
+          16.3094706683,
+          -1.32761084446,
+          1.68
+        ]
+      ],
+      "geometry_ref": "triangle:42",
+      "id": "escape_tunnel_shell_tunnel_walls_000042",
+      "metadata": {
+        "annotation_id": "tunnel_walls",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        -0.1393026215798941,
+        0.7513917176562067,
+        -0.6449847023446558
+      ],
+      "roles": [
+        "attachment",
+        "boundary"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          16.1733035742,
+          -0.391462072899,
+          2.8
+        ],
+        [
+          22.0413342843,
+          0.456635761625,
+          2.5
+        ],
+        [
+          22.0738112219,
+          -0.598864711384,
+          1.284
+        ]
+      ],
+      "geometry_ref": "triangle:43",
+      "id": "escape_tunnel_shell_tunnel_walls_000043",
+      "metadata": {
+        "annotation_id": "tunnel_walls",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        -0.1410716434753435,
+        0.7457661105255465,
+        -0.6511003761316407
+      ],
+      "roles": [
+        "attachment",
+        "boundary"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          16.3094706683,
+          -1.32761084446,
+          1.68
+        ],
+        [
+          22.0782398952,
+          -0.742796594067,
+          -0.54
+        ],
+        [
+          16.3280389084,
+          -1.45526749513,
+          1.11022302463e-16
+        ]
+      ],
+      "geometry_ref": "triangle:44",
+      "id": "escape_tunnel_shell_tunnel_walls_000044",
+      "metadata": {
+        "annotation_id": "tunnel_walls",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        -0.1296797646370606,
+        0.9885963868531176,
+        -0.07655287417620522
+      ],
+      "roles": [
+        "attachment",
+        "boundary"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          16.3094706683,
+          -1.32761084446,
+          1.68
+        ],
+        [
+          22.0738112219,
+          -0.598864711384,
+          1.284
+        ],
+        [
+          22.0782398952,
+          -0.742796594067,
+          -0.54
+        ]
+      ],
+      "geometry_ref": "triangle:45",
+      "id": "escape_tunnel_shell_tunnel_walls_000045",
+      "metadata": {
+        "annotation_id": "tunnel_walls",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        -0.1303329139728258,
+        0.9883729232216549,
+        -0.07830897890812251
+      ],
+      "roles": [
+        "attachment",
+        "boundary"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          16.3280389084,
+          -1.45526749513,
+          1.11022302463e-16
+        ],
+        [
+          22.0738112219,
+          -0.598864711384,
+          -1.3
+        ],
+        [
+          16.3094706683,
+          -1.32761084446,
+          -0.7
+        ]
+      ],
+      "geometry_ref": "triangle:46",
+      "id": "escape_tunnel_shell_tunnel_walls_000046",
+      "metadata": {
+        "annotation_id": "tunnel_walls",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        -0.10477355285249172,
+        0.9778659925030305,
+        0.1811093684178958
+      ],
+      "roles": [
+        "attachment",
+        "boundary"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          16.3280389084,
+          -1.45526749513,
+          1.11022302463e-16
+        ],
+        [
+          22.0782398952,
+          -0.742796594067,
+          -0.54
+        ],
+        [
+          22.0738112219,
+          -0.598864711384,
+          -1.3
+        ]
+      ],
+      "geometry_ref": "triangle:47",
+      "id": "escape_tunnel_shell_tunnel_walls_000047",
+      "metadata": {
+        "annotation_id": "tunnel_walls",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        -0.10363542613257984,
+        0.977134066868489,
+        0.18565751752990176
+      ],
+      "roles": [
+        "attachment",
+        "boundary"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          22.0738112219,
+          -0.598864711384,
+          -1.3
+        ],
+        [
+          28.8951310044,
+          3.29737991164,
+          -2.0
+        ],
+        [
+          21.9261887781,
+          4.19886471138,
+          -1.3
+        ]
+      ],
+      "geometry_ref": "triangle:48",
+      "id": "escape_tunnel_shell_tunnel_floor_000048",
+      "metadata": {
+        "annotation_id": "tunnel_floor",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        0.10033764102741187,
+        0.00308731203208635,
+        0.994948655106117
+      ],
+      "roles": [
+        "support",
+        "traversable"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          22.0738112219,
+          -0.598864711384,
+          -1.3
+        ],
+        [
+          29.1048689956,
+          -0.897379911643,
+          -2.0
+        ],
+        [
+          28.8951310044,
+          3.29737991164,
+          -2.0
+        ]
+      ],
+      "geometry_ref": "triangle:49",
+      "id": "escape_tunnel_shell_tunnel_floor_000049",
+      "metadata": {
+        "annotation_id": "tunnel_floor",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        0.0992759670681112,
+        0.004963798354254029,
+        0.9950475581943757
+      ],
+      "roles": [
+        "support",
+        "traversable"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          21.9261887781,
+          4.19886471138,
+          -1.3
+        ],
+        [
+          28.8888388647,
+          3.42322270634,
+          -1.32
+        ],
+        [
+          21.9217601048,
+          4.34279659407,
+          -0.54
+        ]
+      ],
+      "geometry_ref": "triangle:50",
+      "id": "escape_tunnel_shell_tunnel_walls_000050",
+      "metadata": {
+        "annotation_id": "tunnel_walls",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        -0.10829432910474533,
+        -0.9768720281768348,
+        0.1843729341563732
+      ],
+      "roles": [
+        "attachment",
+        "boundary"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          21.9261887781,
+          4.19886471138,
+          -1.3
+        ],
+        [
+          28.8951310044,
+          3.29737991164,
+          -2.0
+        ],
+        [
+          28.8888388647,
+          3.42322270634,
+          -1.32
+        ]
+      ],
+      "geometry_ref": "triangle:51",
+      "id": "escape_tunnel_shell_tunnel_walls_000051",
+      "metadata": {
+        "annotation_id": "tunnel_walls",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        -0.10839804080290705,
+        -0.9776884706126052,
+        0.1799308733410594
+      ],
+      "roles": [
+        "attachment",
+        "boundary"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          21.9217601048,
+          4.34279659407,
+          -0.54
+        ],
+        [
+          28.8951310044,
+          3.29737991164,
+          0.312
+        ],
+        [
+          21.9261887781,
+          4.19886471138,
+          1.284
+        ]
+      ],
+      "geometry_ref": "triangle:52",
+      "id": "escape_tunnel_shell_tunnel_walls_000052",
+      "metadata": {
+        "annotation_id": "tunnel_walls",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        -0.13853605796278365,
+        -0.9873146628364216,
+        -0.07757265750466143
+      ],
+      "roles": [
+        "attachment",
+        "boundary"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          21.9217601048,
+          4.34279659407,
+          -0.54
+        ],
+        [
+          28.8888388647,
+          3.42322270634,
+          -1.32
+        ],
+        [
+          28.8951310044,
+          3.29737991164,
+          0.312
+        ]
+      ],
+      "geometry_ref": "triangle:53",
+      "id": "escape_tunnel_shell_tunnel_walls_000053",
+      "metadata": {
+        "annotation_id": "tunnel_walls",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        -0.13879388368160667,
+        -0.9874310626418156,
+        -0.07560525367083705
+      ],
+      "roles": [
+        "attachment",
+        "boundary"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          21.9261887781,
+          4.19886471138,
+          1.284
+        ],
+        [
+          28.9412733625,
+          2.37453275052,
+          1.4
+        ],
+        [
+          21.9586657157,
+          3.14336423838,
+          2.5
+        ]
+      ],
+      "geometry_ref": "triangle:54",
+      "id": "escape_tunnel_shell_tunnel_walls_000054",
+      "metadata": {
+        "annotation_id": "tunnel_walls",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        -0.18309104837651968,
+        -0.7448364434532136,
+        -0.6416356758382086
+      ],
+      "roles": [
+        "attachment",
+        "boundary"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          21.9261887781,
+          4.19886471138,
+          1.284
+        ],
+        [
+          28.8951310044,
+          3.29737991164,
+          0.312
+        ],
+        [
+          28.9412733625,
+          2.37453275052,
+          1.4
+        ]
+      ],
+      "geometry_ref": "triangle:55",
+      "id": "escape_tunnel_shell_tunnel_walls_000055",
+      "metadata": {
+        "annotation_id": "tunnel_walls",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        -0.18545445894337775,
+        -0.7532511151599902,
+        -0.631046274981677
+      ],
+      "roles": [
+        "attachment",
+        "boundary"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          21.9586657157,
+          3.14336423838,
+          2.5
+        ],
+        [
+          29.0587266375,
+          0.0254672494797,
+          1.4
+        ],
+        [
+          22.0413342843,
+          0.456635761625,
+          2.5
+        ]
+      ],
+      "geometry_ref": "triangle:56",
+      "id": "escape_tunnel_shell_tunnel_overhead_000056",
+      "metadata": {
+        "annotation_id": "tunnel_overhead",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        -0.15514682833677243,
+        -0.004773748569085612,
+        -0.987879887932556
+      ],
+      "roles": [
+        "attachment",
+        "overhead"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          21.9586657157,
+          3.14336423838,
+          2.5
+        ],
+        [
+          28.9412733625,
+          2.37453275052,
+          1.4
+        ],
+        [
+          29.0587266375,
+          0.0254672494797,
+          1.4
+        ]
+      ],
+      "geometry_ref": "triangle:57",
+      "id": "escape_tunnel_shell_tunnel_overhead_000057",
+      "metadata": {
+        "annotation_id": "tunnel_overhead",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        -0.15645078811556412,
+        -0.00782253940231409,
+        -0.9876547771237267
+      ],
+      "roles": [
+        "attachment",
+        "overhead"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          22.0413342843,
+          0.456635761625,
+          2.5
+        ],
+        [
+          29.1048689956,
+          -0.897379911643,
+          0.312
+        ],
+        [
+          22.0738112219,
+          -0.598864711384,
+          1.284
+        ]
+      ],
+      "geometry_ref": "triangle:58",
+      "id": "escape_tunnel_shell_tunnel_walls_000058",
+      "metadata": {
+        "annotation_id": "tunnel_walls",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        -0.058613057544367984,
+        0.7531128749512769,
+        -0.6552751384479065
+      ],
+      "roles": [
+        "attachment",
+        "boundary"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          22.0413342843,
+          0.456635761625,
+          2.5
+        ],
+        [
+          29.0587266375,
+          0.0254672494797,
+          1.4
+        ],
+        [
+          29.1048689956,
+          -0.897379911643,
+          0.312
+        ]
+      ],
+      "geometry_ref": "triangle:59",
+      "id": "escape_tunnel_shell_tunnel_walls_000059",
+      "metadata": {
+        "annotation_id": "tunnel_walls",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        -0.05473941485187123,
+        0.760324561564462,
+        -0.6472326919613095
+      ],
+      "roles": [
+        "attachment",
+        "boundary"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          22.0738112219,
+          -0.598864711384,
+          1.284
+        ],
+        [
+          29.1111611353,
+          -1.02322270634,
+          -1.32
+        ],
+        [
+          22.0782398952,
+          -0.742796594067,
+          -0.54
+        ]
+      ],
+      "geometry_ref": "triangle:60",
+      "id": "escape_tunnel_shell_tunnel_walls_000060",
+      "metadata": {
+        "annotation_id": "tunnel_walls",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        0.03101883897193635,
+        0.9964272635820581,
+        -0.07855278492329146
+      ],
+      "roles": [
+        "attachment",
+        "boundary"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          22.0738112219,
+          -0.598864711384,
+          1.284
+        ],
+        [
+          29.1048689956,
+          -0.897379911643,
+          0.312
+        ],
+        [
+          29.1111611353,
+          -1.02322270634,
+          -1.32
+        ]
+      ],
+      "geometry_ref": "triangle:61",
+      "id": "escape_tunnel_shell_tunnel_walls_000061",
+      "metadata": {
+        "annotation_id": "tunnel_walls",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        0.031703888074525975,
+        0.996548405945673,
+        -0.07672117105529758
+      ],
+      "roles": [
+        "attachment",
+        "boundary"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          22.0782398952,
+          -0.742796594067,
+          -0.54
+        ],
+        [
+          29.1048689956,
+          -0.897379911643,
+          -2.0
+        ],
+        [
+          22.0738112219,
+          -0.598864711384,
+          -1.3
+        ]
+      ],
+      "geometry_ref": "triangle:62",
+      "id": "escape_tunnel_shell_tunnel_walls_000062",
+      "metadata": {
+        "annotation_id": "tunnel_walls",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        0.0601007771440453,
+        0.9808231135384263,
+        0.18540204026781668
+      ],
+      "roles": [
+        "attachment",
+        "boundary"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          22.0782398952,
+          -0.742796594067,
+          -0.54
+        ],
+        [
+          29.1111611353,
+          -1.02322270634,
+          -1.32
+        ],
+        [
+          29.1048689956,
+          -0.897379911643,
+          -2.0
+        ]
+      ],
+      "geometry_ref": "triangle:63",
+      "id": "escape_tunnel_shell_tunnel_walls_000063",
+      "metadata": {
+        "annotation_id": "tunnel_walls",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        0.05923054236553093,
+        0.9816750904934606,
+        0.1811236029780244
+      ],
+      "roles": [
+        "attachment",
+        "boundary"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          29.1048689956,
+          -0.897379911643,
+          -2.0
+        ],
+        [
+          35.4761772782,
+          4.94450603519,
+          -2.7
+        ],
+        [
+          28.8951310044,
+          3.29737991164,
+          -2.0
+        ]
+      ],
+      "geometry_ref": "triangle:64",
+      "id": "escape_tunnel_shell_tunnel_floor_000064",
+      "metadata": {
+        "annotation_id": "tunnel_floor",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        0.10447509965385147,
+        0.0052237549835854775,
+        0.9945137836833582
+      ],
+      "roles": [
+        "support",
+        "traversable"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          29.1048689956,
+          -0.897379911643,
+          -2.0
+        ],
+        [
+          36.5238227218,
+          0.0554939648065,
+          -2.7
+        ],
+        [
+          35.4761772782,
+          4.94450603519,
+          -2.7
+        ]
+      ],
+      "geometry_ref": "triangle:65",
+      "id": "escape_tunnel_shell_tunnel_floor_000065",
+      "metadata": {
+        "annotation_id": "tunnel_floor",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        0.09142341350595301,
+        0.019590731464558996,
+        0.9956193864643271
+      ],
+      "roles": [
+        "support",
+        "traversable"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          28.8951310044,
+          3.29737991164,
+          -2.0
+        ],
+        [
+          35.4447479149,
+          5.09117639731,
+          -1.9
+        ],
+        [
+          28.8888388647,
+          3.42322270634,
+          -1.32
+        ]
+      ],
+      "geometry_ref": "triangle:66",
+      "id": "escape_tunnel_shell_tunnel_walls_000066",
+      "metadata": {
+        "annotation_id": "tunnel_walls",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        0.25739404908763774,
+        -0.9497436499884858,
+        0.17814405070284953
+      ],
+      "roles": [
+        "attachment",
+        "boundary"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          28.8951310044,
+          3.29737991164,
+          -2.0
+        ],
+        [
+          35.4761772782,
+          4.94450603519,
+          -2.7
+        ],
+        [
+          35.4447479149,
+          5.09117639731,
+          -1.9
+        ]
+      ],
+      "geometry_ref": "triangle:67",
+      "id": "escape_tunnel_shell_tunnel_walls_000067",
+      "metadata": {
+        "annotation_id": "tunnel_walls",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        0.2570238469673005,
+        -0.9487203001136855,
+        0.18403405728921
+      ],
+      "roles": [
+        "attachment",
+        "boundary"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          28.8888388647,
+          3.42322270634,
+          -1.32
+        ],
+        [
+          35.4761772782,
+          4.94450603519,
+          0.02
+        ],
+        [
+          28.8951310044,
+          3.29737991164,
+          0.312
+        ]
+      ],
+      "geometry_ref": "triangle:68",
+      "id": "escape_tunnel_shell_tunnel_walls_000068",
+      "metadata": {
+        "annotation_id": "tunnel_walls",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        0.23894335706808778,
+        -0.9680884414893669,
+        -0.07557011027993175
+      ],
+      "roles": [
+        "attachment",
+        "boundary"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          28.8888388647,
+          3.42322270634,
+          -1.32
+        ],
+        [
+          35.4447479149,
+          5.09117639731,
+          -1.9
+        ],
+        [
+          35.4761772782,
+          4.94450603519,
+          0.02
+        ]
+      ],
+      "geometry_ref": "triangle:69",
+      "id": "escape_tunnel_shell_tunnel_walls_000069",
+      "metadata": {
+        "annotation_id": "tunnel_walls",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        0.2393425625576471,
+        -0.9678091607621252,
+        -0.07784963772073496
+      ],
+      "roles": [
+        "attachment",
+        "boundary"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          28.8951310044,
+          3.29737991164,
+          0.312
+        ],
+        [
+          35.7066592758,
+          3.86892337971,
+          1.3
+        ],
+        [
+          28.9412733625,
+          2.37453275052,
+          1.4
+        ]
+      ],
+      "geometry_ref": "triangle:70",
+      "id": "escape_tunnel_shell_tunnel_walls_000070",
+      "metadata": {
+        "annotation_id": "tunnel_walls",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        0.1561609577168732,
+        -0.7499814394584032,
+        -0.6427609164789427
+      ],
+      "roles": [
+        "attachment",
+        "boundary"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          28.8951310044,
+          3.29737991164,
+          0.312
+        ],
+        [
+          35.4761772782,
+          4.94450603519,
+          0.02
+        ],
+        [
+          35.7066592758,
+          3.86892337971,
+          1.3
+        ]
+      ],
+      "geometry_ref": "triangle:71",
+      "id": "escape_tunnel_shell_tunnel_walls_000071",
+      "metadata": {
+        "annotation_id": "tunnel_walls",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        0.15680023545760158,
+        -0.7420348894995656,
+        -0.6517652253118513
+      ],
+      "roles": [
+        "attachment",
+        "boundary"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          28.9412733625,
+          2.37453275052,
+          1.4
+        ],
+        [
+          36.2933407242,
+          1.13107662029,
+          1.3
+        ],
+        [
+          29.0587266375,
+          0.0254672494797,
+          1.4
+        ]
+      ],
+      "geometry_ref": "triangle:72",
+      "id": "escape_tunnel_shell_tunnel_overhead_000072",
+      "metadata": {
+        "annotation_id": "tunnel_overhead",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        -0.013716325853685443,
+        -0.0006858162923805688,
+        -0.9999056915835056
+      ],
+      "roles": [
+        "attachment",
+        "overhead"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          28.9412733625,
+          2.37453275052,
+          1.4
+        ],
+        [
+          35.7066592758,
+          3.86892337971,
+          1.3
+        ],
+        [
+          36.2933407242,
+          1.13107662029,
+          1.3
+        ]
+      ],
+      "geometry_ref": "triangle:73",
+      "id": "escape_tunnel_shell_tunnel_overhead_000073",
+      "metadata": {
+        "annotation_id": "tunnel_overhead",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        -0.014111636173706822,
+        -0.0030239220369799097,
+        -0.9998958533867491
+      ],
+      "roles": [
+        "attachment",
+        "overhead"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          29.0587266375,
+          0.0254672494797,
+          1.4
+        ],
+        [
+          36.5238227218,
+          0.0554939648065,
+          0.02
+        ],
+        [
+          29.1048689956,
+          -0.897379911643,
+          0.312
+        ]
+      ],
+      "geometry_ref": "triangle:74",
+      "id": "escape_tunnel_shell_tunnel_walls_000074",
+      "metadata": {
+        "annotation_id": "tunnel_walls",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        -0.12227098546881539,
+        0.7543282485180791,
+        -0.6450106197576377
+      ],
+      "roles": [
+        "attachment",
+        "boundary"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          29.0587266375,
+          0.0254672494797,
+          1.4
+        ],
+        [
+          36.2933407242,
+          1.13107662029,
+          1.3
+        ],
+        [
+          36.5238227218,
+          0.0554939648065,
+          0.02
+        ]
+      ],
+      "geometry_ref": "triangle:75",
+      "id": "escape_tunnel_shell_tunnel_walls_000075",
+      "metadata": {
+        "annotation_id": "tunnel_walls",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        -0.12341827768746183,
+        0.748681820042265,
+        -0.6513397431992478
+      ],
+      "roles": [
+        "attachment",
+        "boundary"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          29.1048689956,
+          -0.897379911643,
+          0.312
+        ],
+        [
+          36.5552520851,
+          -0.0911763973051,
+          -1.9
+        ],
+        [
+          29.1111611353,
+          -1.02322270634,
+          -1.32
+        ]
+      ],
+      "geometry_ref": "triangle:76",
+      "id": "escape_tunnel_shell_tunnel_walls_000076",
+      "metadata": {
+        "annotation_id": "tunnel_walls",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        -0.12975372171395547,
+        0.9885730522489699,
+        -0.07672869129949321
+      ],
+      "roles": [
+        "attachment",
+        "boundary"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          29.1048689956,
+          -0.897379911643,
+          0.312
+        ],
+        [
+          36.5238227218,
+          0.0554939648065,
+          0.02
+        ],
+        [
+          36.5552520851,
+          -0.0911763973051,
+          -1.9
+        ]
+      ],
+      "geometry_ref": "triangle:77",
+      "id": "escape_tunnel_shell_tunnel_walls_000077",
+      "metadata": {
+        "annotation_id": "tunnel_walls",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        -0.13001236530783533,
+        0.9884680614396875,
+        -0.07763811165097004
+      ],
+      "roles": [
+        "attachment",
+        "boundary"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          29.1111611353,
+          -1.02322270634,
+          -1.32
+        ],
+        [
+          36.5238227218,
+          0.0554939648065,
+          -2.7
+        ],
+        [
+          29.1048689956,
+          -0.897379911643,
+          -2.0
+        ]
+      ],
+      "geometry_ref": "triangle:78",
+      "id": "escape_tunnel_shell_tunnel_walls_000078",
+      "metadata": {
+        "annotation_id": "tunnel_walls",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        -0.10836642104641382,
+        0.9773329617405282,
+        0.1818708351690255
+      ],
+      "roles": [
+        "attachment",
+        "boundary"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          29.1111611353,
+          -1.02322270634,
+          -1.32
+        ],
+        [
+          36.5552520851,
+          -0.0911763973051,
+          -1.9
+        ],
+        [
+          36.5238227218,
+          0.0554939648065,
+          -2.7
+        ]
+      ],
+      "geometry_ref": "triangle:79",
+      "id": "escape_tunnel_shell_tunnel_walls_000079",
+      "metadata": {
+        "annotation_id": "tunnel_walls",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        -0.10804914988770149,
+        0.9770857179793317,
+        0.18338179007022223
+      ],
+      "roles": [
+        "attachment",
+        "boundary"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          36.5238227218,
+          0.0554939648065,
+          -2.7
+        ],
+        [
+          42.7919663832,
+          6.4403620275,
+          -3.3
+        ],
+        [
+          35.4761772782,
+          4.94450603519,
+          -2.7
+        ]
+      ],
+      "geometry_ref": "triangle:80",
+      "id": "escape_tunnel_shell_tunnel_floor_000080",
+      "metadata": {
+        "annotation_id": "tunnel_floor",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        0.07831933080944785,
+        0.01678271374402299,
+        0.99678704994645
+      ],
+      "roles": [
+        "support",
+        "traversable"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          36.5238227218,
+          0.0554939648065,
+          -2.7
+        ],
+        [
+          43.2080336168,
+          1.9596379725,
+          -3.3
+        ],
+        [
+          42.7919663832,
+          6.4403620275,
+          -3.3
+        ]
+      ],
+      "geometry_ref": "triangle:81",
+      "id": "escape_tunnel_shell_tunnel_floor_000081",
+      "metadata": {
+        "annotation_id": "tunnel_floor",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        0.08711516228194625,
+        0.008089265067510343,
+        0.9961654040827044
+      ],
+      "roles": [
+        "support",
+        "traversable"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          35.4761772782,
+          4.94450603519,
+          -2.7
+        ],
+        [
+          42.7794843662,
+          6.57478374915,
+          -2.56
+        ],
+        [
+          35.4447479149,
+          5.09117639731,
+          -1.9
+        ]
+      ],
+      "geometry_ref": "triangle:82",
+      "id": "escape_tunnel_shell_tunnel_walls_000082",
+      "metadata": {
+        "annotation_id": "tunnel_walls",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        0.21076489140314772,
+        -0.9600087104201144,
+        0.18428628942308348
+      ],
+      "roles": [
+        "attachment",
+        "boundary"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          35.4761772782,
+          4.94450603519,
+          -2.7
+        ],
+        [
+          42.7919663832,
+          6.4403620275,
+          -3.3
+        ],
+        [
+          42.7794843662,
+          6.57478374915,
+          -2.56
+        ]
+      ],
+      "geometry_ref": "triangle:83",
+      "id": "escape_tunnel_shell_tunnel_walls_000083",
+      "metadata": {
+        "annotation_id": "tunnel_walls",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        0.21112372440498037,
+        -0.961088726721419,
+        0.17814385300192553
+      ],
+      "roles": [
+        "attachment",
+        "boundary"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          35.4447479149,
+          5.09117639731,
+          -1.9
+        ],
+        [
+          42.7919663832,
+          6.4403620275,
+          -0.784
+        ],
+        [
+          35.4761772782,
+          4.94450603519,
+          0.02
+        ]
+      ],
+      "geometry_ref": "triangle:84",
+      "id": "escape_tunnel_shell_tunnel_walls_000084",
+      "metadata": {
+        "annotation_id": "tunnel_walls",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        0.19149441326849234,
+        -0.9783993634115121,
+        -0.07787538354899981
+      ],
+      "roles": [
+        "attachment",
+        "boundary"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          35.4447479149,
+          5.09117639731,
+          -1.9
+        ],
+        [
+          42.7794843662,
+          6.57478374915,
+          -2.56
+        ],
+        [
+          42.7919663832,
+          6.4403620275,
+          -0.784
+        ]
+      ],
+      "geometry_ref": "triangle:85",
+      "id": "escape_tunnel_shell_tunnel_walls_000085",
+      "metadata": {
+        "annotation_id": "tunnel_walls",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        0.19116793976523444,
+        -0.9786558384593965,
+        -0.07541597082350243
+      ],
+      "roles": [
+        "attachment",
+        "boundary"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          35.4761772782,
+          4.94450603519,
+          0.02
+        ],
+        [
+          42.8835011746,
+          5.4546027354,
+          0.4
+        ],
+        [
+          35.7066592758,
+          3.86892337971,
+          1.3
+        ]
+      ],
+      "geometry_ref": "triangle:86",
+      "id": "escape_tunnel_shell_tunnel_walls_000086",
+      "metadata": {
+        "annotation_id": "tunnel_walls",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        0.08534673849620168,
+        -0.7551764672244093,
+        -0.6499418724613162
+      ],
+      "roles": [
+        "attachment",
+        "boundary"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          35.4761772782,
+          4.94450603519,
+          0.02
+        ],
+        [
+          42.7919663832,
+          6.4403620275,
+          -0.784
+        ],
+        [
+          42.8835011746,
+          5.4546027354,
+          0.4
+        ]
+      ],
+      "geometry_ref": "triangle:87",
+      "id": "escape_tunnel_shell_tunnel_walls_000087",
+      "metadata": {
+        "annotation_id": "tunnel_walls",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        0.08540864341733885,
+        -0.7624459881855502,
+        -0.6413902702172601
+      ],
+      "roles": [
+        "attachment",
+        "boundary"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          35.7066592758,
+          3.86892337971,
+          1.3
+        ],
+        [
+          43.1164988254,
+          2.9453972646,
+          0.4
+        ],
+        [
+          36.2933407242,
+          1.13107662029,
+          1.3
+        ]
+      ],
+      "geometry_ref": "triangle:88",
+      "id": "escape_tunnel_shell_tunnel_overhead_000088",
+      "metadata": {
+        "annotation_id": "tunnel_overhead",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        -0.12378894278781472,
+        -0.026526202023828785,
+        -0.9919539597429239
+      ],
+      "roles": [
+        "attachment",
+        "overhead"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          35.7066592758,
+          3.86892337971,
+          1.3
+        ],
+        [
+          42.8835011746,
+          5.4546027354,
+          0.4
+        ],
+        [
+          43.1164988254,
+          2.9453972646,
+          0.4
+        ]
+      ],
+      "geometry_ref": "triangle:89",
+      "id": "escape_tunnel_shell_tunnel_overhead_000089",
+      "metadata": {
+        "annotation_id": "tunnel_overhead",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        -0.12195705941601397,
+        -0.011324584085713723,
+        -0.9924707700753129
+      ],
+      "roles": [
+        "attachment",
+        "overhead"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          36.2933407242,
+          1.13107662029,
+          1.3
+        ],
+        [
+          43.2080336168,
+          1.9596379725,
+          -0.784
+        ],
+        [
+          36.5238227218,
+          0.0554939648065,
+          0.02
+        ]
+      ],
+      "geometry_ref": "triangle:90",
+      "id": "escape_tunnel_shell_tunnel_walls_000090",
+      "metadata": {
+        "annotation_id": "tunnel_walls",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        -0.27991760114371106,
+        0.709568053749674,
+        -0.646652390135419
+      ],
+      "roles": [
+        "attachment",
+        "boundary"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          36.2933407242,
+          1.13107662029,
+          1.3
+        ],
+        [
+          43.1164988254,
+          2.9453972646,
+          0.4
+        ],
+        [
+          43.2080336168,
+          1.9596379725,
+          -0.784
+        ]
+      ],
+      "geometry_ref": "triangle:91",
+      "id": "escape_tunnel_shell_tunnel_walls_000091",
+      "metadata": {
+        "annotation_id": "tunnel_walls",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        -0.27633566984814845,
+        0.7279732993664008,
+        -0.6274499764755528
+      ],
+      "roles": [
+        "attachment",
+        "boundary"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          36.5238227218,
+          0.0554939648065,
+          0.02
+        ],
+        [
+          43.2205156338,
+          1.82521625085,
+          -2.56
+        ],
+        [
+          36.5552520851,
+          -0.0911763973051,
+          -1.9
+        ]
+      ],
+      "geometry_ref": "triangle:92",
+      "id": "escape_tunnel_shell_tunnel_walls_000092",
+      "metadata": {
+        "annotation_id": "tunnel_walls",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        -0.2825855221979955,
+        0.9560930701297172,
+        -0.07766249992124885
+      ],
+      "roles": [
+        "attachment",
+        "boundary"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          36.5238227218,
+          0.0554939648065,
+          0.02
+        ],
+        [
+          43.2080336168,
+          1.9596379725,
+          -0.784
+        ],
+        [
+          43.2205156338,
+          1.82521625085,
+          -2.56
+        ]
+      ],
+      "geometry_ref": "triangle:93",
+      "id": "escape_tunnel_shell_tunnel_walls_000093",
+      "metadata": {
+        "annotation_id": "tunnel_walls",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        -0.281478780158533,
+        0.9566797874322474,
+        -0.07438736881389393
+      ],
+      "roles": [
+        "attachment",
+        "boundary"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          36.5552520851,
+          -0.0911763973051,
+          -1.9
+        ],
+        [
+          43.2080336168,
+          1.9596379725,
+          -3.3
+        ],
+        [
+          36.5238227218,
+          0.0554939648065,
+          -2.7
+        ]
+      ],
+      "geometry_ref": "triangle:94",
+      "id": "escape_tunnel_shell_tunnel_walls_000094",
+      "metadata": {
+        "annotation_id": "tunnel_walls",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        -0.25397378089779404,
+        0.9495356077354561,
+        0.1840637070661608
+      ],
+      "roles": [
+        "attachment",
+        "boundary"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          36.5552520851,
+          -0.0911763973051,
+          -1.9
+        ],
+        [
+          43.2205156338,
+          1.82521625085,
+          -2.56
+        ],
+        [
+          43.2080336168,
+          1.9596379725,
+          -3.3
+        ]
+      ],
+      "geometry_ref": "triangle:95",
+      "id": "escape_tunnel_shell_tunnel_walls_000095",
+      "metadata": {
+        "annotation_id": "tunnel_walls",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        -0.2557395442852174,
+        0.9504122769258887,
+        0.1769570268662347
+      ],
+      "roles": [
+        "attachment",
+        "boundary"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          43.2080336168,
+          1.9596379725,
+          -3.3
+        ],
+        [
+          49.7503596598,
+          6.488434433,
+          -3.9
+        ],
+        [
+          42.7919663832,
+          6.4403620275,
+          -3.3
+        ]
+      ],
+      "geometry_ref": "triangle:96",
+      "id": "escape_tunnel_shell_tunnel_floor_000096",
+      "metadata": {
+        "annotation_id": "tunnel_floor",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        0.08585063045981098,
+        0.007971844255477084,
+        0.9962761258550862
+      ],
+      "roles": [
+        "support",
+        "traversable"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          43.2080336168,
+          1.9596379725,
+          -3.3
+        ],
+        [
+          50.2496403402,
+          1.111565567,
+          -3.9
+        ],
+        [
+          49.7503596598,
+          6.488434433,
+          -3.9
+        ]
+      ],
+      "geometry_ref": "triangle:97",
+      "id": "escape_tunnel_shell_tunnel_floor_000097",
+      "metadata": {
+        "annotation_id": "tunnel_floor",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        0.08585063045898543,
+        0.007971844256677773,
+        0.9962761258551478
+      ],
+      "roles": [
+        "support",
+        "traversable"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          42.7919663832,
+          6.4403620275,
+          -3.3
+        ],
+        [
+          49.7353812394,
+          6.64974049898,
+          -3.04
+        ],
+        [
+          42.7794843662,
+          6.57478374915,
+          -2.56
+        ]
+      ],
+      "geometry_ref": "triangle:98",
+      "id": "escape_tunnel_shell_tunnel_walls_000098",
+      "metadata": {
+        "annotation_id": "tunnel_walls",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        0.02295479574313481,
+        -0.9835714397356301,
+        0.17905390330504029
+      ],
+      "roles": [
+        "attachment",
+        "boundary"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          42.7919663832,
+          6.4403620275,
+          -3.3
+        ],
+        [
+          49.7503596598,
+          6.488434433,
+          -3.9
+        ],
+        [
+          49.7353812394,
+          6.64974049898,
+          -3.04
+        ]
+      ],
+      "geometry_ref": "triangle:99",
+      "id": "escape_tunnel_shell_tunnel_walls_000099",
+      "metadata": {
+        "annotation_id": "tunnel_walls",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        0.02271269089989684,
+        -0.9825352837360135,
+        0.18468500178920141
+      ],
+      "roles": [
+        "attachment",
+        "boundary"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          42.7794843662,
+          6.57478374915,
+          -2.56
+        ],
+        [
+          49.7503596598,
+          6.488434433,
+          -0.976
+        ],
+        [
+          42.7919663832,
+          6.4403620275,
+          -0.784
+        ]
+      ],
+      "geometry_ref": "triangle:100",
+      "id": "escape_tunnel_shell_tunnel_walls_000100",
+      "metadata": {
+        "annotation_id": "tunnel_walls",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        0.004805378279261242,
+        -0.9971338633576919,
+        -0.07550474743323753
+      ],
+      "roles": [
+        "attachment",
+        "boundary"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          42.7794843662,
+          6.57478374915,
+          -2.56
+        ],
+        [
+          49.7353812394,
+          6.64974049898,
+          -3.04
+        ],
+        [
+          49.7503596598,
+          6.488434433,
+          -0.976
+        ]
+      ],
+      "geometry_ref": "triangle:101",
+      "id": "escape_tunnel_shell_tunnel_walls_000101",
+      "metadata": {
+        "annotation_id": "tunnel_walls",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        0.005363873261412002,
+        -0.9969426717649631,
+        -0.07795215248966968
+      ],
+      "roles": [
+        "attachment",
+        "boundary"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          42.7919663832,
+          6.4403620275,
+          -0.784
+        ],
+        [
+          49.8602014095,
+          5.30552328248,
+          0.4
+        ],
+        [
+          42.8835011746,
+          5.4546027354,
+          0.4
+        ]
+      ],
+      "geometry_ref": "triangle:102",
+      "id": "escape_tunnel_shell_tunnel_walls_000102",
+      "metadata": {
+        "annotation_id": "tunnel_walls",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        -0.016432808872194376,
+        -0.7690314075691451,
+        -0.638999731584286
+      ],
+      "roles": [
+        "attachment",
+        "boundary"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          42.7919663832,
+          6.4403620275,
+          -0.784
+        ],
+        [
+          49.7503596598,
+          6.488434433,
+          -0.976
+        ],
+        [
+          49.8602014095,
+          5.30552328248,
+          0.4
+        ]
+      ],
+      "geometry_ref": "triangle:103",
+      "id": "escape_tunnel_shell_tunnel_walls_000103",
+      "metadata": {
+        "annotation_id": "tunnel_walls",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        -0.012728087358882305,
+        -0.7587480860398891,
+        -0.6512598081587637
+      ],
+      "roles": [
+        "attachment",
+        "boundary"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          42.8835011746,
+          5.4546027354,
+          0.4
+        ],
+        [
+          50.1397985905,
+          2.29447671752,
+          0.4
+        ],
+        [
+          43.1164988254,
+          2.9453972646,
+          0.4
+        ]
+      ],
+      "geometry_ref": "triangle:104",
+      "id": "escape_tunnel_shell_tunnel_overhead_000104",
+      "metadata": {
+        "annotation_id": "tunnel_overhead",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        0.0,
+        0.0,
+        -1.0
+      ],
+      "roles": [
+        "attachment",
+        "overhead"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          42.8835011746,
+          5.4546027354,
+          0.4
+        ],
+        [
+          49.8602014095,
+          5.30552328248,
+          0.4
+        ],
+        [
+          50.1397985905,
+          2.29447671752,
+          0.4
+        ]
+      ],
+      "geometry_ref": "triangle:105",
+      "id": "escape_tunnel_shell_tunnel_overhead_000105",
+      "metadata": {
+        "annotation_id": "tunnel_overhead",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        0.0,
+        0.0,
+        -1.0
+      ],
+      "roles": [
+        "attachment",
+        "overhead"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          43.1164988254,
+          2.9453972646,
+          0.4
+        ],
+        [
+          50.2496403402,
+          1.111565567,
+          -0.976
+        ],
+        [
+          43.2080336168,
+          1.9596379725,
+          -0.784
+        ]
+      ],
+      "geometry_ref": "triangle:106",
+      "id": "escape_tunnel_shell_tunnel_walls_000106",
+      "metadata": {
+        "annotation_id": "tunnel_walls",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        0.07533579973410111,
+        0.7691830761964071,
+        -0.634572228017785
+      ],
+      "roles": [
+        "attachment",
+        "boundary"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          43.1164988254,
+          2.9453972646,
+          0.4
+        ],
+        [
+          50.1397985905,
+          2.29447671752,
+          0.4
+        ],
+        [
+          50.2496403402,
+          1.111565567,
+          -0.976
+        ]
+      ],
+      "geometry_ref": "triangle:107",
+      "id": "escape_tunnel_shell_tunnel_walls_000107",
+      "metadata": {
+        "annotation_id": "tunnel_walls",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        0.07036256503849293,
+        0.7591977065765368,
+        -0.6470455561783346
+      ],
+      "roles": [
+        "attachment",
+        "boundary"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          43.2080336168,
+          1.9596379725,
+          -0.784
+        ],
+        [
+          50.2646187606,
+          0.95025950102,
+          -3.04
+        ],
+        [
+          43.2205156338,
+          1.82521625085,
+          -2.56
+        ]
+      ],
+      "geometry_ref": "triangle:108",
+      "id": "escape_tunnel_shell_tunnel_walls_000108",
+      "metadata": {
+        "annotation_id": "tunnel_walls",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        0.11794935429013738,
+        0.9902494815289369,
+        -0.07412094275042307
+      ],
+      "roles": [
+        "attachment",
+        "boundary"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          43.2080336168,
+          1.9596379725,
+          -0.784
+        ],
+        [
+          50.2496403402,
+          1.111565567,
+          -0.976
+        ],
+        [
+          50.2646187606,
+          0.95025950102,
+          -3.04
+        ]
+      ],
+      "geometry_ref": "triangle:109",
+      "id": "escape_tunnel_shell_tunnel_walls_000109",
+      "metadata": {
+        "annotation_id": "tunnel_walls",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        0.11716534722935257,
+        0.9901590835758883,
+        -0.07653280748007525
+      ],
+      "roles": [
+        "attachment",
+        "boundary"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          43.2205156338,
+          1.82521625085,
+          -2.56
+        ],
+        [
+          50.2496403402,
+          1.111565567,
+          -3.9
+        ],
+        [
+          43.2080336168,
+          1.9596379725,
+          -3.3
+        ]
+      ],
+      "geometry_ref": "triangle:110",
+      "id": "escape_tunnel_shell_tunnel_walls_000110",
+      "metadata": {
+        "annotation_id": "tunnel_walls",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        0.13241227636691952,
+        0.9756257114860414,
+        0.17498988586397254
+      ],
+      "roles": [
+        "attachment",
+        "boundary"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          43.2205156338,
+          1.82521625085,
+          -2.56
+        ],
+        [
+          50.2646187606,
+          0.95025950102,
+          -3.04
+        ],
+        [
+          50.2496403402,
+          1.111565567,
+          -3.9
+        ]
+      ],
+      "geometry_ref": "triangle:111",
+      "id": "escape_tunnel_shell_tunnel_walls_000111",
+      "metadata": {
+        "annotation_id": "tunnel_walls",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        0.13334104737160024,
+        0.9745020507713625,
+        0.18046029515728232
+      ],
+      "roles": [
+        "attachment",
+        "boundary"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          50.2496403402,
+          1.111565567,
+          -3.9
+        ],
+        [
+          56.3484420553,
+          7.96535438522,
+          -4.4
+        ],
+        [
+          49.7503596598,
+          6.488434433,
+          -3.9
+        ]
+      ],
+      "geometry_ref": "triangle:112",
+      "id": "escape_tunnel_shell_tunnel_floor_000112",
+      "metadata": {
+        "annotation_id": "tunnel_floor",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        0.07403110105674444,
+        0.006874316526501081,
+        0.9972322396757035
+      ],
+      "roles": [
+        "support",
+        "traversable"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          50.2496403402,
+          1.111565567,
+          -3.9
+        ],
+        [
+          57.6515579447,
+          3.03464561478,
+          -4.4
+        ],
+        [
+          56.3484420553,
+          7.96535438522,
+          -4.4
+        ]
+      ],
+      "geometry_ref": "triangle:113",
+      "id": "escape_tunnel_shell_tunnel_floor_000113",
+      "metadata": {
+        "annotation_id": "tunnel_floor",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        0.06307517960409566,
+        0.01666986889625634,
+        0.9978695491841069
+      ],
+      "roles": [
+        "support",
+        "traversable"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          49.7503596598,
+          6.488434433,
+          -3.9
+        ],
+        [
+          56.3093485787,
+          8.11327564834,
+          -3.58
+        ],
+        [
+          49.7353812394,
+          6.64974049898,
+          -3.04
+        ]
+      ],
+      "geometry_ref": "triangle:114",
+      "id": "escape_tunnel_shell_tunnel_walls_000114",
+      "metadata": {
+        "annotation_id": "tunnel_walls",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        0.22794702710698547,
+        -0.9562583037833695,
+        0.18333087377318752
+      ],
+      "roles": [
+        "attachment",
+        "boundary"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          49.7503596598,
+          6.488434433,
+          -3.9
+        ],
+        [
+          56.3484420553,
+          7.96535438522,
+          -4.4
+        ],
+        [
+          56.3093485787,
+          8.11327564834,
+          -3.58
+        ]
+      ],
+      "geometry_ref": "triangle:115",
+      "id": "escape_tunnel_shell_tunnel_walls_000115",
+      "metadata": {
+        "annotation_id": "tunnel_walls",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        0.2279437210941967,
+        -0.9562521197806562,
+        0.1833672365193212
+      ],
+      "roles": [
+        "attachment",
+        "boundary"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          49.7353812394,
+          6.64974049898,
+          -3.04
+        ],
+        [
+          56.3484420553,
+          7.96535438522,
+          -1.612
+        ],
+        [
+          49.7503596598,
+          6.488434433,
+          -0.976
+        ]
+      ],
+      "geometry_ref": "triangle:116",
+      "id": "escape_tunnel_shell_tunnel_walls_000116",
+      "metadata": {
+        "annotation_id": "tunnel_walls",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        0.21063840599073036,
+        -0.9744723650355402,
+        -0.07768572393770545
+      ],
+      "roles": [
+        "attachment",
+        "boundary"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          49.7353812394,
+          6.64974049898,
+          -3.04
+        ],
+        [
+          56.3093485787,
+          8.11327564834,
+          -3.58
+        ],
+        [
+          56.3484420553,
+          7.96535438522,
+          -1.612
+        ]
+      ],
+      "geometry_ref": "triangle:117",
+      "id": "escape_tunnel_shell_tunnel_walls_000117",
+      "metadata": {
+        "annotation_id": "tunnel_walls",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        0.2105893629914912,
+        -0.9745033095281963,
+        -0.07743009694834681
+      ],
+      "roles": [
+        "attachment",
+        "boundary"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          49.7503596598,
+          6.488434433,
+          -0.976
+        ],
+        [
+          56.635127551,
+          6.88059845573,
+          -0.3
+        ],
+        [
+          49.8602014095,
+          5.30552328248,
+          0.4
+        ]
+      ],
+      "geometry_ref": "triangle:118",
+      "id": "escape_tunnel_shell_tunnel_walls_000118",
+      "metadata": {
+        "annotation_id": "tunnel_walls",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        0.10682799522613155,
+        -0.7497365293476138,
+        -0.6530565947892728
+      ],
+      "roles": [
+        "attachment",
+        "boundary"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          49.7503596598,
+          6.488434433,
+          -0.976
+        ],
+        [
+          56.3484420553,
+          7.96535438522,
+          -1.612
+        ],
+        [
+          56.635127551,
+          6.88059845573,
+          -0.3
+        ]
+      ],
+      "geometry_ref": "triangle:119",
+      "id": "escape_tunnel_shell_tunnel_walls_000119",
+      "metadata": {
+        "annotation_id": "tunnel_walls",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        0.10654865009852733,
+        -0.7547479638236779,
+        -0.6473043304862047
+      ],
+      "roles": [
+        "attachment",
+        "boundary"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          49.8602014095,
+          5.30552328248,
+          0.4
+        ],
+        [
+          57.364872449,
+          4.11940154427,
+          -0.3
+        ],
+        [
+          50.1397985905,
+          2.29447671752,
+          0.4
+        ]
+      ],
+      "geometry_ref": "triangle:120",
+      "id": "escape_tunnel_shell_tunnel_overhead_000120",
+      "metadata": {
+        "annotation_id": "tunnel_overhead",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        -0.09423961348800818,
+        -0.008750821251456358,
+        -0.9955110840051234
+      ],
+      "roles": [
+        "attachment",
+        "overhead"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          49.8602014095,
+          5.30552328248,
+          0.4
+        ],
+        [
+          56.635127551,
+          6.88059845573,
+          -0.3
+        ],
+        [
+          57.364872449,
+          4.11940154427,
+          -0.3
+        ]
+      ],
+      "geometry_ref": "triangle:121",
+      "id": "escape_tunnel_shell_tunnel_overhead_000121",
+      "metadata": {
+        "annotation_id": "tunnel_overhead",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        -0.09685158754640646,
+        -0.0255964909934005,
+        -0.9949696425713529
+      ],
+      "roles": [
+        "attachment",
+        "overhead"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          50.1397985905,
+          2.29447671752,
+          0.4
+        ],
+        [
+          57.6515579447,
+          3.03464561478,
+          -1.612
+        ],
+        [
+          50.2496403402,
+          1.111565567,
+          -0.976
+        ]
+      ],
+      "geometry_ref": "triangle:122",
+      "id": "escape_tunnel_shell_tunnel_walls_000122",
+      "metadata": {
+        "annotation_id": "tunnel_walls",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        -0.2438249063066571,
+        0.7257143322803018,
+        -0.6433413736015319
+      ],
+      "roles": [
+        "attachment",
+        "boundary"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          50.1397985905,
+          2.29447671752,
+          0.4
+        ],
+        [
+          57.364872449,
+          4.11940154427,
+          -0.3
+        ],
+        [
+          57.6515579447,
+          3.03464561478,
+          -1.612
+        ]
+      ],
+      "geometry_ref": "triangle:123",
+      "id": "escape_tunnel_shell_tunnel_walls_000123",
+      "metadata": {
+        "annotation_id": "tunnel_walls",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        -0.24481484295535358,
+        0.7202946446770978,
+        -0.6490310605188623
+      ],
+      "roles": [
+        "attachment",
+        "boundary"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          50.2496403402,
+          1.111565567,
+          -0.976
+        ],
+        [
+          57.6906514213,
+          2.88672435166,
+          -3.58
+        ],
+        [
+          50.2646187606,
+          0.95025950102,
+          -3.04
+        ]
+      ],
+      "geometry_ref": "triangle:124",
+      "id": "escape_tunnel_shell_tunnel_walls_000124",
+      "metadata": {
+        "annotation_id": "tunnel_walls",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        -0.25682634931841164,
+        0.9633730161232322,
+        -0.07715347109109191
+      ],
+      "roles": [
+        "attachment",
+        "boundary"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          50.2496403402,
+          1.111565567,
+          -0.976
+        ],
+        [
+          57.6515579447,
+          3.03464561478,
+          -1.612
+        ],
+        [
+          57.6906514213,
+          2.88672435166,
+          -3.58
+        ]
+      ],
+      "geometry_ref": "triangle:125",
+      "id": "escape_tunnel_shell_tunnel_walls_000125",
+      "metadata": {
+        "annotation_id": "tunnel_walls",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        -0.25693717855934006,
+        0.9633148575011026,
+        -0.07750981609832534
+      ],
+      "roles": [
+        "attachment",
+        "boundary"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          50.2646187606,
+          0.95025950102,
+          -3.04
+        ],
+        [
+          57.6515579447,
+          3.03464561478,
+          -4.4
+        ],
+        [
+          50.2496403402,
+          1.111565567,
+          -3.9
+        ]
+      ],
+      "geometry_ref": "triangle:126",
+      "id": "escape_tunnel_shell_tunnel_walls_000126",
+      "metadata": {
+        "annotation_id": "tunnel_walls",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        -0.23560175926656263,
+        0.954441017191855,
+        0.18312333475632733
+      ],
+      "roles": [
+        "attachment",
+        "boundary"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          50.2646187606,
+          0.95025950102,
+          -3.04
+        ],
+        [
+          57.6906514213,
+          2.88672435166,
+          -3.58
+        ],
+        [
+          57.6515579447,
+          3.03464561478,
+          -4.4
+        ]
+      ],
+      "geometry_ref": "triangle:127",
+      "id": "escape_tunnel_shell_tunnel_walls_000127",
+      "metadata": {
+        "annotation_id": "tunnel_walls",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        -0.23554101891198534,
+        0.9544036563799239,
+        0.183395989864926
+      ],
+      "roles": [
+        "attachment",
+        "boundary"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          57.6515579447,
+          3.03464561478,
+          -4.4
+        ],
+        [
+          63.4773477122,
+          10.4541216268,
+          -4.8
+        ],
+        [
+          56.3484420553,
+          7.96535438522,
+          -4.4
+        ]
+      ],
+      "geometry_ref": "triangle:128",
+      "id": "escape_tunnel_shell_tunnel_floor_000128",
+      "metadata": {
+        "annotation_id": "tunnel_floor",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        0.05129760407106892,
+        0.01355722393379057,
+        0.9985913866521066
+      ],
+      "roles": [
+        "support",
+        "traversable"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          57.6515579447,
+          3.03464561478,
+          -4.4
+        ],
+        [
+          64.5226522878,
+          4.54587837318,
+          -4.8
+        ],
+        [
+          63.4773477122,
+          10.4541216268,
+          -4.8
+        ]
+      ],
+      "geometry_ref": "triangle:129",
+      "id": "escape_tunnel_shell_tunnel_floor_000129",
+      "metadata": {
+        "annotation_id": "tunnel_floor",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        0.05594394142700847,
+        0.0098977742520876,
+        0.9983848503870971
+      ],
+      "roles": [
+        "support",
+        "traversable"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          56.3484420553,
+          7.96535438522,
+          -4.4
+        ],
+        [
+          63.4459885749,
+          10.6313689244,
+          -3.84
+        ],
+        [
+          56.3093485787,
+          8.11327564834,
+          -3.58
+        ]
+      ],
+      "geometry_ref": "triangle:130",
+      "id": "escape_tunnel_shell_tunnel_walls_000130",
+      "metadata": {
+        "annotation_id": "tunnel_walls",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        0.33304618232779787,
+        -0.9250319413557976,
+        0.1827461296673711
+      ],
+      "roles": [
+        "attachment",
+        "boundary"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          56.3484420553,
+          7.96535438522,
+          -4.4
+        ],
+        [
+          63.4773477122,
+          10.4541216268,
+          -4.8
+        ],
+        [
+          63.4459885749,
+          10.6313689244,
+          -3.84
+        ]
+      ],
+      "geometry_ref": "triangle:131",
+      "id": "escape_tunnel_shell_tunnel_walls_000131",
+      "metadata": {
+        "annotation_id": "tunnel_walls",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        0.3331866063605489,
+        -0.925186763234402,
+        0.18170343551455348
+      ],
+      "roles": [
+        "attachment",
+        "boundary"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          56.3093485787,
+          8.11327564834,
+          -3.58
+        ],
+        [
+          63.4773477122,
+          10.4541216268,
+          -1.536
+        ],
+        [
+          56.3484420553,
+          7.96535438522,
+          -1.612
+        ]
+      ],
+      "geometry_ref": "triangle:132",
+      "id": "escape_tunnel_shell_tunnel_walls_000132",
+      "metadata": {
+        "annotation_id": "tunnel_walls",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        0.3293498273468116,
+        -0.9410406002689851,
+        -0.0772740569144237
+      ],
+      "roles": [
+        "attachment",
+        "boundary"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          56.3093485787,
+          8.11327564834,
+          -3.58
+        ],
+        [
+          63.4459885749,
+          10.6313689244,
+          -3.84
+        ],
+        [
+          63.4773477122,
+          10.4541216268,
+          -1.536
+        ]
+      ],
+      "geometry_ref": "triangle:133",
+      "id": "escape_tunnel_shell_tunnel_walls_000133",
+      "metadata": {
+        "annotation_id": "tunnel_walls",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        0.32925864512935626,
+        -0.9411047103370563,
+        -0.07688087401289018
+      ],
+      "roles": [
+        "attachment",
+        "boundary"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          56.3484420553,
+          7.96535438522,
+          -1.612
+        ],
+        [
+          63.7073147188,
+          9.15430811102,
+          0.0
+        ],
+        [
+          56.635127551,
+          6.88059845573,
+          -0.3
+        ]
+      ],
+      "geometry_ref": "triangle:134",
+      "id": "escape_tunnel_shell_tunnel_walls_000134",
+      "metadata": {
+        "annotation_id": "tunnel_walls",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        0.25777860156654864,
+        -0.7162333740011602,
+        -0.6485059340833428
+      ],
+      "roles": [
+        "attachment",
+        "boundary"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          56.3484420553,
+          7.96535438522,
+          -1.612
+        ],
+        [
+          63.4773477122,
+          10.4541216268,
+          -1.536
+        ],
+        [
+          63.7073147188,
+          9.15430811102,
+          0.0
+        ]
+      ],
+      "geometry_ref": "triangle:135",
+      "id": "escape_tunnel_shell_tunnel_walls_000135",
+      "metadata": {
+        "annotation_id": "tunnel_walls",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        0.2576299761218313,
+        -0.7182256972570283,
+        -0.6463579837853943
+      ],
+      "roles": [
+        "attachment",
+        "boundary"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          56.635127551,
+          6.88059845573,
+          -0.3
+        ],
+        [
+          64.2926852812,
+          5.84569188898,
+          0.0
+        ],
+        [
+          57.364872449,
+          4.11940154427,
+          -0.3
+        ]
+      ],
+      "geometry_ref": "triangle:136",
+      "id": "escape_tunnel_shell_tunnel_overhead_000136",
+      "metadata": {
+        "annotation_id": "tunnel_overhead",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        0.04059230277549559,
+        0.010727965733101806,
+        -0.9991181990668632
+      ],
+      "roles": [
+        "attachment",
+        "overhead"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          56.635127551,
+          6.88059845573,
+          -0.3
+        ],
+        [
+          63.7073147188,
+          9.15430811102,
+          0.0
+        ],
+        [
+          64.2926852812,
+          5.84569188898,
+          0.0
+        ]
+      ],
+      "geometry_ref": "triangle:137",
+      "id": "escape_tunnel_shell_tunnel_overhead_000137",
+      "metadata": {
+        "annotation_id": "tunnel_overhead",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        0.040103385166135076,
+        0.007095214299097479,
+        -0.999170344051637
+      ],
+      "roles": [
+        "attachment",
+        "overhead"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          57.364872449,
+          4.11940154427,
+          -0.3
+        ],
+        [
+          64.5226522878,
+          4.54587837318,
+          -1.536
+        ],
+        [
+          57.6515579447,
+          3.03464561478,
+          -1.612
+        ]
+      ],
+      "geometry_ref": "triangle:138",
+      "id": "escape_tunnel_shell_tunnel_walls_000138",
+      "metadata": {
+        "annotation_id": "tunnel_walls",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        -0.15648242820860875,
+        0.744136260608221,
+        -0.6494416642855242
+      ],
+      "roles": [
+        "attachment",
+        "boundary"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          57.364872449,
+          4.11940154427,
+          -0.3
+        ],
+        [
+          64.2926852812,
+          5.84569188898,
+          0.0
+        ],
+        [
+          64.5226522878,
+          4.54587837318,
+          -1.536
+        ]
+      ],
+      "geometry_ref": "triangle:139",
+      "id": "escape_tunnel_shell_tunnel_walls_000139",
+      "metadata": {
+        "annotation_id": "tunnel_walls",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        -0.15673488405864242,
+        0.7422266553492762,
+        -0.6515625589367077
+      ],
+      "roles": [
+        "attachment",
+        "boundary"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          57.6515579447,
+          3.03464561478,
+          -1.612
+        ],
+        [
+          64.5540114251,
+          4.36863107557,
+          -3.84
+        ],
+        [
+          57.6906514213,
+          2.88672435166,
+          -3.58
+        ]
+      ],
+      "geometry_ref": "triangle:140",
+      "id": "escape_tunnel_shell_tunnel_walls_000140",
+      "metadata": {
+        "annotation_id": "tunnel_walls",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        -0.21322035846001394,
+        0.973930302880539,
+        -0.07743929150763856
+      ],
+      "roles": [
+        "attachment",
+        "boundary"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          57.6515579447,
+          3.03464561478,
+          -1.612
+        ],
+        [
+          64.5226522878,
+          4.54587837318,
+          -1.536
+        ],
+        [
+          64.5540114251,
+          4.36863107557,
+          -3.84
+        ]
+      ],
+      "geometry_ref": "triangle:141",
+      "id": "escape_tunnel_shell_tunnel_walls_000141",
+      "metadata": {
+        "annotation_id": "tunnel_walls",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        -0.21333382625127434,
+        0.9738747835246768,
+        -0.07782406177882865
+      ],
+      "roles": [
+        "attachment",
+        "boundary"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          57.6906514213,
+          2.88672435166,
+          -3.58
+        ],
+        [
+          64.5226522878,
+          4.54587837318,
+          -4.8
+        ],
+        [
+          57.6515579447,
+          3.03464561478,
+          -4.4
+        ]
+      ],
+      "geometry_ref": "triangle:142",
+      "id": "escape_tunnel_shell_tunnel_walls_000142",
+      "metadata": {
+        "annotation_id": "tunnel_walls",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        -0.20098860069574268,
+        0.9623150164342302,
+        0.18317584866885325
+      ],
+      "roles": [
+        "attachment",
+        "boundary"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          57.6906514213,
+          2.88672435166,
+          -3.58
+        ],
+        [
+          64.5540114251,
+          4.36863107557,
+          -3.84
+        ],
+        [
+          64.5226522878,
+          4.54587837318,
+          -4.8
+        ]
+      ],
+      "geometry_ref": "triangle:143",
+      "id": "escape_tunnel_shell_tunnel_walls_000143",
+      "metadata": {
+        "annotation_id": "tunnel_walls",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        -0.20076824195045642,
+        0.9621645192055621,
+        0.1842051872398074
+      ],
+      "roles": [
+        "attachment",
+        "boundary"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          64.5226522878,
+          4.54587837318,
+          -4.8
+        ],
+        [
+          69.850130039,
+          11.3968790631,
+          -5.0
+        ],
+        [
+          63.4773477122,
+          10.4541216268,
+          -4.8
+        ]
+      ],
+      "geometry_ref": "triangle:144",
+      "id": "escape_tunnel_shell_tunnel_floor_000144",
+      "metadata": {
+        "annotation_id": "tunnel_floor",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        0.030568274254134872,
+        0.005408233137060673,
+        0.9995180496736712
+      ],
+      "roles": [
+        "support",
+        "traversable"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          64.5226522878,
+          4.54587837318,
+          -4.8
+        ],
+        [
+          70.149869961,
+          4.20312093687,
+          -5.0
+        ],
+        [
+          69.850130039,
+          11.3968790631,
+          -5.0
+        ]
+      ],
+      "geometry_ref": "triangle:145",
+      "id": "escape_tunnel_shell_tunnel_floor_000145",
+      "metadata": {
+        "annotation_id": "tunnel_floor",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        0.03560933760254782,
+        0.001483722400471161,
+        0.9993646850091042
+      ],
+      "roles": [
+        "support",
+        "traversable"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          63.4773477122,
+          10.4541216268,
+          -4.8
+        ],
+        [
+          69.8411378414,
+          11.6126918069,
+          -3.9
+        ],
+        [
+          63.4459885749,
+          10.6313689244,
+          -3.84
+        ]
+      ],
+      "geometry_ref": "triangle:146",
+      "id": "escape_tunnel_shell_tunnel_walls_000146",
+      "metadata": {
+        "annotation_id": "tunnel_walls",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        0.15076468457559242,
+        -0.9712478404237613,
+        0.18424885985265213
+      ],
+      "roles": [
+        "attachment",
+        "boundary"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          63.4773477122,
+          10.4541216268,
+          -4.8
+        ],
+        [
+          69.850130039,
+          11.3968790631,
+          -5.0
+        ],
+        [
+          69.8411378414,
+          11.6126918069,
+          -3.9
+        ]
+      ],
+      "geometry_ref": "triangle:147",
+      "id": "escape_tunnel_shell_tunnel_walls_000147",
+      "metadata": {
+        "annotation_id": "tunnel_walls",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        0.14951256719340245,
+        -0.970030924293912,
+        0.1915358926278236
+      ],
+      "roles": [
+        "attachment",
+        "boundary"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          63.4459885749,
+          10.6313689244,
+          -3.84
+        ],
+        [
+          69.850130039,
+          11.3968790631,
+          -1.26
+        ],
+        [
+          63.4773477122,
+          10.4541216268,
+          -1.536
+        ]
+      ],
+      "geometry_ref": "triangle:148",
+      "id": "escape_tunnel_shell_tunnel_walls_000148",
+      "metadata": {
+        "annotation_id": "tunnel_walls",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        0.1491971981072012,
+        -0.9857370052982256,
+        -0.07786367871252062
+      ],
+      "roles": [
+        "attachment",
+        "boundary"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          63.4459885749,
+          10.6313689244,
+          -3.84
+        ],
+        [
+          69.8411378414,
+          11.6126918069,
+          -3.9
+        ],
+        [
+          69.850130039,
+          11.3968790631,
+          -1.26
+        ]
+      ],
+      "geometry_ref": "triangle:149",
+      "id": "escape_tunnel_shell_tunnel_walls_000149",
+      "metadata": {
+        "annotation_id": "tunnel_walls",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        0.1504306027276474,
+        -0.9852920114102311,
+        -0.08105730080737776
+      ],
+      "roles": [
+        "attachment",
+        "boundary"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          63.4773477122,
+          10.4541216268,
+          -1.536
+        ],
+        [
+          69.9160728219,
+          9.81425227535,
+          0.5
+        ],
+        [
+          63.7073147188,
+          9.15430811102,
+          0.0
+        ]
+      ],
+      "geometry_ref": "triangle:150",
+      "id": "escape_tunnel_shell_tunnel_walls_000150",
+      "metadata": {
+        "annotation_id": "tunnel_walls",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        0.13187395310618427,
+        -0.7468663880122343,
+        -0.6517667212659041
+      ],
+      "roles": [
+        "attachment",
+        "boundary"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          63.4773477122,
+          10.4541216268,
+          -1.536
+        ],
+        [
+          69.850130039,
+          11.3968790631,
+          -1.26
+        ],
+        [
+          69.9160728219,
+          9.81425227535,
+          0.5
+        ]
+      ],
+      "geometry_ref": "triangle:151",
+      "id": "escape_tunnel_shell_tunnel_walls_000151",
+      "metadata": {
+        "annotation_id": "tunnel_walls",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        0.13738624534922447,
+        -0.7339667709437666,
+        -0.6651449456616378
+      ],
+      "roles": [
+        "attachment",
+        "boundary"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          63.7073147188,
+          9.15430811102,
+          0.0
+        ],
+        [
+          70.0839271781,
+          5.78574772465,
+          0.5
+        ],
+        [
+          64.2926852812,
+          5.84569188898,
+          0.0
+        ]
+      ],
+      "geometry_ref": "triangle:152",
+      "id": "escape_tunnel_shell_tunnel_overhead_000152",
+      "metadata": {
+        "annotation_id": "tunnel_overhead",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        0.08616389893414061,
+        0.015244382120134686,
+        -0.996164339521468
+      ],
+      "roles": [
+        "attachment",
+        "overhead"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          63.7073147188,
+          9.15430811102,
+          0.0
+        ],
+        [
+          69.9160728219,
+          9.81425227535,
+          0.5
+        ],
+        [
+          70.0839271781,
+          5.78574772465,
+          0.5
+        ]
+      ],
+      "geometry_ref": "triangle:153",
+      "id": "escape_tunnel_shell_tunnel_overhead_000153",
+      "metadata": {
+        "annotation_id": "tunnel_overhead",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        0.07991941011764388,
+        0.0033299754199978666,
+        -0.9967957660173673
+      ],
+      "roles": [
+        "attachment",
+        "overhead"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          64.2926852812,
+          5.84569188898,
+          0.0
+        ],
+        [
+          70.149869961,
+          4.20312093687,
+          -1.26
+        ],
+        [
+          64.5226522878,
+          4.54587837318,
+          -1.536
+        ]
+      ],
+      "geometry_ref": "triangle:154",
+      "id": "escape_tunnel_shell_tunnel_walls_000154",
+      "metadata": {
+        "annotation_id": "tunnel_walls",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        0.0779559570355436,
+        0.7667584525722112,
+        -0.6371847017715827
+      ],
+      "roles": [
+        "attachment",
+        "boundary"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          64.2926852812,
+          5.84569188898,
+          0.0
+        ],
+        [
+          70.0839271781,
+          5.78574772465,
+          0.5
+        ],
+        [
+          70.149869961,
+          4.20312093687,
+          -1.26
+        ]
+      ],
+      "geometry_ref": "triangle:155",
+      "id": "escape_tunnel_shell_tunnel_walls_000155",
+      "metadata": {
+        "annotation_id": "tunnel_walls",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        0.06518234427033338,
+        0.7432142567926827,
+        -0.6658707310698706
+      ],
+      "roles": [
+        "attachment",
+        "boundary"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          64.5226522878,
+          4.54587837318,
+          -1.536
+        ],
+        [
+          70.1588621586,
+          3.98730819308,
+          -3.9
+        ],
+        [
+          64.5540114251,
+          4.36863107557,
+          -3.84
+        ]
+      ],
+      "geometry_ref": "triangle:156",
+      "id": "escape_tunnel_shell_tunnel_walls_000156",
+      "metadata": {
+        "annotation_id": "tunnel_walls",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        0.06687726105480357,
+        0.9948909461375102,
+        -0.07562696111452444
+      ],
+      "roles": [
+        "attachment",
+        "boundary"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          64.5226522878,
+          4.54587837318,
+          -1.536
+        ],
+        [
+          70.149869961,
+          4.20312093687,
+          -1.26
+        ],
+        [
+          70.1588621586,
+          3.98730819308,
+          -3.9
+        ]
+      ],
+      "geometry_ref": "triangle:157",
+      "id": "escape_tunnel_shell_tunnel_walls_000157",
+      "metadata": {
+        "annotation_id": "tunnel_walls",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        0.0645596779174679,
+        0.9946139637505181,
+        -0.0810870587681896
+      ],
+      "roles": [
+        "attachment",
+        "boundary"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          64.5540114251,
+          4.36863107557,
+          -3.84
+        ],
+        [
+          70.149869961,
+          4.20312093687,
+          -5.0
+        ],
+        [
+          64.5226522878,
+          4.54587837318,
+          -4.8
+        ]
+      ],
+      "geometry_ref": "triangle:158",
+      "id": "escape_tunnel_shell_tunnel_walls_000158",
+      "metadata": {
+        "annotation_id": "tunnel_walls",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        0.06615504037216252,
+        0.9816085374974002,
+        0.17907593290437596
+      ],
+      "roles": [
+        "attachment",
+        "boundary"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          64.5540114251,
+          4.36863107557,
+          -3.84
+        ],
+        [
+          70.1588621586,
+          3.98730819308,
+          -3.9
+        ],
+        [
+          70.149869961,
+          4.20312093687,
+          -5.0
+        ]
+      ],
+      "geometry_ref": "triangle:159",
+      "id": "escape_tunnel_shell_tunnel_walls_000159",
+      "metadata": {
+        "annotation_id": "tunnel_walls",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        0.06866164116087964,
+        0.9790824858941517,
+        0.1915282351206288
+      ],
+      "roles": [
+        "attachment",
+        "boundary"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          70.149869961,
+          4.20312093687,
+          -5.0
+        ],
+        [
+          75.8584119715,
+          12.2476408547,
+          -5.0
+        ],
+        [
+          69.850130039,
+          11.3968790631,
+          -5.0
+        ]
+      ],
+      "geometry_ref": "triangle:160",
+      "id": "escape_tunnel_shell_tunnel_floor_000160",
+      "metadata": {
+        "annotation_id": "tunnel_floor",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        0.0,
+        -0.0,
+        1.0
+      ],
+      "roles": [
+        "support",
+        "traversable"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          70.149869961,
+          4.20312093687,
+          -5.0
+        ],
+        [
+          76.1415880285,
+          3.75235914534,
+          -5.0
+        ],
+        [
+          75.8584119715,
+          12.2476408547,
+          -5.0
+        ]
+      ],
+      "geometry_ref": "triangle:161",
+      "id": "escape_tunnel_shell_tunnel_floor_000161",
+      "metadata": {
+        "annotation_id": "tunnel_floor",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        -0.0,
+        0.0,
+        1.0
+      ],
+      "roles": [
+        "support",
+        "traversable"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          69.850130039,
+          11.3968790631,
+          -5.0
+        ],
+        [
+          75.8499166898,
+          12.5024993059,
+          -3.76
+        ],
+        [
+          69.8411378414,
+          11.6126918069,
+          -3.9
+        ]
+      ],
+      "geometry_ref": "triangle:162",
+      "id": "escape_tunnel_shell_tunnel_walls_000162",
+      "metadata": {
+        "annotation_id": "tunnel_walls",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        0.13939614994957109,
+        -0.9714958837826233,
+        0.19174060908596352
+      ],
+      "roles": [
+        "attachment",
+        "boundary"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          69.850130039,
+          11.3968790631,
+          -5.0
+        ],
+        [
+          75.8584119715,
+          12.2476408547,
+          -5.0
+        ],
+        [
+          75.8499166898,
+          12.5024993059,
+          -3.76
+        ]
+      ],
+      "geometry_ref": "triangle:163",
+      "id": "escape_tunnel_shell_tunnel_walls_000163",
+      "metadata": {
+        "annotation_id": "tunnel_walls",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        0.13735795454292457,
+        -0.970054514335114,
+        0.20031732711338285
+      ],
+      "roles": [
+        "attachment",
+        "boundary"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          69.8411378414,
+          11.6126918069,
+          -3.9
+        ],
+        [
+          75.8584119715,
+          12.2476408547,
+          -0.784
+        ],
+        [
+          69.850130039,
+          11.3968790631,
+          -1.26
+        ]
+      ],
+      "geometry_ref": "triangle:164",
+      "id": "escape_tunnel_shell_tunnel_walls_000164",
+      "metadata": {
+        "annotation_id": "tunnel_walls",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        0.14603350059363737,
+        -0.9859501182531999,
+        -0.08109612210746803
+      ],
+      "roles": [
+        "attachment",
+        "boundary"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          69.8411378414,
+          11.6126918069,
+          -3.9
+        ],
+        [
+          75.8499166898,
+          12.5024993059,
+          -3.76
+        ],
+        [
+          75.8584119715,
+          12.2476408547,
+          -0.784
+        ]
+      ],
+      "geometry_ref": "triangle:165",
+      "id": "escape_tunnel_shell_tunnel_walls_000165",
+      "metadata": {
+        "annotation_id": "tunnel_walls",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        0.1478926463947845,
+        -0.9853606637237127,
+        -0.08480641207073697
+      ],
+      "roles": [
+        "attachment",
+        "boundary"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          69.850130039,
+          11.3968790631,
+          -1.26
+        ],
+        [
+          75.920710704,
+          10.3786788786,
+          1.2
+        ],
+        [
+          69.9160728219,
+          9.81425227535,
+          0.5
+        ]
+      ],
+      "geometry_ref": "triangle:166",
+      "id": "escape_tunnel_shell_tunnel_walls_000166",
+      "metadata": {
+        "annotation_id": "tunnel_walls",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        0.14634795373563908,
+        -0.7328440393219976,
+        -0.6644711359175881
+      ],
+      "roles": [
+        "attachment",
+        "boundary"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          69.850130039,
+          11.3968790631,
+          -1.26
+        ],
+        [
+          75.8584119715,
+          12.2476408547,
+          -0.784
+        ],
+        [
+          75.920710704,
+          10.3786788786,
+          1.2
+        ]
+      ],
+      "geometry_ref": "triangle:167",
+      "id": "escape_tunnel_shell_tunnel_walls_000167",
+      "metadata": {
+        "annotation_id": "tunnel_walls",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        0.15534000951538993,
+        -0.7166194802485774,
+        -0.6799455875083075
+      ],
+      "roles": [
+        "attachment",
+        "boundary"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          69.9160728219,
+          9.81425227535,
+          0.5
+        ],
+        [
+          76.079289296,
+          5.62132112139,
+          1.2
+        ],
+        [
+          70.0839271781,
+          5.78574772465,
+          0.5
+        ]
+      ],
+      "geometry_ref": "triangle:168",
+      "id": "escape_tunnel_shell_tunnel_overhead_000168",
+      "metadata": {
+        "annotation_id": "tunnel_overhead",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        0.11609866503832218,
+        0.0048374443743151125,
+        -0.9932259053751291
+      ],
+      "roles": [
+        "attachment",
+        "overhead"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          69.9160728219,
+          9.81425227535,
+          0.5
+        ],
+        [
+          75.920710704,
+          10.3786788786,
+          1.2
+        ],
+        [
+          76.079289296,
+          5.62132112139,
+          1.2
+        ]
+      ],
+      "geometry_ref": "triangle:169",
+      "id": "escape_tunnel_shell_tunnel_overhead_000169",
+      "metadata": {
+        "annotation_id": "tunnel_overhead",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        0.11543469120816585,
+        0.003847823042528723,
+        -0.9933076191812428
+      ],
+      "roles": [
+        "attachment",
+        "overhead"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          70.0839271781,
+          5.78574772465,
+          0.5
+        ],
+        [
+          76.1415880285,
+          3.75235914534,
+          -0.784
+        ],
+        [
+          70.149869961,
+          4.20312093687,
+          -1.26
+        ]
+      ],
+      "geometry_ref": "triangle:170",
+      "id": "escape_tunnel_shell_tunnel_walls_000170",
+      "metadata": {
+        "annotation_id": "tunnel_walls",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        0.10838989545956121,
+        0.7412174476057543,
+        -0.6624562822761033
+      ],
+      "roles": [
+        "attachment",
+        "boundary"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          70.0839271781,
+          5.78574772465,
+          0.5
+        ],
+        [
+          76.079289296,
+          5.62132112139,
+          1.2
+        ],
+        [
+          76.1415880285,
+          3.75235914534,
+          -0.784
+        ]
+      ],
+      "geometry_ref": "triangle:171",
+      "id": "escape_tunnel_shell_tunnel_walls_000171",
+      "metadata": {
+        "annotation_id": "tunnel_walls",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        0.09937621841179717,
+        0.7258469692593543,
+        -0.6806398052062343
+      ],
+      "roles": [
+        "attachment",
+        "boundary"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          70.149869961,
+          4.20312093687,
+          -1.26
+        ],
+        [
+          76.1500833102,
+          3.49750069406,
+          -3.76
+        ],
+        [
+          70.1588621586,
+          3.98730819308,
+          -3.9
+        ]
+      ],
+      "geometry_ref": "triangle:172",
+      "id": "escape_tunnel_shell_tunnel_walls_000172",
+      "metadata": {
+        "annotation_id": "tunnel_walls",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        0.08309321449098392,
+        0.9932515670895956,
+        -0.0809125588497729
+      ],
+      "roles": [
+        "attachment",
+        "boundary"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          70.149869961,
+          4.20312093687,
+          -1.26
+        ],
+        [
+          76.1415880285,
+          3.75235914534,
+          -0.784
+        ],
+        [
+          76.1500833102,
+          3.49750069406,
+          -3.76
+        ]
+      ],
+      "geometry_ref": "triangle:173",
+      "id": "escape_tunnel_shell_tunnel_walls_000173",
+      "metadata": {
+        "annotation_id": "tunnel_walls",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        0.08144657346687079,
+        0.9930626841522697,
+        -0.0848113259818231
+      ],
+      "roles": [
+        "attachment",
+        "boundary"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          70.1588621586,
+          3.98730819308,
+          -3.9
+        ],
+        [
+          76.1415880285,
+          3.75235914534,
+          -5.0
+        ],
+        [
+          70.149869961,
+          4.20312093687,
+          -5.0
+        ]
+      ],
+      "geometry_ref": "triangle:174",
+      "id": "escape_tunnel_shell_tunnel_walls_000174",
+      "metadata": {
+        "annotation_id": "tunnel_walls",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        0.07363157235669965,
+        0.9787422774467968,
+        0.19142086064621472
+      ],
+      "roles": [
+        "attachment",
+        "boundary"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "boundary": [
+        [
+          70.1588621586,
+          3.98730819308,
+          -3.9
+        ],
+        [
+          76.1500833102,
+          3.49750069406,
+          -3.76
+        ],
+        [
+          76.1415880285,
+          3.75235914534,
+          -5.0
+        ]
+      ],
+      "geometry_ref": "triangle:175",
+      "id": "escape_tunnel_shell_tunnel_walls_000175",
+      "metadata": {
+        "annotation_id": "tunnel_walls",
+        "auto_classified": false,
+        "space_id": "prison_block"
+      },
+      "normal": [
+        0.0751823804068958,
+        0.9768541576066087,
+        0.20025874373678645
+      ],
+      "roles": [
+        "attachment",
+        "boundary"
+      ],
+      "source_id": "escape_tunnel_shell",
+      "transform": {
+        "rotation_rpy": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    }
+  ],
+  "triangle_groups": {
+    "tunnel_floor": [
+      0,
+      1,
+      16,
+      17,
+      32,
+      33,
+      48,
+      49,
+      64,
+      65,
+      80,
+      81,
+      96,
+      97,
+      112,
+      113,
+      128,
+      129,
+      144,
+      145,
+      160,
+      161
+    ],
+    "tunnel_overhead": [
+      8,
+      9,
+      24,
+      25,
+      40,
+      41,
+      56,
+      57,
+      72,
+      73,
+      88,
+      89,
+      104,
+      105,
+      120,
+      121,
+      136,
+      137,
+      152,
+      153,
+      168,
+      169
+    ],
+    "tunnel_walls": [
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      18,
+      19,
+      20,
+      21,
+      22,
+      23,
+      26,
+      27,
+      28,
+      29,
+      30,
+      31,
+      34,
+      35,
+      36,
+      37,
+      38,
+      39,
+      42,
+      43,
+      44,
+      45,
+      46,
+      47,
+      50,
+      51,
+      52,
+      53,
+      54,
+      55,
+      58,
+      59,
+      60,
+      61,
+      62,
+      63,
+      66,
+      67,
+      68,
+      69,
+      70,
+      71,
+      74,
+      75,
+      76,
+      77,
+      78,
+      79,
+      82,
+      83,
+      84,
+      85,
+      86,
+      87,
+      90,
+      91,
+      92,
+      93,
+      94,
+      95,
+      98,
+      99,
+      100,
+      101,
+      102,
+      103,
+      106,
+      107,
+      108,
+      109,
+      110,
+      111,
+      114,
+      115,
+      116,
+      117,
+      118,
+      119,
+      122,
+      123,
+      124,
+      125,
+      126,
+      127,
+      130,
+      131,
+      132,
+      133,
+      134,
+      135,
+      138,
+      139,
+      140,
+      141,
+      142,
+      143,
+      146,
+      147,
+      148,
+      149,
+      150,
+      151,
+      154,
+      155,
+      156,
+      157,
+      158,
+      159,
+      162,
+      163,
+      164,
+      165,
+      166,
+      167,
+      170,
+      171,
+      172,
+      173,
+      174,
+      175
+    ]
+  },
+  "visual_triangles": 176
+}

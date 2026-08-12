@@ -1,0 +1,22 @@
+<?xml version='1.0' encoding='utf-8'?>
+<sdf version="1.12">
+  <model name="room_geometry">
+    <static>true</static>
+    <link name="room_geometry_body_link">
+      <visual name="structure_visual">
+        <geometry>
+          <mesh>
+            <uri>room_geometry_prison_block.obj</uri>
+          </mesh>
+        </geometry>
+      </visual>
+      <collision name="structure_collision">
+        <geometry>
+          <mesh>
+            <uri>room_geometry_prison_block.obj</uri>
+          </mesh>
+        </geometry>
+      </collision>
+    </link>
+  </model>
+</sdf>

@@ -8,7 +8,7 @@ import numpy as np
 
 from agents import function_tool
 from omegaconf import DictConfig
-from pydrake.all import RigidTransform, RollPitchYaw
+from pydrake.all import RigidTransform, RollPitchYaw, RotationMatrix
 
 from scenesmith.agent_utils.action_logger import log_scene_action
 from scenesmith.agent_utils.asset_manager import (
@@ -73,6 +73,7 @@ class FurnitureTools:
         self.scene = scene
         self.asset_manager = asset_manager
         self.cfg = cfg
+        self._structural_surface_index = None
 
         # Initialize placement noise configuration.
         # Start with natural profile as default until planner sets it.
@@ -127,6 +128,18 @@ class FurnitureTools:
         """
         room_geometry = self.scene.room_geometry
 
+        surface_index = self._get_structural_surface_index()
+        if surface_index is not None:
+            pose = surface_index.support_pose(x, y)
+            if pose is None:
+                return (
+                    False,
+                    f"Position ({x:.3f}, {y:.3f}) is not on a traversable "
+                    "structural support surface (it may be outside the room, "
+                    "inside a hole/shaft, or on an overly steep patch).",
+                )
+            return True, ""
+
         # Floor bounds: [-length/2, length/2] × [-width/2, width/2].
         min_x = -room_geometry.length / 2
         max_x = room_geometry.length / 2
@@ -142,6 +155,58 @@ class FurnitureTools:
             return False, error_msg
 
         return True, ""
+
+    def _get_structural_surface_index(self):
+        """Lazily load compiled surface patches for irregular geometry."""
+
+        if self._structural_surface_index is False:
+            return None
+        if self._structural_surface_index is not None:
+            return self._structural_surface_index
+        sidecar_paths = [
+            path
+            for path in (
+                self.scene.room_geometry.structural_surface_path,
+                *self.scene.room_geometry.additional_structural_surface_paths,
+            )
+            if path is not None and path.exists()
+        ]
+        if not sidecar_paths:
+            self._structural_surface_index = False
+            return None
+        from scenesmith.agent_utils.structural_surfaces import (
+            StructuralSurfaceIndex,
+            load_surface_patches,
+        )
+
+        self._structural_surface_index = StructuralSurfaceIndex(
+            patch
+            for sidecar_path in sidecar_paths
+            for patch in load_surface_patches(sidecar_path)
+        )
+        return self._structural_surface_index
+
+    def _surface_aligned_pose(
+        self, x: float, y: float, yaw_degrees: float
+    ) -> tuple[float, float, float, float] | None:
+        """Return z/roll/pitch/yaw aligned to the support surface, if present."""
+
+        surface_index = self._get_structural_surface_index()
+        if surface_index is None:
+            return None
+        pose = surface_index.support_pose(x, y, yaw=math.radians(yaw_degrees))
+        if pose is None:
+            return None
+        rotation = RotationMatrix(
+            np.column_stack((pose.tangent_x, pose.tangent_y, pose.normal))
+        )
+        rpy = RollPitchYaw(rotation)
+        return (
+            pose.position[2],
+            math.degrees(rpy.roll_angle()),
+            math.degrees(rpy.pitch_angle()),
+            math.degrees(rpy.yaw_angle()),
+        )
 
     def _create_loop_error_response(
         self, method_name: str, attempt_count: int, args: tuple, kwargs: dict
@@ -460,6 +525,10 @@ class FurnitureTools:
                     error_type=FurnitureErrorType.POSITION_OUT_OF_BOUNDS,
                 )
 
+            surface_pose = self._surface_aligned_pose(x, y, yaw)
+            if surface_pose is not None:
+                z, roll, pitch, yaw = surface_pose
+
             # Create new scene object with unique ID and specified pose.
             # Convert degrees to radians for Drake's RigidTransform.
             scene_object = copy_scene_object_with_new_pose(
@@ -600,6 +669,10 @@ class FurnitureTools:
                     object_id=object_id,
                     error_type=FurnitureErrorType.POSITION_OUT_OF_BOUNDS,
                 ).to_json()
+
+            surface_pose = self._surface_aligned_pose(x, y, yaw)
+            if surface_pose is not None:
+                z, roll, pitch, yaw = surface_pose
 
             # Get current position and rotation.
             current_transform = scene_obj.transform

@@ -60,6 +60,7 @@ import time
 from dataclasses import dataclass, field
 
 from scenesmith.agent_utils.house import PlacedRoom, RoomSpec, Wall, WallDirection
+from scenesmith.agent_utils.structural_geometry import Footprint2D
 
 console_logger = logging.getLogger(__name__)
 
@@ -345,10 +346,53 @@ def place_rooms(
     if not room_specs:
         return []
 
+    # v2 layouts place each level independently in XY.  This permits stacked
+    # rooms with identical footprints while retaining the proven legacy
+    # rectangle search within each level.  Cross-level adjacency must be
+    # represented by a ConnectorSpec rather than a planar door/open edge.
+    spec_lookup = {spec.room_id: spec for spec in room_specs}
+    for spec in room_specs:
+        for connected_room_id in spec.connections:
+            connected = spec_lookup.get(connected_room_id)
+            if connected is not None and connected.level_id != spec.level_id:
+                raise PlacementError(
+                    f"Rooms '{spec.room_id}' and '{connected_room_id}' are on "
+                    "different levels; use a structural connector instead of "
+                    "a planar room connection"
+                )
+
+    level_groups: dict[str, list[RoomSpec]] = {}
+    for spec in room_specs:
+        if spec.footprint is not None:
+            raise PlacementError(
+                f"Room '{spec.room_id}' has an arbitrary footprint. Polygon "
+                "placement is not available in the legacy rectangle placer."
+            )
+        if abs(spec.yaw) > 1e-9:
+            raise PlacementError(
+                f"Room '{spec.room_id}' has yaw={spec.yaw}. Rotated room "
+                "placement is not available in the legacy rectangle placer."
+            )
+        level_groups.setdefault(spec.level_id, []).append(spec)
+
+    if len(level_groups) > 1:
+        placed: list[PlacedRoom] = []
+        for level_specs in level_groups.values():
+            if len(level_specs) == 1:
+                placed.append(
+                    create_placed_room(spec=level_specs[0], position=(0.0, 0.0))
+                )
+            else:
+                placed.extend(
+                    _place_rooms_attempt(room_specs=level_specs, config=config)
+                )
+        update_wall_connectivity(placed)
+        return placed
+
     if len(room_specs) == 1:
         # Single room: place at origin.
         spec = room_specs[0]
-        return [_create_placed_room(spec=spec, position=(0.0, 0.0))]
+        return [create_placed_room(spec=spec, position=(0.0, 0.0))]
 
     return _place_rooms_attempt(room_specs=room_specs, config=config)
 
@@ -383,7 +427,7 @@ def _place_rooms_attempt(
 
     # Place first room at origin (should have no/fewest adjacencies).
     first_spec = sorted_specs[0]
-    first_room = _create_placed_room(first_spec, (0.0, 0.0))
+    first_room = create_placed_room(first_spec, (0.0, 0.0))
     initial_placed = [first_room]
     initial_slots = _get_room_slots(first_room)
 
@@ -429,7 +473,7 @@ def _place_rooms_attempt(
     )
 
     # Update wall connectivity.
-    _update_wall_connectivity(state.best_layout)
+    update_wall_connectivity(state.best_layout)
 
     return state.best_layout
 
@@ -493,7 +537,7 @@ def _get_all_candidates(
             )
 
             for pos in positions:
-                room = _create_placed_room(
+                room = create_placed_room(
                     spec=spec, position=pos, room_width=room_x, room_depth=room_y
                 )
 
@@ -909,6 +953,41 @@ def rooms_overlap(room_a: PlacedRoom, room_b: PlacedRoom) -> bool:
     Returns:
         True if rooms overlap (share interior space).
     """
+    if room_a.level_id != room_b.level_id:
+        return False
+
+    if (
+        room_a.footprint is not None
+        or room_b.footprint is not None
+        or abs(room_a.yaw) > 1e-9
+        or abs(room_b.yaw) > 1e-9
+    ):
+        from shapely.geometry import Polygon
+
+        def world_polygon(room: PlacedRoom) -> Polygon:
+            footprint = room.footprint or Footprint2D.rectangle(room.width, room.depth)
+            centered = footprint.centered_on_bounds()
+            cosine, sine = math.cos(room.yaw), math.sin(room.yaw)
+            center_x = room.position[0] + room.width / 2.0
+            center_y = room.position[1] + room.depth / 2.0
+
+            def transform(loop):
+                return tuple(
+                    (
+                        center_x + cosine * x - sine * y,
+                        center_y + sine * x + cosine * y,
+                    )
+                    for x, y in loop
+                )
+
+            return Polygon(
+                transform(centered.outer),
+                [transform(hole) for hole in centered.holes],
+            )
+
+        overlap_area = world_polygon(room_a).intersection(world_polygon(room_b)).area
+        return overlap_area > 1e-9
+
     # Room A bounds.
     a_min_x = room_a.position[0]
     a_max_x = room_a.position[0] + room_a.width
@@ -1037,6 +1116,8 @@ def _violates_exterior_clearance(
     """
     # Check if candidate is in any placed room's clearance zones.
     for placed in placed_rooms:
+        if placed.level_id != candidate.level_id:
+            continue
         placed_spec = room_spec_map.get(placed.room_id)
         if placed_spec and placed_spec.exterior_walls:
             zones = _get_exterior_clearance_zones(
@@ -1053,6 +1134,8 @@ def _violates_exterior_clearance(
         )
         for zone in zones:
             for placed in placed_rooms:
+                if placed.level_id != candidate.level_id:
+                    continue
                 if _overlaps_zone(room=placed, zone=zone):
                     return True
 
@@ -1072,6 +1155,9 @@ def rooms_share_edge(
     Returns:
         True if rooms share sufficient edge.
     """
+    if room_a.level_id != room_b.level_id:
+        return False
+
     # Room A bounds.
     a_min_x = room_a.position[0]
     a_max_x = room_a.position[0] + room_a.width
@@ -1204,7 +1290,7 @@ def get_shared_edge(room_a: PlacedRoom, room_b: PlacedRoom) -> SharedEdge | None
     return None
 
 
-def _create_placed_room(
+def create_placed_room(
     spec: RoomSpec,
     position: tuple[float, float],
     room_width: float | None = None,
@@ -1269,6 +1355,10 @@ def _create_placed_room(
         width=room_width,
         depth=room_depth,
         walls=walls,
+        level_id=spec.level_id,
+        elevation=spec.elevation,
+        yaw=spec.yaw,
+        footprint=spec.footprint,
     )
 
 
@@ -1338,7 +1428,7 @@ def _get_room_slots(room: PlacedRoom) -> list[Slot]:
     return slots
 
 
-def _update_wall_connectivity(placed_rooms: list[PlacedRoom]) -> None:
+def update_wall_connectivity(placed_rooms: list[PlacedRoom]) -> None:
     """Update wall is_exterior and faces_rooms based on placement.
 
     Args:
@@ -1352,6 +1442,8 @@ def _update_wall_connectivity(placed_rooms: list[PlacedRoom]) -> None:
 
             for other_room in placed_rooms:
                 if other_room.room_id == room.room_id:
+                    continue
+                if other_room.level_id != room.level_id:
                     continue
 
                 # Check if this wall touches the other room.

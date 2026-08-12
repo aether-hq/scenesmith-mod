@@ -1,0 +1,68 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="800" viewBox="0 0 1280 800">
+<style>
+  .title { fill:#f3efe5; font:700 26px sans-serif }
+  .subtitle { fill:#b7b0a3; font:15px sans-serif }
+  .label { fill:#ded7ca; font:14px sans-serif }
+  .small { fill:#999184; font:12px monospace }
+  .room { fill:#373b40; stroke:#aeb5bd; stroke-width:3 }
+  .tunnel { fill:#4a3528; stroke:#bb8c65; stroke-width:3 }
+  .floor { fill:none; stroke:#c89a70; stroke-width:4 }
+  .ceiling { fill:none; stroke:#8a6248; stroke-width:4 }
+  .light { fill:#ffd369; stroke:#fff1b1; stroke-width:2 }
+  .bar { stroke:#78838d; stroke-width:2 }
+  .breach { stroke:#121619; stroke-width:8 }
+</style>
+<rect width="100%" height="100%" fill="#121619"/>
+<text x="52" y="43" class="title">The Long Way Out — underground prison escape</text>
+<text x="52" y="67" class="subtitle">Real wall breach · 69 m irregular descending tunnel · surface-mounted ceiling lights</text>
+<text x="52" y="104" class="label">PLAN</text>
+<rect x="84.9" y="195.4" width="181.0" height="134.3" class="room"/>
+<polygon points="267.1,285.4 319.9,285.3 386.4,280.4 460.9,270.6 551.8,274.6 647.8,261.8 734.2,236.3 825.3,247.6 921.0,221.8 1009.8,201.5 1082.6,206.1 1160.1,212.2 1156.4,98.1 1078.7,109.5 996.3,122.2 904.1,155.6 818.8,175.4 728.8,176.1 634.2,196.2 549.1,218.3 459.0,206.2 378.4,223.3 315.5,234.5 264.9,239.8" class="tunnel"/>
+<line x1="266.0" y1="286.7" x2="266.0" y2="238.4" class="breach"/>
+<line x1="97.9" y1="212.9" x2="97.9" y2="195.4" class="bar"/>
+<line x1="104.3" y1="212.9" x2="104.3" y2="195.4" class="bar"/>
+<line x1="110.8" y1="212.9" x2="110.8" y2="195.4" class="bar"/>
+<line x1="117.3" y1="212.9" x2="117.3" y2="195.4" class="bar"/>
+<line x1="123.7" y1="212.9" x2="123.7" y2="195.4" class="bar"/>
+<line x1="130.2" y1="212.9" x2="130.2" y2="195.4" class="bar"/>
+<line x1="138.0" y1="212.9" x2="138.0" y2="195.4" class="bar"/>
+<line x1="144.4" y1="212.9" x2="144.4" y2="195.4" class="bar"/>
+<line x1="150.9" y1="212.9" x2="150.9" y2="195.4" class="bar"/>
+<line x1="157.3" y1="212.9" x2="157.3" y2="195.4" class="bar"/>
+<line x1="163.8" y1="212.9" x2="163.8" y2="195.4" class="bar"/>
+<line x1="170.3" y1="212.9" x2="170.3" y2="195.4" class="bar"/>
+<line x1="178.0" y1="212.9" x2="178.0" y2="195.4" class="bar"/>
+<line x1="184.5" y1="212.9" x2="184.5" y2="195.4" class="bar"/>
+<line x1="191.0" y1="212.9" x2="191.0" y2="195.4" class="bar"/>
+<line x1="197.4" y1="212.9" x2="197.4" y2="195.4" class="bar"/>
+<line x1="203.9" y1="212.9" x2="203.9" y2="195.4" class="bar"/>
+<line x1="210.4" y1="212.9" x2="210.4" y2="195.4" class="bar"/>
+<circle cx="117.3" cy="286.7" r="5" class="light"/>
+<circle cx="175.5" cy="286.7" r="5" class="light"/>
+<circle cx="233.6" cy="286.7" r="5" class="light"/>
+<circle cx="350.0" cy="255.9" r="5" class="light"/>
+<circle cx="505.1" cy="242.4" r="5" class="light"/>
+<circle cx="686.1" cy="217.6" r="5" class="light"/>
+<circle cx="867.2" cy="200.1" r="5" class="light"/>
+<circle cx="1042.0" cy="159.8" r="5" class="light"/>
+<text x="100.5" y="313.6" class="label">detention block</text>
+<text x="285.4" y="296.1" class="label">dug breach</text>
+<text x="731.5" y="152.5" class="label">hand-cut escape tunnel</text>
+<text x="1093.6" y="101.4" class="label">terminal cavern</text>
+<text x="52" y="447" class="label">LONGITUDINAL SECTION</text>
+<rect x="84.9" y="499.5" width="181.0" height="81.0" class="room"/>
+<polyline points="266.0,580.5 317.7,585.0 382.4,596.2 460.0,609.8 550.5,625.5 641.0,641.2 731.5,654.8 822.0,668.2 912.6,679.5 1003.1,688.5 1080.7,693.0 1158.3,693.0" class="floor"/>
+<polyline points="266.0,513.0 317.7,513.0 382.4,517.5 460.0,524.2 550.5,549.0 641.0,551.2 731.5,571.5 822.0,571.5 912.6,587.2 1003.1,580.5 1080.7,569.2 1158.3,553.5" class="ceiling"/>
+<circle cx="117.3" cy="501.1" r="5" class="light"/>
+<circle cx="175.5" cy="501.1" r="5" class="light"/>
+<circle cx="233.6" cy="501.1" r="5" class="light"/>
+<circle cx="350.0" cy="516.8" r="5" class="light"/>
+<circle cx="505.1" cy="538.1" r="5" class="light"/>
+<circle cx="686.1" cy="563.2" r="5" class="light"/>
+<circle cx="867.2" cy="580.7" r="5" class="light"/>
+<circle cx="1042.0" cy="576.2" r="5" class="light"/>
+<line x1="72" y1="580.5" x2="1210" y2="580.5" stroke="#5c6165" stroke-dasharray="6 7"/>
+<text x="72" y="572.5" class="small">detention datum z=0</text>
+<text x="964.3" y="683.0" class="small">z=-5 m · 6.2 m headroom</text>
+<text x="52" y="780" class="small">Yellow markers are fixture meshes positioned from StructuralSurfaceIndex overhead queries; matching SDF point lights are exported.</text>
+</svg>

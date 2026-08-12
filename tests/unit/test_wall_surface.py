@@ -1,14 +1,30 @@
 """Unit tests for WallSurface"""
 
+import tempfile
 import unittest
+
+from pathlib import Path
 
 import numpy as np
 
 from pydrake.math import RigidTransform, RotationMatrix
 
-from scenesmith.agent_utils.house import Opening, OpeningType, Wall, WallDirection
+from scenesmith.agent_utils.house import (
+    HouseLayout,
+    Opening,
+    OpeningType,
+    PlacedRoom,
+    RoomSpec,
+    Wall,
+    WallDirection,
+)
 from scenesmith.agent_utils.room import UniqueID
-from scenesmith.wall_agents.tools.wall_surface import WallSurface, _create_wall_surface
+from scenesmith.agent_utils.structural_geometry import Footprint2D
+from scenesmith.wall_agents.tools.wall_surface import (
+    WallSurface,
+    _create_wall_surface,
+    extract_wall_surfaces,
+)
 
 
 def _create_test_wall_surface(
@@ -327,6 +343,28 @@ class TestToWorldPoseRotation(unittest.TestCase):
         np.testing.assert_allclose(
             pose_no_rot.translation(), pose_with_rot.translation(), atol=1e-10
         )
+
+
+class TestStructuralWallSurfaceExtraction(unittest.TestCase):
+    def test_triangle_room_exposes_three_exact_attachment_panels(self) -> None:
+        footprint = Footprint2D(outer=((0, 0), (4, 0), (1, 3)))
+        layout = HouseLayout(
+            room_specs=[RoomSpec("triangle", length=4, width=3, footprint=footprint)],
+            placed_rooms=[PlacedRoom("triangle", (0, 0), 4, 3, footprint=footprint)],
+        )
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            layout.compile_polygon_rooms(Path(temporary_directory))
+            surfaces = extract_wall_surfaces(layout, "triangle", 2.5)
+
+            self.assertEqual(len(surfaces), 3)
+            self.assertTrue(all(surface.boundary_polygon for surface in surfaces))
+            self.assertTrue(
+                all(surface.contains_point_2d(0.1, 0.1) for surface in surfaces)
+            )
+            diagonal = max(surfaces, key=lambda surface: surface.length)
+            local_x = diagonal.transform.rotation().matrix()[:, 0]
+            self.assertGreater(abs(local_x[0]), 0.1)
+            self.assertGreater(abs(local_x[1]), 0.1)
 
 
 class TestExcludedRegionCoordinates(unittest.TestCase):

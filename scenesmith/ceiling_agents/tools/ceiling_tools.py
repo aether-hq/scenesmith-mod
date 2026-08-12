@@ -9,9 +9,11 @@ import math
 
 from typing import Any
 
+import numpy as np
+
 from agents import function_tool
 from omegaconf import DictConfig
-from pydrake.all import RigidTransform, RollPitchYaw
+from pydrake.all import RigidTransform, RollPitchYaw, RotationMatrix
 
 from scenesmith.agent_utils.action_logger import log_scene_action
 from scenesmith.agent_utils.asset_manager import AssetGenerationRequest, AssetManager
@@ -93,6 +95,7 @@ class CeilingTools:
         self.ceiling_height = ceiling_height
         self.asset_manager = asset_manager
         self.cfg = cfg
+        self._structural_surface_index: Any | bool | None = None
 
         # Initialize placement noise configuration.
         # Start with natural profile as default until planner sets it.
@@ -117,6 +120,80 @@ class CeilingTools:
 
         # Create tool closures.
         self.tools = self._create_tool_closures()
+
+    def _get_structural_surface_index(self):
+        """Lazily merge authored overhead patches for this room."""
+
+        if self._structural_surface_index is False:
+            return None
+        if self._structural_surface_index is not None:
+            return self._structural_surface_index
+        sidecar_paths = [
+            path
+            for path in (
+                self.scene.room_geometry.structural_surface_path,
+                *self.scene.room_geometry.additional_structural_surface_paths,
+            )
+            if path is not None and path.exists()
+        ]
+        if not sidecar_paths:
+            self._structural_surface_index = False
+            return None
+        from scenesmith.agent_utils.structural_surfaces import (
+            StructuralSurfaceIndex,
+            load_surface_patches,
+        )
+
+        self._structural_surface_index = StructuralSurfaceIndex(
+            patch
+            for sidecar_path in sidecar_paths
+            for patch in load_surface_patches(sidecar_path)
+        )
+        return self._structural_surface_index
+
+    def _ceiling_transform(
+        self, x: float, y: float, rotation_deg: float
+    ) -> RigidTransform | None:
+        """Resolve an authored overhead pose, falling back for legacy rooms."""
+
+        surface_index = self._get_structural_surface_index()
+        if surface_index is None:
+            return compute_ceiling_transform(
+                x=x,
+                y=y,
+                rotation_deg=rotation_deg,
+                ceiling_height=self.ceiling_height,
+            )
+        from scenesmith.agent_utils.structural_geometry import SurfaceRole
+
+        # A legacy rectangular room may only have an additional platform or
+        # terrain sidecar.  Those surfaces augment its floor without replacing
+        # the nominal flat ceiling.
+        if not surface_index.by_role(SurfaceRole.OVERHEAD):
+            return compute_ceiling_transform(
+                x=x,
+                y=y,
+                rotation_deg=rotation_deg,
+                ceiling_height=self.ceiling_height,
+            )
+        pose = surface_index.overhead_pose(x, y, yaw=math.radians(rotation_deg))
+        if pose is None:
+            return None
+
+        # Ceiling assets are canonicalized with their top at local z=0 and
+        # extend along local -Z.  Align that direction to the authored inward
+        # (usually downward) overhead normal while retaining a right-handed
+        # tangent frame.
+        rotation = RotationMatrix(
+            np.column_stack(
+                (
+                    pose.tangent_x,
+                    tuple(-component for component in pose.tangent_y),
+                    tuple(-component for component in pose.normal),
+                )
+            )
+        )
+        return RigidTransform(rotation, pose.position)
 
     def set_noise_profile(self, mode: PlacementNoiseMode) -> None:
         """Update the active noise profile based on placement style.
@@ -484,12 +561,22 @@ class CeilingTools:
             )
 
             # Convert ceiling SE(2) to world SE(3).
-            world_transform = compute_ceiling_transform(
-                x=noisy_x,
-                y=noisy_y,
-                rotation_deg=noisy_rotation,
-                ceiling_height=self.ceiling_height,
+            world_transform = self._ceiling_transform(
+                x=noisy_x, y=noisy_y, rotation_deg=noisy_rotation
             )
+            if world_transform is None:
+                return self._create_placement_failure_result(
+                    asset_id=asset_id,
+                    position_x=position_x,
+                    position_y=position_y,
+                    rotation_deg=rotation_degrees,
+                    message=(
+                        f"Position ({noisy_x:.2f}, {noisy_y:.2f}) is not on an "
+                        "authored overhead attachment surface (it may be inside "
+                        "an atrium, shaft, opening, or outside the ceiling)."
+                    ),
+                    error_type=CeilingErrorType.POSITION_OUT_OF_BOUNDS,
+                )
 
             # Create new scene object with unique ID.
             object_id = self.scene.generate_unique_id(original_asset.name)
@@ -598,12 +685,19 @@ class CeilingTools:
                 ).to_json()
 
             # Convert ceiling SE(2) to world SE(3).
-            world_transform = compute_ceiling_transform(
-                x=position_x,
-                y=position_y,
-                rotation_deg=rotation_degrees,
-                ceiling_height=self.ceiling_height,
+            world_transform = self._ceiling_transform(
+                x=position_x, y=position_y, rotation_deg=rotation_degrees
             )
+            if world_transform is None:
+                return CeilingOperationResult(
+                    success=False,
+                    message=(
+                        f"Position ({position_x:.2f}, {position_y:.2f}) is not "
+                        "on an authored overhead attachment surface."
+                    ),
+                    object_id=object_id,
+                    error_type=CeilingErrorType.POSITION_OUT_OF_BOUNDS,
+                ).to_json()
 
             # Update the object's transform.
             scene_object.transform = world_transform

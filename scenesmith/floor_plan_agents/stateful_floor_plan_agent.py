@@ -7,6 +7,7 @@ with rooms, doors, windows, and materials, then generates the geometry.
 import copy
 import json
 import logging
+import math
 import shutil
 
 from pathlib import Path
@@ -19,7 +20,7 @@ import yaml
 
 from agents import Agent, FunctionTool, Runner, RunResult
 from omegaconf import DictConfig
-from pydrake.all import RigidTransform
+from pydrake.all import RigidTransform, RollPitchYaw
 
 from scenesmith.agent_utils.action_logger import log_scene_action
 from scenesmith.agent_utils.base_stateful_agent import (
@@ -38,6 +39,7 @@ from scenesmith.agent_utils.house import (
     Wall,
     WallDirection,
     compute_wall_normals,
+    legacy_openings_to_boundary_portals,
 )
 from scenesmith.agent_utils.placement_noise import PlacementNoiseMode
 from scenesmith.agent_utils.rendering import save_directive_as_blend
@@ -734,7 +736,17 @@ class StatefulFloorPlanAgent(BaseStatefulAgent, BaseFloorPlanAgent):
         Args:
             output_dir: Directory to save GLTF files.
         """
+        replacement_space_ids = {
+            mesh.space_id
+            for mesh in self.layout.structural_meshes
+            if mesh.replaces_room_shell
+        }
         for room_spec in self.layout.room_specs:
+            if room_spec.room_id in replacement_space_ids:
+                # compile_structural_meshes below creates the room-compatible
+                # SDF and RoomGeometry. Do not surround it with a legacy box.
+                self.layout.invalidate_room_geometry(room_spec.room_id)
+                continue
             # Skip rooms that already have geometry (not invalidated).
             if room_spec.room_id in self.layout.room_geometries:
                 console_logger.debug(
@@ -747,6 +759,29 @@ class StatefulFloorPlanAgent(BaseStatefulAgent, BaseFloorPlanAgent):
                 room_spec=room_spec, output_dir=output_dir
             )
             self.layout.set_room_geometry(room_spec.room_id, room_geometry)
+
+        # Structural assets are authored independently of the legacy room loop,
+        # but must exist before ``to_drake_directive`` is called.  Compile them
+        # after rooms so room-local surface sidecars can be attached to the
+        # generated RoomGeometry and consumed by later placement agents.
+        structural_dir = output_dir / "structural"
+        if self.layout.connectors:
+            self.layout.compile_connectors(structural_dir / "connectors")
+        if self.layout.structural_meshes:
+            self.layout.compile_structural_meshes(structural_dir / "meshes")
+        if self.layout.platforms:
+            self.layout.compile_platforms(structural_dir / "platforms")
+        if self.layout.heightfields:
+            self.layout.compile_heightfields(structural_dir / "heightfields")
+
+        blocked_connectors = self.layout.geometrically_blocked_connectors()
+        if blocked_connectors:
+            raise ValueError(
+                "Structural connectors fail support/headroom/width clearance: "
+                + ", ".join(sorted(blocked_connectors))
+                + ". Add or resize independent floor/ceiling openings, widen "
+                "the connector, or revise its route."
+            )
 
     def _export_floor_plan(self, output_dir: Path) -> None:
         """Export floor plan to .blend and .dmd.yaml files.
@@ -1274,6 +1309,35 @@ class StatefulFloorPlanAgent(BaseStatefulAgent, BaseFloorPlanAgent):
                 f"Ensure placement algorithm ran successfully."
             )
 
+        from scenesmith.agent_utils.structural_geometry import ElevationProfile
+
+        if (
+            room_spec.footprint is not None
+            or room_spec.floor_footprint is not None
+            or room_spec.ceiling_footprint is not None
+            or room_spec.floor_profile != ElevationProfile()
+            or room_spec.ceiling_profile is not None
+            or abs(room_spec.yaw) > 1e-9
+            or len(self.layout.levels) > 1
+            or bool(self.layout.connectors)
+            or any(
+                portal.source_space_id == room_spec.room_id
+                for portal in self.layout.portals
+            )
+            or any(
+                heightfield.space_id == room_spec.room_id and heightfield.replaces_floor
+                for heightfield in self.layout.heightfields
+            )
+        ):
+            return self._generate_polygon_room_geometry(
+                room_spec=room_spec,
+                placed_room=placed_room,
+                output_dir=output_dir,
+                wall_height=wall_height,
+                wall_thickness=wall_thickness,
+                floor_thickness=floor_thickness,
+            )
+
         # Get materials for this room.
         room_materials = self.layout.room_materials.get(room_spec.room_id)
         wall_material = Material.from_path("materials/Plaster001_1K-JPG")  # Default.
@@ -1375,6 +1439,185 @@ class StatefulFloorPlanAgent(BaseStatefulAgent, BaseFloorPlanAgent):
             wall_height=wall_height,
             wall_thickness=wall_thickness,
             openings=openings,
+        )
+
+    def _generate_polygon_room_geometry(
+        self,
+        *,
+        room_spec: RoomSpec,
+        placed_room: PlacedRoom,
+        output_dir: Path,
+        wall_height: float,
+        wall_thickness: float,
+        floor_thickness: float,
+    ) -> RoomGeometry:
+        """Generate an arbitrary polygon room without cardinal-wall assumptions."""
+
+        from scenesmith.agent_utils.structural_compiler import (
+            compile_polygon_space,
+            write_compiled_structure,
+        )
+        from scenesmith.agent_utils.structural_geometry import Footprint2D, SurfaceRole
+
+        source_footprint = room_spec.footprint or Footprint2D.rectangle(
+            room_spec.length, room_spec.width
+        )
+        min_x, min_y, max_x, max_y = source_footprint.bounds
+        footprint_width = max_x - min_x
+        footprint_depth = max_y - min_y
+        if not math.isclose(
+            footprint_width, room_spec.length, rel_tol=0.0, abs_tol=1e-6
+        ) or not math.isclose(
+            footprint_depth, room_spec.width, rel_tol=0.0, abs_tol=1e-6
+        ):
+            raise ValueError(
+                f"Room '{room_spec.room_id}' footprint bounds are "
+                f"{footprint_width:g} × {footprint_depth:g}, but length/width "
+                f"are {room_spec.length:g} × {room_spec.width:g}"
+            )
+
+        footprint = source_footprint.centered_on_bounds()
+        floor_footprint = (
+            room_spec.floor_footprint or source_footprint
+        ).centered_on_bounds()
+        ceiling_footprint = (
+            room_spec.ceiling_footprint or source_footprint
+        ).centered_on_bounds()
+        authored_portals = [
+            portal
+            for portal in self.layout.portals
+            if portal.source_space_id == room_spec.room_id
+            and portal.boundary_loop_index is not None
+        ]
+        authored_ids = {portal.portal_id for portal in authored_portals}
+        legacy_portals = legacy_openings_to_boundary_portals(
+            room_spec, placed_room, wall_height
+        )
+        compiled = compile_polygon_space(
+            structure_id=f"room_geometry_{room_spec.room_id}",
+            footprint=footprint,
+            floor_footprint=floor_footprint,
+            ceiling_footprint=ceiling_footprint,
+            include_floor=not any(
+                heightfield.space_id == room_spec.room_id and heightfield.replaces_floor
+                for heightfield in self.layout.heightfields
+            ),
+            floor_profile=room_spec.floor_profile,
+            ceiling_profile=room_spec.ceiling_profile,
+            wall_height=wall_height,
+            floor_thickness=floor_thickness,
+            ceiling_thickness=floor_thickness,
+            portals=[
+                *authored_portals,
+                *(
+                    portal
+                    for portal in legacy_portals
+                    if portal.portal_id not in authored_ids
+                ),
+            ],
+        )
+        paths = write_compiled_structure(
+            compiled,
+            output_dir / room_spec.room_id / "structural",
+            model_name="room_geometry",
+            link_name="room_geometry_body_link",
+        )
+
+        wall_objects: list[SceneObject] = []
+        wall_normals: dict[str, np.ndarray] = {}
+        for patch in compiled.surfaces:
+            if SurfaceRole.BOUNDARY not in patch.surface.roles:
+                continue
+            start, end = patch.boundary[0], patch.boundary[1]
+            length = math.hypot(end[0] - start[0], end[1] - start[1])
+            yaw = math.atan2(end[1] - start[1], end[0] - start[0])
+            z_values = [point[2] for point in patch.boundary]
+            z_min, z_max = min(z_values), max(z_values)
+            name = patch.surface.surface_id
+            wall_objects.append(
+                SceneObject(
+                    object_id=UniqueID(name),
+                    object_type=ObjectType.WALL,
+                    name=name,
+                    description="Arbitrary structural boundary wall",
+                    transform=RigidTransform(
+                        RollPitchYaw(0.0, 0.0, yaw),
+                        [
+                            (start[0] + end[0]) / 2.0,
+                            (start[1] + end[1]) / 2.0,
+                            (z_min + z_max) / 2.0,
+                        ],
+                    ),
+                    bbox_min=np.array(
+                        [-length / 2.0, -wall_thickness / 2.0, -(z_max - z_min) / 2.0]
+                    ),
+                    bbox_max=np.array(
+                        [length / 2.0, wall_thickness / 2.0, (z_max - z_min) / 2.0]
+                    ),
+                    metadata={"structural_surface_id": name},
+                    immutable=True,
+                )
+            )
+            wall_normals[name] = np.asarray(patch.normal[:2])
+
+        floor_indices = compiled.triangle_groups["floor_top"]
+        floor_vertices = [
+            compiled.visual_mesh.vertices[vertex_index]
+            for triangle_index in floor_indices
+            for vertex_index in compiled.visual_mesh.triangles[triangle_index]
+        ]
+        floor_object = SceneObject(
+            object_id=UniqueID(f"floor_{room_spec.room_id}"),
+            object_type=ObjectType.FLOOR,
+            name="Floor",
+            description="Polygonal floor support surface",
+            transform=RigidTransform(),
+            geometry_path=paths.mesh_path,
+            bbox_min=np.array(
+                [
+                    min(point[0] for point in floor_vertices),
+                    min(point[1] for point in floor_vertices),
+                    min(point[2] for point in floor_vertices) - floor_thickness,
+                ]
+            ),
+            bbox_max=np.array(
+                [
+                    max(point[0] for point in floor_vertices),
+                    max(point[1] for point in floor_vertices),
+                    max(point[2] for point in floor_vertices),
+                ]
+            ),
+            metadata={
+                "structural_surface_id": f"room_geometry_{room_spec.room_id}_floor"
+            },
+            immutable=True,
+        )
+
+        return RoomGeometry(
+            sdf_tree=ET.parse(paths.sdf_path),
+            sdf_path=paths.sdf_path,
+            walls=wall_objects,
+            floor=floor_object,
+            wall_normals=wall_normals,
+            width=footprint_depth,
+            length=footprint_width,
+            wall_height=wall_height,
+            wall_thickness=wall_thickness,
+            openings=compute_openings_data(
+                placed_room=placed_room,
+                wall_height=wall_height,
+                door_clearance_distance=self.cfg.clearance_zones.door_clearance_distance,
+                window_clearance_distance=(
+                    self.cfg.clearance_zones.window_clearance_distance
+                ),
+            ),
+            footprint=footprint,
+            floor_footprint=floor_footprint,
+            ceiling_footprint=ceiling_footprint,
+            floor_profile=room_spec.floor_profile,
+            ceiling_profile=room_spec.ceiling_profile,
+            structural_surfaces=[patch.surface for patch in compiled.surfaces],
+            structural_surface_path=paths.surfaces_path,
         )
 
     @staticmethod

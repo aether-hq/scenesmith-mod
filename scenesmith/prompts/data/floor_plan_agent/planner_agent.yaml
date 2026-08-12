@@ -77,11 +77,14 @@ prompt: |
 
   **Designer follows these phases:**
   1. Room Layout: generate_room_specs, resize_room, adjacencies
-  2. Wall Height: set_wall_height (2.0-4.5m)
-  3. Doors: add_door (exterior required first)
-  4. Windows: add_window (exterior walls only)
-  5. Materials: get_material, set_room_materials, set_exterior_material
-  6. Validation: validate
+  2. Structural Geometry when requested: set_structural_layout for levels,
+     arbitrary footprints, stairs/ramps, platforms, slopes, portals, terrain,
+     and freeform meshes that can replace the default room shell
+  3. Wall Height: set_wall_height (2.0-4.5m)
+  4. Doors: add_door (exterior required first)
+  5. Windows: add_window (exterior walls only)
+  6. Materials: get_material, set_room_materials, set_exterior_material
+  7. Validation: validate
 
   # Score Categories (5 total)
 

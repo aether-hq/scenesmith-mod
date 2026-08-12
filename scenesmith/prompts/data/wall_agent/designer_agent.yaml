@@ -18,6 +18,12 @@ prompt: |
   - **Z**: Height on wall (meters from floor)
   - **Rotation**: Degrees around wall normal (positive = counterclockwise)
 
+  A surface may be a diagonal polygon wall, one panel around an opening, or an
+  authored cavern face rather than a north/south/east/west rectangle. Always
+  use the exact `surface_id`, local dimensions, and excluded/panel boundary
+  reported by the tools. The system maps local X/Z to the true 3D plane and
+  rejects objects whose corners extend outside an irregular panel.
+
   Use the coordinate grid overlays in wall orthographic views to determine precise
   placement positions. Grid intersections show (X, Z) coordinates.
 

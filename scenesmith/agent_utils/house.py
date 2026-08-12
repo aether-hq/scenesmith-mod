@@ -3,6 +3,7 @@
 import hashlib
 import json
 import logging
+import math
 import os
 import time
 import xml.etree.ElementTree as ET
@@ -16,9 +17,25 @@ import numpy as np
 
 from omegaconf import DictConfig
 
-from scenesmith.agent_utils.sceneeval_exporter import (
-    SceneEvalExportConfig,
-    SceneEvalExporter,
+from scenesmith.agent_utils.structural_geometry import (
+    SCHEMA_VERSION,
+    ConnectorSpec,
+    ConnectorType,
+    ElevationProfile,
+    Footprint2D,
+    GeometryValidationError,
+    HeightfieldSpec,
+    InvalidTransformError,
+    LevelSpec,
+    PlatformSpec,
+    PortalSpec,
+    PortalType,
+    StructuralMeshSpec,
+    StructuralSurface,
+    SurfaceRole,
+    Transform3D,
+    default_ground_level,
+    validate_structural_references,
 )
 from scenesmith.utils.material import Material
 from scenesmith.utils.package_utils import create_package_xml
@@ -28,6 +45,24 @@ if TYPE_CHECKING:
     from scenesmith.agent_utils.room import ObjectType, RoomScene, SceneObject
 
 console_logger = logging.getLogger(__name__)
+
+
+def _finite_xy_position(value: Any, *, entity_id: str) -> tuple[float, float]:
+    """Normalize a room min-corner position with a typed diagnostic."""
+
+    try:
+        coordinates = tuple(float(coordinate) for coordinate in value)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise InvalidTransformError(
+            f"position must contain two finite coordinates; got {value!r}",
+            entity_id=entity_id,
+        ) from exc
+    if len(coordinates) != 2 or not all(math.isfinite(v) for v in coordinates):
+        raise InvalidTransformError(
+            f"position must contain two finite coordinates; got {value!r}",
+            entity_id=entity_id,
+        )
+    return coordinates
 
 
 def compute_wall_normals(walls: list["SceneObject"]) -> dict[str, np.ndarray]:
@@ -508,6 +543,33 @@ class PlacedRoom:
     walls: list[Wall] = field(default_factory=list)
     """Exactly 4 walls: N, S, E, W."""
 
+    level_id: str = "ground"
+    """Level grouping for topology and editing (v2; defaults to v1 ground)."""
+
+    elevation: float | None = None
+    """Optional absolute world Z; otherwise inherited from the assigned level."""
+
+    yaw: float = 0.0
+    """Room-local yaw in radians around +Z."""
+
+    footprint: Footprint2D | None = None
+    """Optional arbitrary local footprint; None retains the legacy rectangle."""
+
+    def __post_init__(self) -> None:
+        self.position = _finite_xy_position(self.position, entity_id=self.room_id)
+        self.level_id = self.level_id.strip()
+        if not self.level_id:
+            raise ValueError("PlacedRoom.level_id must not be empty")
+        if self.elevation is not None and not math.isfinite(self.elevation):
+            raise InvalidTransformError(
+                f"elevation must be finite; got {self.elevation!r}",
+                entity_id=self.room_id,
+            )
+        if not math.isfinite(self.yaw):
+            raise InvalidTransformError(
+                f"yaw must be finite; got {self.yaw!r}", entity_id=self.room_id
+            )
+
     def to_dict(self) -> dict:
         """Serialize placed room to dictionary."""
         return {
@@ -516,6 +578,10 @@ class PlacedRoom:
             "width": self.width,
             "depth": self.depth,
             "walls": [wall.to_dict() for wall in self.walls],
+            "level_id": self.level_id,
+            "elevation": self.elevation,
+            "yaw": self.yaw,
+            "footprint": self.footprint.to_dict() if self.footprint else None,
         }
 
     @classmethod
@@ -527,6 +593,14 @@ class PlacedRoom:
             width=data["width"],
             depth=data["depth"],
             walls=[Wall.from_dict(w) for w in data.get("walls", [])],
+            level_id=data.get("level_id", "ground"),
+            elevation=data.get("elevation"),
+            yaw=data.get("yaw", 0.0),
+            footprint=(
+                Footprint2D.from_dict(data["footprint"])
+                if data.get("footprint")
+                else None
+            ),
         )
 
 
@@ -579,6 +653,57 @@ class RoomSpec:
     blocking them.
     """
 
+    level_id: str = "ground"
+    """Level grouping for v2 layouts. Missing v1 values migrate to ground."""
+
+    elevation: float | None = None
+    """Optional absolute floor elevation override; otherwise use the level datum."""
+
+    yaw: float = 0.0
+    """Room yaw in radians. Legacy rectangular placement uses zero."""
+
+    footprint: Footprint2D | None = None
+    """Optional arbitrary footprint in local coordinates."""
+
+    floor_footprint: Footprint2D | None = None
+    """Optional floor slab footprint; use holes for stairs/atria openings."""
+
+    ceiling_footprint: Footprint2D | None = None
+    """Optional ceiling slab footprint, independent of floor openings."""
+
+    floor_profile: ElevationProfile = field(default_factory=ElevationProfile)
+    """Floor elevation surface in room-local coordinates."""
+
+    ceiling_profile: ElevationProfile | None = None
+    """Optional ceiling profile; None uses the layout/level nominal height."""
+
+    def __post_init__(self) -> None:
+        self.position = _finite_xy_position(self.position, entity_id=self.room_id)
+        self.level_id = self.level_id.strip()
+        if not self.level_id:
+            raise ValueError("RoomSpec.level_id must not be empty")
+        if self.elevation is not None and not math.isfinite(self.elevation):
+            raise InvalidTransformError(
+                f"elevation must be finite; got {self.elevation!r}",
+                entity_id=self.room_id,
+            )
+        if not math.isfinite(self.yaw):
+            raise InvalidTransformError(
+                f"yaw must be finite; got {self.yaw!r}", entity_id=self.room_id
+            )
+        boundary = self.footprint or Footprint2D.rectangle(self.length, self.width)
+        for label, slab_footprint in (
+            ("floor", self.floor_footprint),
+            ("ceiling", self.ceiling_footprint),
+        ):
+            if slab_footprint is not None and slab_footprint.outer != boundary.outer:
+                raise GeometryValidationError(
+                    "slab_boundary_mismatch",
+                    f"{label}_footprint outer loop must match room '{self.room_id}' "
+                    "boundary; add holes for slab openings",
+                    entity_id=self.room_id,
+                )
+
     def to_dict(self) -> dict:
         """Serialize room spec to dictionary."""
         return {
@@ -590,6 +715,20 @@ class RoomSpec:
             "prompt": self.prompt,
             "connections": {k: v.value for k, v in self.connections.items()},
             "exterior_walls": [w.value for w in self.exterior_walls],
+            "level_id": self.level_id,
+            "elevation": self.elevation,
+            "yaw": self.yaw,
+            "footprint": self.footprint.to_dict() if self.footprint else None,
+            "floor_footprint": (
+                self.floor_footprint.to_dict() if self.floor_footprint else None
+            ),
+            "ceiling_footprint": (
+                self.ceiling_footprint.to_dict() if self.ceiling_footprint else None
+            ),
+            "floor_profile": self.floor_profile.to_dict(),
+            "ceiling_profile": (
+                self.ceiling_profile.to_dict() if self.ceiling_profile else None
+            ),
         }
 
     @classmethod
@@ -610,7 +749,83 @@ class RoomSpec:
             length=data.get("length", 6.0),
             connections=connections,
             exterior_walls=exterior_walls,
+            level_id=data.get("level_id", "ground"),
+            elevation=data.get("elevation"),
+            yaw=data.get("yaw", 0.0),
+            footprint=(
+                Footprint2D.from_dict(data["footprint"])
+                if data.get("footprint")
+                else None
+            ),
+            floor_footprint=(
+                Footprint2D.from_dict(data["floor_footprint"])
+                if data.get("floor_footprint")
+                else None
+            ),
+            ceiling_footprint=(
+                Footprint2D.from_dict(data["ceiling_footprint"])
+                if data.get("ceiling_footprint")
+                else None
+            ),
+            floor_profile=ElevationProfile.from_dict(data.get("floor_profile")),
+            ceiling_profile=(
+                ElevationProfile.from_dict(data["ceiling_profile"])
+                if data.get("ceiling_profile")
+                else None
+            ),
         )
+
+
+def legacy_openings_to_boundary_portals(
+    room_spec: RoomSpec, placed_room: PlacedRoom, wall_height: float
+) -> list[PortalSpec]:
+    """Map rectangular cardinal openings to v2 boundary-local apertures."""
+
+    rectangle = Footprint2D.rectangle(room_spec.length, room_spec.width)
+    boundary = room_spec.footprint or rectangle
+    if boundary.outer != rectangle.outer:
+        if any(wall.openings for wall in placed_room.walls):
+            raise ValueError(
+                f"Room '{room_spec.room_id}' has cardinal legacy openings on an "
+                "arbitrary footprint. Author them as boundary-local PortalSpec entries."
+            )
+        return []
+    edge_map = {
+        WallDirection.SOUTH: (0, False),
+        WallDirection.EAST: (1, False),
+        WallDirection.NORTH: (2, True),
+        WallDirection.WEST: (3, True),
+    }
+    portal_type_map = {
+        OpeningType.DOOR: PortalType.DOOR,
+        OpeningType.WINDOW: PortalType.WINDOW,
+        OpeningType.OPEN: PortalType.OPEN,
+    }
+    portals: list[PortalSpec] = []
+    for wall in placed_room.walls:
+        edge_index, reverse = edge_map[wall.direction]
+        for opening in wall.openings:
+            center = opening.position_along_wall + opening.width / 2.0
+            if reverse:
+                center = wall.length - center
+            portals.append(
+                PortalSpec(
+                    portal_id=opening.opening_id,
+                    portal_type=portal_type_map[opening.opening_type],
+                    source_space_id=room_spec.room_id,
+                    width=opening.width,
+                    height=(
+                        wall_height - opening.sill_height
+                        if opening.opening_type == OpeningType.OPEN
+                        else opening.height
+                    ),
+                    boundary_loop_index=0,
+                    boundary_edge_index=edge_index,
+                    position_along=center,
+                    sill_height=opening.sill_height,
+                )
+            )
+    return portals
 
 
 @dataclass
@@ -658,6 +873,30 @@ class RoomGeometry:
     openings: list["ClearanceOpeningData"] = field(default_factory=list)
     """All door/window/open openings with physics and rendering data."""
 
+    footprint: Footprint2D | None = None
+    """Compiled local footprint, when geometry is not a legacy rectangle."""
+
+    floor_footprint: Footprint2D | None = None
+    """Compiled floor slab footprint, including local openings."""
+
+    ceiling_footprint: Footprint2D | None = None
+    """Compiled ceiling slab footprint, including local openings."""
+
+    floor_profile: ElevationProfile = field(default_factory=ElevationProfile)
+    """Compiled floor elevation profile."""
+
+    ceiling_profile: ElevationProfile | None = None
+    """Compiled ceiling profile, if explicitly authored."""
+
+    structural_surfaces: list[StructuralSurface] = field(default_factory=list)
+    """First-class support, attachment, overhead, and traversable patches."""
+
+    structural_surface_path: Path | None = None
+    """Sidecar containing explicit surface boundaries, normals, and mesh groups."""
+
+    additional_structural_surface_paths: list[Path] = field(default_factory=list)
+    """Room-local platform, terrain, or freeform surface sidecars."""
+
     def content_hash(self) -> str:
         """Generate content hash for this floor plan."""
         floor_plan_dict = {
@@ -687,6 +926,45 @@ class RoomGeometry:
         # Add walls and floor content hashes.
         floor_plan_dict["walls"] = [wall.content_hash() for wall in self.walls]
         floor_plan_dict["floor"] = self.floor.content_hash() if self.floor else None
+        floor_plan_dict["footprint"] = (
+            self.footprint.to_dict() if self.footprint is not None else None
+        )
+        floor_plan_dict["floor_footprint"] = (
+            self.floor_footprint.to_dict() if self.floor_footprint is not None else None
+        )
+        floor_plan_dict["ceiling_footprint"] = (
+            self.ceiling_footprint.to_dict()
+            if self.ceiling_footprint is not None
+            else None
+        )
+        floor_plan_dict["floor_profile"] = self.floor_profile.to_dict()
+        floor_plan_dict["ceiling_profile"] = (
+            self.ceiling_profile.to_dict() if self.ceiling_profile is not None else None
+        )
+        floor_plan_dict["structural_surfaces"] = [
+            surface.to_dict() for surface in self.structural_surfaces
+        ]
+        sidecar_paths = [
+            path
+            for path in (
+                self.structural_surface_path,
+                *self.additional_structural_surface_paths,
+            )
+            if path is not None
+        ]
+        floor_plan_dict["structural_sidecars"] = []
+        for path in sidecar_paths:
+            path = Path(path)
+            floor_plan_dict["structural_sidecars"].append(
+                {
+                    "path": str(path),
+                    "content_hash": (
+                        hashlib.sha256(path.read_bytes()).hexdigest()
+                        if path.exists()
+                        else ""
+                    ),
+                }
+            )
 
         # Convert to JSON string with sorted keys for determinism.
         content_json = json.dumps(floor_plan_dict, sort_keys=True)
@@ -733,6 +1011,29 @@ class RoomGeometry:
             "openings": [o.to_dict() for o in self.openings],
             "floor": floor_data,
             "wall_normals": wall_normals_data,
+            "footprint": self.footprint.to_dict() if self.footprint else None,
+            "floor_footprint": (
+                self.floor_footprint.to_dict() if self.floor_footprint else None
+            ),
+            "ceiling_footprint": (
+                self.ceiling_footprint.to_dict() if self.ceiling_footprint else None
+            ),
+            "floor_profile": self.floor_profile.to_dict(),
+            "ceiling_profile": (
+                self.ceiling_profile.to_dict() if self.ceiling_profile else None
+            ),
+            "structural_surfaces": [
+                surface.to_dict() for surface in self.structural_surfaces
+            ],
+            "structural_surface_path": (
+                safe_relative_path(self.structural_surface_path, scene_dir)
+                if self.structural_surface_path
+                else None
+            ),
+            "additional_structural_surface_paths": [
+                safe_relative_path(path, scene_dir)
+                for path in self.additional_structural_surface_paths
+            ],
         }
 
     @classmethod
@@ -803,6 +1104,44 @@ class RoomGeometry:
             openings=[
                 ClearanceOpeningData.from_dict(o) for o in data.get("openings", [])
             ],
+            footprint=(
+                Footprint2D.from_dict(data["footprint"])
+                if data.get("footprint")
+                else None
+            ),
+            floor_footprint=(
+                Footprint2D.from_dict(data["floor_footprint"])
+                if data.get("floor_footprint")
+                else None
+            ),
+            ceiling_footprint=(
+                Footprint2D.from_dict(data["ceiling_footprint"])
+                if data.get("ceiling_footprint")
+                else None
+            ),
+            floor_profile=ElevationProfile.from_dict(data.get("floor_profile")),
+            ceiling_profile=(
+                ElevationProfile.from_dict(data["ceiling_profile"])
+                if data.get("ceiling_profile")
+                else None
+            ),
+            structural_surfaces=[
+                StructuralSurface.from_dict(surface)
+                for surface in data.get("structural_surfaces", [])
+            ],
+            structural_surface_path=(
+                scene_dir / data["structural_surface_path"]
+                if scene_dir and data.get("structural_surface_path")
+                else (
+                    Path(data["structural_surface_path"])
+                    if data.get("structural_surface_path")
+                    else None
+                )
+            ),
+            additional_structural_surface_paths=[
+                scene_dir / path if scene_dir is not None else Path(path)
+                for path in data.get("additional_structural_surface_paths", [])
+            ],
         )
 
 
@@ -820,6 +1159,9 @@ class HouseLayout:
     with RoomGeometry.
     """
 
+    schema_version: int = SCHEMA_VERSION
+    """Serialized semantic schema version (v1 inputs migrate to v2)."""
+
     wall_height: float = 2.5
     """Wall height in meters (default 2.5m, agent can override via set_wall_height)."""
 
@@ -828,6 +1170,36 @@ class HouseLayout:
 
     room_specs: list[RoomSpec] = field(default_factory=list)
     """Specifications for each room in the house."""
+
+    levels: list[LevelSpec] = field(default_factory=lambda: [default_ground_level()])
+    """Vertical datums. Legacy layouts contain one zero-elevation ground level."""
+
+    connectors: list[ConnectorSpec] = field(default_factory=list)
+    """Stairs, ramps, ladders, lifts, shafts, and natural passages."""
+
+    connector_geometry_paths: dict[str, Path] = field(default_factory=dict)
+    """Compiled connector SDF paths keyed by connector ID."""
+
+    structural_meshes: list[StructuralMeshSpec] = field(default_factory=list)
+    """Imported/freeform structural meshes, including cavern chambers/tunnels."""
+
+    structural_mesh_geometry_paths: dict[str, Path] = field(default_factory=dict)
+    """Compiled structural-mesh SDF paths keyed by mesh ID."""
+
+    platforms: list[PlatformSpec] = field(default_factory=list)
+    """Raised/sunken platforms, mezzanines, balconies, bridges, and catwalks."""
+
+    platform_geometry_paths: dict[str, Path] = field(default_factory=dict)
+    """Compiled platform SDF paths keyed by platform ID."""
+
+    heightfields: list[HeightfieldSpec] = field(default_factory=list)
+    """Sampled terrain and organic floor surfaces."""
+
+    heightfield_geometry_paths: dict[str, Path] = field(default_factory=dict)
+    """Compiled heightfield SDF paths keyed by heightfield ID."""
+
+    portals: list[PortalSpec] = field(default_factory=list)
+    """General apertures; legacy doors/windows remain available during migration."""
 
     room_geometries: dict[str, RoomGeometry] = field(default_factory=dict)
     """Generated room geometry for each room (room_id -> RoomGeometry)."""
@@ -872,7 +1244,14 @@ class HouseLayout:
     """
 
     def __post_init__(self) -> None:
-        """Create package.xml for Drake package://scene/ URI resolution."""
+        """Normalize v2 defaults and create package metadata when needed."""
+        if not self.levels:
+            self.levels = [default_ground_level()]
+        if self.schema_version not in (1, SCHEMA_VERSION):
+            raise ValueError(
+                f"Unsupported house layout schema_version={self.schema_version}; "
+                f"supported versions are 1 and {SCHEMA_VERSION}"
+            )
         if self.house_dir is not None:
             package_xml_path = self.house_dir / "package.xml"
             if not package_xml_path.exists():
@@ -881,6 +1260,496 @@ class HouseLayout:
                 console_logger.debug(
                     f"Created package.xml at {package_xml_path} for scene portability"
                 )
+
+    def get_level(self, level_id: str) -> LevelSpec | None:
+        """Get a structural level by stable ID."""
+        for level in self.levels:
+            if level.level_id == level_id:
+                return level
+        return None
+
+    def get_room_elevation(self, room_id: str) -> float:
+        """Resolve a room's absolute floor Z using placement/spec/level precedence."""
+        placed_room = self.get_placed_room(room_id)
+        if placed_room is not None and placed_room.elevation is not None:
+            return placed_room.elevation
+        room_spec = self.get_room_spec(room_id)
+        if room_spec is not None:
+            if room_spec.elevation is not None:
+                return room_spec.elevation
+            level = self.get_level(room_spec.level_id)
+            if level is not None:
+                return level.elevation
+        return 0.0
+
+    def validate_structure(self) -> None:
+        """Validate v2 level, room, portal, and connector references."""
+        validate_structural_references(
+            levels=self.levels,
+            space_level_ids={spec.room_id: spec.level_id for spec in self.room_specs},
+            connectors=self.connectors,
+            portals=self.portals,
+            structural_meshes=self.structural_meshes,
+            platforms=self.platforms,
+            heightfields=self.heightfields,
+        )
+        replacement_spaces = [
+            mesh.space_id for mesh in self.structural_meshes if mesh.replaces_room_shell
+        ]
+        duplicate_spaces = sorted(
+            space_id
+            for space_id in set(replacement_spaces)
+            if replacement_spaces.count(space_id) > 1
+        )
+        if duplicate_spaces:
+            raise GeometryValidationError(
+                "duplicate_room_shell",
+                "only one structural mesh may replace each room shell; duplicates: "
+                + ", ".join(duplicate_spaces),
+            )
+        replacement_floor_spaces = [
+            heightfield.space_id
+            for heightfield in self.heightfields
+            if heightfield.replaces_floor
+        ]
+        duplicate_floor_spaces = sorted(
+            space_id
+            for space_id in set(replacement_floor_spaces)
+            if replacement_floor_spaces.count(space_id) > 1
+        )
+        if duplicate_floor_spaces:
+            raise GeometryValidationError(
+                "duplicate_floor_replacement",
+                "only one heightfield may replace each room floor; duplicates: "
+                + ", ".join(duplicate_floor_spaces),
+            )
+
+    def build_topology(self):
+        """Build the capability-aware semantic topology for this layout."""
+
+        from scenesmith.agent_utils.structural_topology import StructuralTopology
+
+        self.validate_structure()
+        return StructuralTopology.build(
+            space_ids=self.room_ids,
+            portals=self.portals,
+            connectors=self.connectors,
+        )
+
+    def build_structural_surface_index(self, *, include_connectors: bool = True):
+        """Build one house-frame query index from all compiled room surfaces."""
+
+        from scenesmith.agent_utils.structural_surfaces import (
+            StructuralSurfaceIndex,
+            load_surface_patches,
+            transform_surface_patches,
+        )
+
+        patches = []
+        for room_id, geometry in self.room_geometries.items():
+            placed = self.get_placed_room(room_id)
+            if placed is None:
+                continue
+            paths = {
+                Path(path)
+                for path in (
+                    geometry.structural_surface_path,
+                    *geometry.additional_structural_surface_paths,
+                )
+                if path is not None and Path(path).exists()
+            }
+            room_transform = Transform3D(
+                translation=(
+                    placed.position[0] + placed.width / 2.0,
+                    placed.position[1] + placed.depth / 2.0,
+                    self.get_room_elevation(room_id),
+                ),
+                rotation_rpy=(0.0, 0.0, placed.yaw),
+            )
+            for path in sorted(paths, key=str):
+                patches.extend(
+                    transform_surface_patches(
+                        load_surface_patches(path), room_transform
+                    )
+                )
+        if include_connectors:
+            for connector_id, sdf_path in sorted(self.connector_geometry_paths.items()):
+                surface_path = Path(sdf_path).with_suffix(".surfaces.json")
+                if not surface_path.exists():
+                    raise ValueError(
+                        f"compiled connector '{connector_id}' is missing surface "
+                        f"sidecar {surface_path}"
+                    )
+                patches.extend(load_surface_patches(surface_path))
+        return StructuralSurfaceIndex(patches)
+
+    @staticmethod
+    def _connector_centerline_samples(
+        connector: ConnectorSpec, *, sample_spacing: float
+    ) -> tuple[tuple[float, float, float], ...]:
+        """Sample a connector centerline in the house structural frame."""
+
+        if not math.isfinite(sample_spacing) or sample_spacing <= 0:
+            raise ValueError("sample_spacing must be finite and positive")
+        if connector.connector_type.value == "stairs_spiral":
+            center = connector.parameters.get("center")
+            if not isinstance(center, (list, tuple)) or len(center) != 2:
+                raise ValueError(
+                    f"spiral connector '{connector.connector_id}' has no center"
+                )
+            low, high = (
+                (connector.start.position, connector.end.position)
+                if connector.start.position[2] <= connector.end.position[2]
+                else (connector.end.position, connector.start.position)
+            )
+            center_x, center_y = float(center[0]), float(center[1])
+            radius = math.hypot(low[0] - center_x, low[1] - center_y)
+            turns = float(connector.parameters.get("turns", 1.0))
+            direction = (
+                1.0
+                if str(connector.parameters.get("direction", "ccw")).lower() == "ccw"
+                else -1.0
+            )
+            total_angle = direction * math.tau * turns
+            start_angle = math.atan2(low[1] - center_y, low[0] - center_x)
+            length = math.hypot(radius * total_angle, high[2] - low[2])
+            count = max(1, math.ceil(length / sample_spacing))
+            return tuple(
+                (
+                    center_x + radius * math.cos(start_angle + total_angle * i / count),
+                    center_y + radius * math.sin(start_angle + total_angle * i / count),
+                    low[2] + (high[2] - low[2]) * i / count,
+                )
+                for i in range(count + 1)
+            )
+
+        raw_waypoints = connector.parameters.get("waypoints", ())
+        waypoints = tuple(
+            tuple(float(value) for value in point) for point in raw_waypoints
+        )
+        points = (connector.start.position, *waypoints, connector.end.position)
+        samples: list[tuple[float, float, float]] = []
+        for segment_index, (start, end) in enumerate(zip(points, points[1:])):
+            length = math.dist(start, end)
+            count = max(1, math.ceil(length / sample_spacing))
+            samples.extend(
+                tuple(
+                    start[axis] + (end[axis] - start[axis]) * i / count
+                    for axis in range(3)
+                )
+                for i in range(0 if segment_index == 0 else 1, count + 1)
+            )
+        return tuple(samples)
+
+    def geometrically_blocked_connectors(
+        self,
+        *,
+        capabilities: tuple[str, ...] = ("walk",),
+        agent_height: float = 1.8,
+        agent_radius: float = 0.25,
+        max_step_height: float = 0.3,
+        sample_spacing: float = 0.15,
+    ) -> frozenset[str]:
+        """Veto semantically walkable connectors that fail local clearance."""
+
+        missing_geometry = [
+            connector.connector_id
+            for connector in self.connectors
+            if not self._connector_geometry_is_embedded(connector)
+            and connector.connector_id not in self.connector_geometry_paths
+        ]
+        if missing_geometry:
+            raise ValueError("compile_connectors() before checking route clearance")
+        index = self.build_structural_surface_index(include_connectors=True)
+        available = frozenset(capabilities)
+        blocked: set[str] = set()
+        for connector in self.connectors:
+            if not connector.required_capabilities.issubset(available):
+                continue
+            # Climb-only ladders use a different body model; this local support
+            # sampler is intentionally restricted to walkable connectors.
+            if "walk" not in connector.required_capabilities:
+                continue
+            if connector.width / 2.0 + 1e-9 < agent_radius:
+                blocked.add(connector.connector_id)
+                continue
+            for x, y, z in self._connector_centerline_samples(
+                connector, sample_spacing=sample_spacing
+            ):
+                clearance = index.clearance_at(
+                    x,
+                    y,
+                    agent_height=agent_height,
+                    agent_radius=0.0,
+                    reference_z=z + max_step_height,
+                    max_drop=max_step_height * 1.5,
+                )
+                if not clearance.fits:
+                    blocked.add(connector.connector_id)
+                    break
+        return frozenset(blocked)
+
+    @staticmethod
+    def _connector_geometry_is_embedded(connector: ConnectorSpec) -> bool:
+        """Whether a connector centerline is embodied by imported room geometry.
+
+        Natural passages and shafts frequently are not useful as additive mesh
+        primitives: the tunnel/chimney is already part of a scanned or authored
+        cavern shell.  Such connectors still participate in semantic topology and
+        route-clearance checks, but must not produce a duplicate simulation model.
+        """
+
+        return (
+            connector.connector_type
+            in {
+                ConnectorType.NATURAL_PASSAGE,
+                ConnectorType.SHAFT,
+            }
+            and connector.parameters.get("geometry_embedded") is True
+        )
+
+    def compile_connectors(self, output_dir: Path) -> dict[str, Path]:
+        """Compile all supported semantic connectors into simulation assets."""
+        from scenesmith.agent_utils.structural_compiler import (
+            compile_connector,
+            write_compiled_structure,
+        )
+
+        self.validate_structure()
+        compiled_paths: dict[str, Path] = {}
+        for connector in self.connectors:
+            if self._connector_geometry_is_embedded(connector):
+                continue
+            connector_output = output_dir / connector.connector_id
+            paths = write_compiled_structure(
+                compile_connector(connector), connector_output
+            )
+            compiled_paths[connector.connector_id] = paths.sdf_path
+        self.connector_geometry_paths = compiled_paths
+        return dict(compiled_paths)
+
+    def compile_polygon_rooms(self, output_dir: Path) -> dict[str, Path]:
+        """Compile explicitly polygonal rooms into room-compatible SDF assets.
+
+        Polygon coordinates are authored in a min-corner-local convention, like
+        legacy ``RoomSpec.position``.  The compiler recenters them because room
+        models are welded to a frame at the footprint bounding-box center.
+        """
+
+        from scenesmith.agent_utils.structural_compiler import (
+            compile_polygon_space,
+            write_compiled_structure,
+        )
+
+        compiled_paths: dict[str, Path] = {}
+        for room_spec in self.room_specs:
+            if (
+                room_spec.footprint is None
+                and room_spec.floor_footprint is None
+                and room_spec.ceiling_footprint is None
+                and room_spec.floor_profile == ElevationProfile()
+                and room_spec.ceiling_profile is None
+                and abs(room_spec.yaw) <= 1e-9
+                and not any(
+                    heightfield.space_id == room_spec.room_id
+                    and heightfield.replaces_floor
+                    for heightfield in self.heightfields
+                )
+            ):
+                continue
+            source_footprint = room_spec.footprint or Footprint2D.rectangle(
+                room_spec.length, room_spec.width
+            )
+            min_x, min_y, max_x, max_y = source_footprint.bounds
+            footprint_width = max_x - min_x
+            footprint_depth = max_y - min_y
+            if not math.isclose(
+                footprint_width, room_spec.length, rel_tol=0.0, abs_tol=1e-6
+            ) or not math.isclose(
+                footprint_depth, room_spec.width, rel_tol=0.0, abs_tol=1e-6
+            ):
+                raise ValueError(
+                    f"Room '{room_spec.room_id}' footprint bounds are "
+                    f"{footprint_width:g} × {footprint_depth:g}, but width/depth "
+                    f"are {room_spec.length:g} × {room_spec.width:g}"
+                )
+
+            local_footprint = source_footprint.centered_on_bounds()
+            local_floor_footprint = (
+                room_spec.floor_footprint or source_footprint
+            ).centered_on_bounds()
+            local_ceiling_footprint = (
+                room_spec.ceiling_footprint or source_footprint
+            ).centered_on_bounds()
+            authored_portals = [
+                portal
+                for portal in self.portals
+                if portal.source_space_id == room_spec.room_id
+                and portal.boundary_loop_index is not None
+            ]
+            placed_room = self.get_placed_room(room_spec.room_id)
+            legacy_portals = (
+                legacy_openings_to_boundary_portals(
+                    room_spec, placed_room, self.wall_height
+                )
+                if placed_room is not None
+                else []
+            )
+            authored_ids = {portal.portal_id for portal in authored_portals}
+            compiled = compile_polygon_space(
+                structure_id=f"room_geometry_{room_spec.room_id}",
+                footprint=local_footprint,
+                floor_footprint=local_floor_footprint,
+                ceiling_footprint=local_ceiling_footprint,
+                include_floor=not any(
+                    heightfield.space_id == room_spec.room_id
+                    and heightfield.replaces_floor
+                    for heightfield in self.heightfields
+                ),
+                floor_profile=room_spec.floor_profile,
+                ceiling_profile=room_spec.ceiling_profile,
+                wall_height=self.wall_height,
+                portals=[
+                    *authored_portals,
+                    *(
+                        portal
+                        for portal in legacy_portals
+                        if portal.portal_id not in authored_ids
+                    ),
+                ],
+            )
+            paths = write_compiled_structure(
+                compiled,
+                output_dir / room_spec.room_id,
+                model_name="room_geometry",
+                link_name="room_geometry_body_link",
+            )
+            geometry = RoomGeometry(
+                sdf_tree=ET.parse(paths.sdf_path),
+                sdf_path=paths.sdf_path,
+                width=footprint_depth,
+                length=footprint_width,
+                wall_height=self.wall_height,
+                footprint=local_footprint,
+                floor_footprint=local_floor_footprint,
+                ceiling_footprint=local_ceiling_footprint,
+                floor_profile=room_spec.floor_profile,
+                ceiling_profile=room_spec.ceiling_profile,
+                structural_surfaces=[patch.surface for patch in compiled.surfaces],
+                structural_surface_path=paths.surfaces_path,
+                wall_normals={
+                    patch.surface.surface_id: np.asarray(patch.normal[:2])
+                    for patch in compiled.surfaces
+                    if SurfaceRole.BOUNDARY in patch.surface.roles
+                },
+            )
+            self.set_room_geometry(room_spec.room_id, geometry)
+            compiled_paths[room_spec.room_id] = paths.sdf_path
+        return compiled_paths
+
+    def compile_structural_meshes(
+        self, output_dir: Path, *, repair: bool = False
+    ) -> dict[str, Path]:
+        """Compile cavern/freeform meshes into validated SDF and surface assets."""
+
+        from scenesmith.agent_utils.structural_compiler import (
+            compile_structural_mesh,
+            write_compiled_structure,
+        )
+
+        self.validate_structure()
+        compiled_paths: dict[str, Path] = {}
+        # Replacement shells must establish RoomGeometry before additive mesh
+        # sidecars are attached, independent of authoring array order.
+        ordered_meshes = sorted(
+            self.structural_meshes, key=lambda mesh: not mesh.replaces_room_shell
+        )
+        for mesh_spec in ordered_meshes:
+            compiled = compile_structural_mesh(mesh_spec, repair=repair)
+            paths = write_compiled_structure(
+                compiled,
+                output_dir / mesh_spec.mesh_id,
+                model_name=("room_geometry" if mesh_spec.replaces_room_shell else None),
+                link_name=(
+                    "room_geometry_body_link"
+                    if mesh_spec.replaces_room_shell
+                    else "structure_link"
+                ),
+            )
+            compiled_paths[mesh_spec.mesh_id] = paths.sdf_path
+            if mesh_spec.replaces_room_shell:
+                bounds_min, bounds_max = compiled.visual_mesh.bounds
+                self.set_room_geometry(
+                    mesh_spec.space_id,
+                    RoomGeometry(
+                        sdf_tree=ET.parse(paths.sdf_path),
+                        sdf_path=paths.sdf_path,
+                        width=bounds_max[1] - bounds_min[1],
+                        length=bounds_max[0] - bounds_min[0],
+                        wall_height=bounds_max[2] - bounds_min[2],
+                        structural_surfaces=[
+                            patch.surface for patch in compiled.surfaces
+                        ],
+                        structural_surface_path=paths.surfaces_path,
+                        wall_normals={
+                            patch.surface.surface_id: np.asarray(patch.normal[:2])
+                            for patch in compiled.surfaces
+                            if SurfaceRole.BOUNDARY in patch.surface.roles
+                        },
+                    ),
+                )
+            else:
+                self._attach_structural_sidecar(mesh_spec.space_id, paths.surfaces_path)
+        self.structural_mesh_geometry_paths = compiled_paths
+        return dict(compiled_paths)
+
+    def compile_platforms(self, output_dir: Path) -> dict[str, Path]:
+        """Compile authored platforms and open edges into static SDF assets."""
+
+        from scenesmith.agent_utils.structural_compiler import (
+            compile_platform,
+            write_compiled_structure,
+        )
+
+        self.validate_structure()
+        compiled_paths: dict[str, Path] = {}
+        for platform in self.platforms:
+            paths = write_compiled_structure(
+                compile_platform(platform), output_dir / platform.platform_id
+            )
+            compiled_paths[platform.platform_id] = paths.sdf_path
+            self._attach_structural_sidecar(platform.space_id, paths.surfaces_path)
+        self.platform_geometry_paths = compiled_paths
+        return dict(compiled_paths)
+
+    def compile_heightfields(self, output_dir: Path) -> dict[str, Path]:
+        """Compile sampled terrain/floors into SDF and semantic sidecars."""
+
+        from scenesmith.agent_utils.structural_compiler import (
+            compile_heightfield,
+            write_compiled_structure,
+        )
+
+        self.validate_structure()
+        compiled_paths: dict[str, Path] = {}
+        for heightfield in self.heightfields:
+            paths = write_compiled_structure(
+                compile_heightfield(heightfield),
+                output_dir / heightfield.heightfield_id,
+            )
+            compiled_paths[heightfield.heightfield_id] = paths.sdf_path
+            self._attach_structural_sidecar(heightfield.space_id, paths.surfaces_path)
+        self.heightfield_geometry_paths = compiled_paths
+        return dict(compiled_paths)
+
+    def _attach_structural_sidecar(self, room_id: str, path: Path) -> None:
+        """Attach one room-local compiled surface sidecar without duplication."""
+
+        geometry = self.get_room_geometry(room_id)
+        if geometry is None:
+            return
+        if path not in geometry.additional_structural_surface_paths:
+            geometry.additional_structural_surface_paths.append(path)
 
     def get_room_spec(self, room_id: str) -> RoomSpec | None:
         """Get room specification by ID.
@@ -991,9 +1860,40 @@ class HouseLayout:
             room_geometries_data[room_id] = geometry.to_dict(scene_dir=scene_dir)
 
         return {
+            "schema_version": SCHEMA_VERSION,
             "wall_height": self.wall_height,
             "house_prompt": self.house_prompt,
             "rooms": [spec.to_dict() for spec in self.room_specs],
+            "levels": [level.to_dict() for level in self.levels],
+            "connectors": [connector.to_dict() for connector in self.connectors],
+            "connector_geometry_paths": {
+                connector_id: safe_relative_path(path, scene_dir)
+                for connector_id, path in self.connector_geometry_paths.items()
+            },
+            "structural_meshes": [
+                {
+                    **mesh.to_dict(),
+                    "mesh_path": safe_relative_path(Path(mesh.mesh_path), scene_dir),
+                }
+                for mesh in self.structural_meshes
+            ],
+            "structural_mesh_geometry_paths": {
+                mesh_id: safe_relative_path(path, scene_dir)
+                for mesh_id, path in self.structural_mesh_geometry_paths.items()
+            },
+            "platforms": [platform.to_dict() for platform in self.platforms],
+            "platform_geometry_paths": {
+                platform_id: safe_relative_path(path, scene_dir)
+                for platform_id, path in self.platform_geometry_paths.items()
+            },
+            "heightfields": [
+                heightfield.to_dict() for heightfield in self.heightfields
+            ],
+            "heightfield_geometry_paths": {
+                heightfield_id: safe_relative_path(path, scene_dir)
+                for heightfield_id, path in self.heightfield_geometry_paths.items()
+            },
+            "portals": [portal.to_dict() for portal in self.portals],
             "placed_rooms": placed_rooms_data,
             "doors": [door.to_dict() for door in self.doors],
             "windows": [window.to_dict() for window in self.windows],
@@ -1029,10 +1929,15 @@ class HouseLayout:
         Raises:
             ValueError: If no room geometries have been generated.
         """
-        if not self.room_geometries:
+        if (
+            not self.room_geometries
+            and not self.structural_meshes
+            and not self.platforms
+            and not self.heightfields
+        ):
             raise ValueError(
-                "No room geometries have been generated. "
-                "Call generate_house_layout first."
+                "No room or freeform structural geometries have been defined. "
+                "Generate or compile structural geometry first."
             )
 
         def format_sdf_path(sdf_path: Path | str | None) -> str:
@@ -1072,6 +1977,8 @@ class HouseLayout:
             # Room geometry is centered at origin, so translate to room center.
             room_center_x = placed_room.position[0] + placed_room.width / 2
             room_center_y = placed_room.position[1] + placed_room.depth / 2
+            room_center_z = self.get_room_elevation(room_id)
+            room_yaw_deg = placed_room.yaw * 180.0 / np.pi
 
             room_frame_name = f"room_{room_id}_frame"
             model_name = f"room_geometry_{room_id}"
@@ -1083,7 +1990,10 @@ class HouseLayout:
     name: {room_frame_name}
     X_PF:
       base_frame: house_frame
-      translation: [{room_center_x}, {room_center_y}, 0.0]
+      translation: [{room_center_x}, {room_center_y}, {room_center_z}]
+      rotation: !AngleAxis
+        angle_deg: {room_yaw_deg}
+        axis: [0, 0, 1]
 - add_model:
     name: {model_name}
     file: {room_geom_path}
@@ -1091,7 +2001,174 @@ class HouseLayout:
     parent: {room_frame_name}
     child: {model_name}::room_geometry_body_link"""
 
+        directive += self._connector_drake_directives(base_dir=base_dir)
+        directive += self._structural_mesh_drake_directives(base_dir=base_dir)
+        directive += self._platform_drake_directives(base_dir=base_dir)
+        directive += self._heightfield_drake_directives(base_dir=base_dir)
+
         return directive
+
+    def _connector_drake_directives(self, base_dir: Path | None = None) -> str:
+        """Generate model/weld directives for compiled structural connectors."""
+        if not self.connectors:
+            return ""
+        missing = [
+            connector.connector_id
+            for connector in self.connectors
+            if not self._connector_geometry_is_embedded(connector)
+            if connector.connector_id not in self.connector_geometry_paths
+        ]
+        if missing:
+            raise ValueError(
+                "Connector geometry has not been compiled for: "
+                + ", ".join(missing)
+                + ". Call compile_connectors() before exporting the house."
+            )
+
+        directives = ""
+        for connector in self.connectors:
+            if self._connector_geometry_is_embedded(connector):
+                continue
+            sdf_path = self.connector_geometry_paths[connector.connector_id]
+            if base_dir is None:
+                formatted_path = f"file://{sdf_path.absolute()}"
+            else:
+                formatted_path = (
+                    f"package://scene/{os.path.relpath(sdf_path, base_dir)}"
+                )
+            model_name = f"structure_{connector.connector_id}"
+            directives += f"""
+- add_model:
+    name: {model_name}
+    file: {formatted_path}
+- add_weld:
+    parent: house_frame
+    child: {model_name}::structure_link"""
+        return directives
+
+    def _platform_drake_directives(self, base_dir: Path | None = None) -> str:
+        """Generate model/weld directives for platforms in room-local frames."""
+
+        if not self.platforms:
+            return ""
+        missing = [
+            platform.platform_id
+            for platform in self.platforms
+            if platform.platform_id not in self.platform_geometry_paths
+        ]
+        if missing:
+            raise ValueError(
+                "Platform geometry has not been compiled for: "
+                + ", ".join(missing)
+                + ". Call compile_platforms() before exporting the house."
+            )
+        directives = ""
+        placed_ids = {room.room_id for room in self.placed_rooms}
+        for platform in self.platforms:
+            sdf_path = self.platform_geometry_paths[platform.platform_id]
+            formatted_path = (
+                f"file://{sdf_path.absolute()}"
+                if base_dir is None
+                else f"package://scene/{os.path.relpath(sdf_path, base_dir)}"
+            )
+            model_name = f"structure_{platform.platform_id}"
+            parent_frame = (
+                f"room_{platform.space_id}_frame"
+                if platform.space_id in placed_ids
+                else "house_frame"
+            )
+            directives += f"""
+- add_model:
+    name: {model_name}
+    file: {formatted_path}
+- add_weld:
+    parent: {parent_frame}
+    child: {model_name}::structure_link"""
+        return directives
+
+    def _structural_mesh_drake_directives(self, base_dir: Path | None = None) -> str:
+        """Generate model/weld directives for compiled freeform structures."""
+
+        if not self.structural_meshes:
+            return ""
+        missing = [
+            mesh.mesh_id
+            for mesh in self.structural_meshes
+            if mesh.mesh_id not in self.structural_mesh_geometry_paths
+        ]
+        if missing:
+            raise ValueError(
+                "Structural mesh geometry has not been compiled for: "
+                + ", ".join(missing)
+                + ". Call compile_structural_meshes() before exporting the house."
+            )
+        directives = ""
+        placed_ids = {room.room_id for room in self.placed_rooms}
+        for mesh in self.structural_meshes:
+            if mesh.replaces_room_shell:
+                # Its room-compatible SDF is already emitted by the standard
+                # room directive and welded to the room frame there.
+                continue
+            sdf_path = self.structural_mesh_geometry_paths[mesh.mesh_id]
+            formatted_path = (
+                f"file://{sdf_path.absolute()}"
+                if base_dir is None
+                else f"package://scene/{os.path.relpath(sdf_path, base_dir)}"
+            )
+            model_name = f"structure_{mesh.mesh_id}"
+            parent_frame = (
+                f"room_{mesh.space_id}_frame"
+                if mesh.space_id in placed_ids
+                else "house_frame"
+            )
+            directives += f"""
+- add_model:
+    name: {model_name}
+    file: {formatted_path}
+- add_weld:
+    parent: {parent_frame}
+    child: {model_name}::structure_link"""
+        return directives
+
+    def _heightfield_drake_directives(self, base_dir: Path | None = None) -> str:
+        """Generate model/weld directives for room-local heightfields."""
+
+        if not self.heightfields:
+            return ""
+        missing = [
+            heightfield.heightfield_id
+            for heightfield in self.heightfields
+            if heightfield.heightfield_id not in self.heightfield_geometry_paths
+        ]
+        if missing:
+            raise ValueError(
+                "Heightfield geometry has not been compiled for: "
+                + ", ".join(missing)
+                + ". Call compile_heightfields() before exporting the house."
+            )
+        directives = ""
+        placed_ids = {room.room_id for room in self.placed_rooms}
+        for heightfield in self.heightfields:
+            sdf_path = self.heightfield_geometry_paths[heightfield.heightfield_id]
+            formatted_path = (
+                f"file://{sdf_path.absolute()}"
+                if base_dir is None
+                else f"package://scene/{os.path.relpath(sdf_path, base_dir)}"
+            )
+            model_name = f"structure_{heightfield.heightfield_id}"
+            parent_frame = (
+                f"room_{heightfield.space_id}_frame"
+                if heightfield.space_id in placed_ids
+                else "house_frame"
+            )
+            directives += f"""
+- add_model:
+    name: {model_name}
+    file: {formatted_path}
+- add_weld:
+    parent: {parent_frame}
+    child: {model_name}::structure_link"""
+        return directives
 
     @classmethod
     def from_dict(
@@ -1106,7 +2183,49 @@ class HouseLayout:
         Returns:
             Restored HouseLayout instance.
         """
+        input_schema_version = data.get("schema_version", 1)
         room_specs = [RoomSpec.from_dict(r) for r in data.get("rooms", [])]
+        levels = [LevelSpec.from_dict(level) for level in data.get("levels", [])] or [
+            default_ground_level()
+        ]
+        connectors = [
+            ConnectorSpec.from_dict(connector)
+            for connector in data.get("connectors", [])
+        ]
+        structural_meshes = []
+        for mesh_data in data.get("structural_meshes", []):
+            resolved_mesh_data = dict(mesh_data)
+            if house_dir is not None:
+                mesh_path = Path(resolved_mesh_data["mesh_path"])
+                if not mesh_path.is_absolute():
+                    resolved_mesh_data["mesh_path"] = str(house_dir / mesh_path)
+            structural_meshes.append(StructuralMeshSpec.from_dict(resolved_mesh_data))
+        platforms = [
+            PlatformSpec.from_dict(platform) for platform in data.get("platforms", [])
+        ]
+        heightfields = [
+            HeightfieldSpec.from_dict(heightfield)
+            for heightfield in data.get("heightfields", [])
+        ]
+        portals = [PortalSpec.from_dict(portal) for portal in data.get("portals", [])]
+        connector_geometry_paths = {
+            connector_id: (house_dir / path if house_dir is not None else Path(path))
+            for connector_id, path in data.get("connector_geometry_paths", {}).items()
+        }
+        structural_mesh_geometry_paths = {
+            mesh_id: (house_dir / path if house_dir is not None else Path(path))
+            for mesh_id, path in data.get("structural_mesh_geometry_paths", {}).items()
+        }
+        platform_geometry_paths = {
+            platform_id: (house_dir / path if house_dir is not None else Path(path))
+            for platform_id, path in data.get("platform_geometry_paths", {}).items()
+        }
+        heightfield_geometry_paths = {
+            heightfield_id: (house_dir / path if house_dir is not None else Path(path))
+            for heightfield_id, path in data.get(
+                "heightfield_geometry_paths", {}
+            ).items()
+        }
         doors = [Door.from_dict(d) for d in data.get("doors", [])]
         windows = [Window.from_dict(w) for w in data.get("windows", [])]
 
@@ -1140,10 +2259,23 @@ class HouseLayout:
                     geom_data, scene_dir=house_dir
                 )
 
-        return cls(
+        layout = cls(
+            schema_version=(
+                SCHEMA_VERSION if input_schema_version == 1 else input_schema_version
+            ),
             wall_height=data.get("wall_height", 2.5),
             house_prompt=data.get("house_prompt", ""),
             room_specs=room_specs,
+            levels=levels,
+            connectors=connectors,
+            connector_geometry_paths=connector_geometry_paths,
+            structural_meshes=structural_meshes,
+            structural_mesh_geometry_paths=structural_mesh_geometry_paths,
+            platforms=platforms,
+            platform_geometry_paths=platform_geometry_paths,
+            heightfields=heightfields,
+            heightfield_geometry_paths=heightfield_geometry_paths,
+            portals=portals,
             house_dir=house_dir,
             room_geometries=room_geometries,
             placed_rooms=placed_rooms,
@@ -1155,6 +2287,8 @@ class HouseLayout:
             connectivity_valid=data.get("connectivity_valid", False),
             boundary_labels=boundary_labels,
         )
+        layout.validate_structure()
+        return layout
 
     def content_hash(self) -> str:
         """Generate deterministic hash of layout state for render caching.
@@ -1167,13 +2301,42 @@ class HouseLayout:
         """
         # Build comprehensive state dict.
         state = {
+            "schema_version": SCHEMA_VERSION,
             "wall_height": self.wall_height,
+            "levels": [level.to_dict() for level in self.levels],
+            "connectors": [connector.to_dict() for connector in self.connectors],
+            "connector_geometry_paths": {
+                connector_id: str(path)
+                for connector_id, path in self.connector_geometry_paths.items()
+            },
+            "structural_meshes": [mesh.to_dict() for mesh in self.structural_meshes],
+            "structural_mesh_geometry_paths": {
+                mesh_id: str(path)
+                for mesh_id, path in self.structural_mesh_geometry_paths.items()
+            },
+            "platforms": [platform.to_dict() for platform in self.platforms],
+            "platform_geometry_paths": {
+                platform_id: str(path)
+                for platform_id, path in self.platform_geometry_paths.items()
+            },
+            "heightfields": [
+                heightfield.to_dict() for heightfield in self.heightfields
+            ],
+            "heightfield_geometry_paths": {
+                heightfield_id: str(path)
+                for heightfield_id, path in self.heightfield_geometry_paths.items()
+            },
+            "portals": [portal.to_dict() for portal in self.portals],
             "placed_rooms": [
                 {
                     "room_id": r.room_id,
                     "position": r.position,
                     "width": r.width,
                     "depth": r.depth,
+                    "level_id": r.level_id,
+                    "elevation": self.get_room_elevation(r.room_id),
+                    "yaw": r.yaw,
+                    "footprint": r.footprint.to_dict() if r.footprint else None,
                     # Include wall cache keys for each wall.
                     "walls": [
                         w.cache_key(
@@ -1240,7 +2403,13 @@ class HouseScene:
         return self.layout.house_dir
 
     def _get_room_position(self, room_id: str) -> tuple[float, float]:
-        """Get room center position from layout.
+        """Get legacy XY room-center position from the full v2 transform."""
+
+        x, y, _, _ = self._get_room_transform(room_id)
+        return (x, y)
+
+    def _get_room_transform(self, room_id: str) -> tuple[float, float, float, float]:
+        """Get room center XYZ and yaw from layout.
 
         Room geometry is centered at origin, so we need the center position
         (not corner) when placing rooms in the combined directive.
@@ -1249,16 +2418,21 @@ class HouseScene:
             room_id: Room ID to look up.
 
         Returns:
-            (x, y) center position tuple. Returns (0, 0) if room not found.
+            (x, y, z, yaw) tuple. Returns identity if room is not found.
         """
         for placed in self.layout.placed_rooms:
             if placed.room_id == room_id:
                 # Convert from corner to center position.
                 center_x = placed.position[0] + placed.width / 2
                 center_y = placed.position[1] + placed.depth / 2
-                return (center_x, center_y)
+                return (
+                    center_x,
+                    center_y,
+                    self.layout.get_room_elevation(room_id),
+                    placed.yaw,
+                )
         # Default to origin for single room mode or if placement not done.
-        return (0.0, 0.0)
+        return (0.0, 0.0, 0.0, 0.0)
 
     def add_room(self, room: "RoomScene") -> None:
         """Add a room to the house.
@@ -1411,6 +2585,13 @@ class HouseScene:
         console_logger.info(f"Saved combined house state: {state_path}")
 
         # Export combined SceneEval format.
+        # Imported lazily so layout serialization and validation do not require
+        # the full Drake/scene runtime to be importable.
+        from scenesmith.agent_utils.sceneeval_exporter import (
+            SceneEvalExportConfig,
+            SceneEvalExporter,
+        )
+
         floor_thickness = cfg["floor_plan_agent"]["floor_thickness"] if cfg else 0.1
         config = SceneEvalExportConfig(floor_thickness=floor_thickness)
         SceneEvalExporter.export_house(
@@ -1457,8 +2638,9 @@ class HouseScene:
             geometry_name = f"room_geometry_{room_id}"
             room_frame_name = f"room_{room_id}_frame"
 
-            # Get room position from layout.
-            pos_x, pos_y = self._get_room_position(room_id)
+            # Get full room transform from the v2 layout.
+            pos_x, pos_y, pos_z, yaw = self._get_room_transform(room_id)
+            yaw_deg = yaw * 180.0 / np.pi
 
             # Add room frame as child of house_frame.
             directive += f"""
@@ -1466,7 +2648,10 @@ class HouseScene:
     name: {room_frame_name}
     X_PF:
       base_frame: house_frame
-      translation: [{pos_x}, {pos_y}, 0]"""
+      translation: [{pos_x}, {pos_y}, {pos_z}]
+      rotation: !AngleAxis
+        angle_deg: {yaw_deg}
+        axis: [0, 0, 1]"""
 
             # Get room directive with parent_frame so all objects use
             # room-local coordinates relative to the room frame.
@@ -1492,6 +2677,13 @@ class HouseScene:
 - add_weld:
     parent: {room_frame_name}
     child: {geometry_name}::room_geometry_body_link"""
+
+        directive += self.layout._connector_drake_directives(base_dir=self.house_dir)
+        directive += self.layout._structural_mesh_drake_directives(
+            base_dir=self.house_dir
+        )
+        directive += self.layout._platform_drake_directives(base_dir=self.house_dir)
+        directive += self.layout._heightfield_drake_directives(base_dir=self.house_dir)
 
         return directive
 
