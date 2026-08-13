@@ -10,15 +10,14 @@ create_arrangement uses exact positions with all-or-nothing semantics.
 import logging
 import math
 import time
-
+from collections.abc import Callable
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from scenesmith.manipuland_agents.tools.manipuland_tools import FillAssetItem
 
 import numpy as np
-
 from omegaconf import DictConfig
 from pydrake.math import RigidTransform, RotationMatrix
 
@@ -45,6 +44,19 @@ from scenesmith.utils.collision_utils import compute_pairwise_collisions
 from scenesmith.utils.shape_analysis import is_circular_object
 
 console_logger = logging.getLogger(__name__)
+
+
+def placed_container_conflict_message(
+    scene: RoomScene, container_asset_id: UniqueID
+) -> str | None:
+    """Reject reuse that would duplicate composite collision geometry for Drake/FCL."""
+    if container_asset_id not in scene.objects:
+        return None
+    return (
+        f"Container asset '{container_asset_id}' is already placed in the scene. "
+        "Remove that placed object or generate a separate unused container asset before "
+        "creating the arrangement."
+    )
 
 
 def _get_container_bounds_info(container_asset: SceneObject, cfg: DictConfig) -> dict:
@@ -262,6 +274,23 @@ def create_arrangement_impl(
             inside_assets=[],
             removed_assets=[],
             error_type=ManipulandErrorType.ASSET_NOT_FOUND,
+        ).to_json()
+
+    conflict_message = placed_container_conflict_message(scene, container_unique_id)
+    if conflict_message:
+        console_logger.warning(f"Create arrangement failed: {conflict_message}")
+        return FillContainerResult(
+            success=False,
+            message=conflict_message,
+            filled_container_id=None,
+            container_asset_id=container_asset_id,
+            fill_count=0,
+            total_fill_attempted=len(fill_assets),
+            removed_count=0,
+            parent_surface_id=surface_id,
+            inside_assets=[],
+            removed_assets=[],
+            error_type=ManipulandErrorType.INVALID_OPERATION,
         ).to_json()
 
     container_asset = asset_manager.get_asset_by_id(container_unique_id)

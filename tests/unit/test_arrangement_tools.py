@@ -1,17 +1,16 @@
 """Unit tests for arrangement tools."""
 
 import unittest
-
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import numpy as np
-
 from pydrake.math import RigidTransform
 
 from scenesmith.agent_utils.room import ObjectType, SceneObject, UniqueID
 from scenesmith.manipuland_agents.tools.arrangement_tools import (
     _get_container_bounds_info,
     _validate_item_within_container_bounds,
+    placed_container_conflict_message,
 )
 
 
@@ -229,6 +228,27 @@ class TestGetContainerBoundsInfo(unittest.TestCase):
 
         self.assertIn("no bounding box", str(ctx.exception))
         self.assertIn("no_bbox", str(ctx.exception))
+
+
+class TestPlacedContainerConflict(unittest.TestCase):
+    """Guard composite creation against duplicate physical geometry."""
+
+    def test_unplaced_asset_template_is_available(self):
+        scene = Mock(objects={})
+
+        message = placed_container_conflict_message(scene, UniqueID("tray_0"))
+
+        self.assertIsNone(message)
+
+    def test_placed_asset_returns_actionable_repair(self):
+        placed_id = UniqueID("tray_0")
+        scene = Mock(objects={placed_id: object()})
+
+        message = placed_container_conflict_message(scene, placed_id)
+
+        self.assertIn("already placed", message)
+        self.assertIn("Remove", message)
+        self.assertIn("separate unused container asset", message)
 
 
 if __name__ == "__main__":

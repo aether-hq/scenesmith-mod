@@ -3,13 +3,11 @@
 import logging
 import math
 import time
-
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
 
 import numpy as np
 import trimesh
-
 from omegaconf import DictConfig
 from pydrake.all import RigidTransform
 
@@ -22,6 +20,9 @@ from scenesmith.agent_utils.room import (
     SupportSurface,
     UniqueID,
     serialize_rigid_transform,
+)
+from scenesmith.manipuland_agents.tools.arrangement_tools import (
+    placed_container_conflict_message,
 )
 from scenesmith.manipuland_agents.tools.fill_container import (
     compute_composite_bbox_in_local_frame,
@@ -212,6 +213,23 @@ def fill_container_tool_impl(
             inside_assets=[],
             removed_assets=[],
             error_type=ManipulandErrorType.ASSET_NOT_FOUND,
+        ).to_json()
+
+    conflict_message = placed_container_conflict_message(scene, container_unique_id)
+    if conflict_message:
+        console_logger.warning(f"Fill container failed: {conflict_message}")
+        return FillContainerResult(
+            success=False,
+            message=conflict_message,
+            filled_container_id=None,
+            container_asset_id=container_asset_id,
+            fill_count=0,
+            total_fill_attempted=len(fill_asset_ids),
+            removed_count=0,
+            parent_surface_id=surface_id,
+            inside_assets=[],
+            removed_assets=[],
+            error_type=ManipulandErrorType.INVALID_OPERATION,
         ).to_json()
 
     container_asset = asset_manager.get_asset_by_id(container_unique_id)
