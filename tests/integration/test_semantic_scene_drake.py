@@ -34,6 +34,26 @@ def _parse_sdf(sdf_path: Path) -> int:
     return plant.num_collision_geometries()
 
 
+def _heldout_trial_paths() -> tuple[Path, ...]:
+    results = (
+        Path(__file__).parents[2]
+        / "docs"
+        / "geometry-extension"
+        / "llm-trials"
+        / "results"
+    )
+    return tuple(sorted(results.glob("heldout_*.json")))
+
+
+class TestSemanticSceneTrialDiscovery(unittest.TestCase):
+    def test_only_retained_trial_records_are_discovered(self) -> None:
+        paths = _heldout_trial_paths()
+        self.assertGreaterEqual(len(paths), 2)
+        for path in paths:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            self.assertIn("semantic_environment", data)
+
+
 @unittest.skipIf(Parser is None, "pydrake is unavailable on this host")
 class TestSemanticSceneDrake(unittest.TestCase):
     def test_prison_escape_semantic_shell_loads_in_drake(self) -> None:
@@ -45,16 +65,9 @@ class TestSemanticSceneDrake(unittest.TestCase):
     def test_heldout_semantic_products_and_collision_policies_load_in_drake(
         self,
     ) -> None:
-        results = (
-            Path(__file__).parents[2]
-            / "docs"
-            / "geometry-extension"
-            / "llm-trials"
-            / "results"
-        )
         with tempfile.TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory)
-            for result_path in sorted(results.glob("*.json")):
+            for result_path in _heldout_trial_paths():
                 with self.subTest(trial=result_path.stem):
                     data = json.loads(result_path.read_text(encoding="utf-8"))
                     environment = SemanticEnvironmentSpec.from_dict(
