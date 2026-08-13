@@ -30,12 +30,12 @@ class TestCrossFeatureScenarios(unittest.TestCase):
             connector_id="rising_tunnel",
             connector_type=ConnectorType.NATURAL_PASSAGE,
             start=ConnectorEndpoint("lower", "ground", (0, 1, 0)),
-            end=ConnectorEndpoint("upper", "upper", (5, 1, 3)),
+            end=ConnectorEndpoint("upper", "upper_level", (5, 1, 3)),
             parameters={"geometry_embedded": True},
         )
         layout = HouseLayout(
             wall_height=2.5,
-            levels=[LevelSpec("ground", 0), LevelSpec("upper", 3)],
+            levels=[LevelSpec("ground", 0), LevelSpec("upper_level", 3)],
             room_specs=[
                 RoomSpec(
                     "lower",
@@ -48,7 +48,7 @@ class TestCrossFeatureScenarios(unittest.TestCase):
                         gradient=(0.6, 0),
                     ),
                 ),
-                RoomSpec("upper", level_id="upper"),
+                RoomSpec("upper", level_id="upper_level"),
             ],
             placed_rooms=[PlacedRoom("lower", (0, 0), 5, 2)],
             connectors=[passage],
@@ -76,18 +76,18 @@ class TestCrossFeatureScenarios(unittest.TestCase):
             connector_id="main_stairs",
             connector_type=ConnectorType.STAIRS_STRAIGHT,
             start=ConnectorEndpoint("lower", "ground", (0, 0, 0)),
-            end=ConnectorEndpoint("upper", "upper", (4, 0, 3)),
+            end=ConnectorEndpoint("upper", "upper_level", (4, 0, 3)),
             parameters={"riser_count": 18},
         )
         layout = HouseLayout(
-            levels=[LevelSpec("ground", 0), LevelSpec("upper", 3)],
+            levels=[LevelSpec("ground", 0), LevelSpec("upper_level", 3)],
             room_specs=[
                 RoomSpec("lower", length=6, width=5, footprint=lower_footprint),
                 RoomSpec(
                     "upper",
                     length=6,
                     width=5,
-                    level_id="upper",
+                    level_id="upper_level",
                     footprint=Footprint2D.rectangle(6, 5),
                 ),
             ],
@@ -98,7 +98,7 @@ class TestCrossFeatureScenarios(unittest.TestCase):
                     (0, 0),
                     6,
                     5,
-                    level_id="upper",
+                    level_id="upper_level",
                     footprint=Footprint2D.rectangle(6, 5),
                 ),
             ],
@@ -226,14 +226,14 @@ class TestCrossFeatureScenarios(unittest.TestCase):
             connector_id="stairs",
             connector_type=ConnectorType.STAIRS_STRAIGHT,
             start=ConnectorEndpoint("lower", "ground", (1, 2, 0)),
-            end=ConnectorEndpoint("upper", "upper", (5, 2, 3)),
+            end=ConnectorEndpoint("upper", "upper_level", (5, 2, 3)),
             width=1,
             parameters={"riser_count": 18},
         )
 
         def make_layout(*, cut_openings: bool) -> HouseLayout:
             return HouseLayout(
-                levels=[LevelSpec("ground", 0), LevelSpec("upper", 3)],
+                levels=[LevelSpec("ground", 0), LevelSpec("upper_level", 3)],
                 room_specs=[
                     RoomSpec(
                         "lower",
@@ -246,7 +246,7 @@ class TestCrossFeatureScenarios(unittest.TestCase):
                         "upper",
                         length=6,
                         width=4,
-                        level_id="upper",
+                        level_id="upper_level",
                         footprint=boundary,
                         floor_footprint=opening if cut_openings else boundary,
                     ),
@@ -254,7 +254,12 @@ class TestCrossFeatureScenarios(unittest.TestCase):
                 placed_rooms=[
                     PlacedRoom("lower", (0, 0), 6, 4, footprint=boundary),
                     PlacedRoom(
-                        "upper", (0, 0), 6, 4, level_id="upper", footprint=boundary
+                        "upper",
+                        (0, 0),
+                        6,
+                        4,
+                        level_id="upper_level",
+                        footprint=boundary,
                     ),
                 ],
                 connectors=[stairs],

@@ -16,6 +16,7 @@ from scenesmith.agent_utils.semantic_environments import (
     HeroFeatureType,
     OpeningTarget,
     PassageCrossSectionSpec,
+    PassageFloorMode,
     PassageJunctionSpec,
     PassageNetworkSpec,
     PassageSegmentSpec,
@@ -52,6 +53,301 @@ def _segment(
 
 
 class TestSemanticEnvironmentModel(unittest.TestCase):
+    def test_llm_json_types_are_strict_instead_of_coercive(self) -> None:
+        base = SemanticEnvironmentSpec(
+            regions=(_region(),),
+            passage_networks=(
+                PassageNetworkSpec(
+                    "strict_route",
+                    "underground",
+                    (
+                        PassageJunctionSpec("strict_a", (0, 0, 0)),
+                        PassageJunctionSpec("strict_b", (4, 0, 0)),
+                    ),
+                    (
+                        _segment(
+                            "strict_edge",
+                            "strict_a",
+                            "strict_b",
+                            ((0, 0, 0), (4, 0, 0)),
+                        ),
+                    ),
+                ),
+            ),
+        ).to_dict()
+        base["passage_networks"][0]["junctions"][0]["open_boundary"] = "false"
+        with self.assertRaisesRegex(GeometryValidationError, "invalid_boolean"):
+            SemanticEnvironmentSpec.from_dict(base)
+
+        base = SemanticEnvironmentSpec(
+            regions=(_region(),),
+            chambers=(
+                CavernChamberSpec("room", "underground", (0, 0, 4), (10, 10, 8)),
+            ),
+        ).to_dict()
+        base["detail_fields"] = [
+            {
+                "id": "bad_count",
+                "region_id": "underground",
+                "target_chamber_id": "room",
+                "formation_type": "stalactite",
+                "surface_role": "overhead",
+                "count": 1.5,
+                "min_size": [1, 1, 1],
+                "max_size": [2, 2, 2],
+                "seed": 4,
+            }
+        ]
+        with self.assertRaisesRegex(GeometryValidationError, "invalid_integer"):
+            SemanticEnvironmentSpec.from_dict(base)
+
+        base = SemanticEnvironmentSpec(
+            regions=(_region(),),
+            chambers=(
+                CavernChamberSpec(
+                    "transform_room", "underground", (0, 0, 4), (10, 10, 8)
+                ),
+            ),
+        ).to_dict()
+        base["regions"][0]["transform"]["translation"][0] = "0"
+        with self.assertRaisesRegex(GeometryValidationError, "invalid_number"):
+            SemanticEnvironmentSpec.from_dict(base)
+
+        base = SemanticEnvironmentSpec(
+            regions=(_region(),),
+            chambers=(
+                CavernChamberSpec(
+                    "numeric_room", "underground", (0, 0, 4), (10, 10, 8)
+                ),
+            ),
+        ).to_dict()
+        base["chambers"][0]["size"][0] = "10"
+        with self.assertRaisesRegex(GeometryValidationError, "invalid_number"):
+            SemanticEnvironmentSpec.from_dict(base)
+
+        base = SemanticEnvironmentSpec(
+            regions=(_region(),),
+            chambers=(
+                CavernChamberSpec("schema_room", "underground", (0, 0, 4), (10, 10, 8)),
+            ),
+        ).to_dict()
+        base["schema_version"] = "1"
+        with self.assertRaisesRegex(GeometryValidationError, "invalid_integer"):
+            SemanticEnvironmentSpec.from_dict(base)
+
+    def test_detail_and_scene_work_budgets_fail_before_sampling(self) -> None:
+        region = EnvironmentRegionSpec(
+            "budget_region",
+            EnvironmentKind.SUBTERRANEAN,
+            Bounds3D((-100, -100, -100), (100, 100, 100)),
+        )
+        chamber = CavernChamberSpec(
+            "budget_chamber", "budget_region", (0, 0, 0), (100, 100, 100)
+        )
+        with self.assertRaisesRegex(
+            GeometryValidationError, "semantic_budget_exceeded"
+        ):
+            SemanticEnvironmentSpec(
+                regions=(region,),
+                chambers=(chamber,),
+                detail_fields=(
+                    DetailFieldSpec(
+                        "too_many",
+                        "budget_region",
+                        "budget_chamber",
+                        FormationType.STALACTITE,
+                        DetailSurfaceRole.OVERHEAD,
+                        10_001,
+                        (1, 1, 1),
+                        (2, 2, 2),
+                        7,
+                    ),
+                ),
+            )
+
+    def test_complete_hero_envelope_must_fit_inside_target_chamber(self) -> None:
+        region = EnvironmentRegionSpec(
+            "hero_region",
+            EnvironmentKind.SUBTERRANEAN,
+            Bounds3D((-20, -20, -20), (20, 20, 20)),
+        )
+        chamber = CavernChamberSpec(
+            "hero_chamber", "hero_region", (0, 0, 0), (10, 10, 10)
+        )
+        with self.assertRaisesRegex(GeometryValidationError, "hero_outside_chamber"):
+            SemanticEnvironmentSpec(
+                regions=(region,),
+                chambers=(chamber,),
+                hero_features=(
+                    HeroFeatureSpec(
+                        "oversized_hero",
+                        "hero_region",
+                        "hero_chamber",
+                        HeroFeatureType.ROCK_SPIRE,
+                        (0, 0, -4.5),
+                        (12, 12, 12),
+                    ),
+                ),
+            )
+
+    def test_unsupported_floor_mode_is_rejected_by_the_semantic_contract(self) -> None:
+        segment = PassageSegmentSpec(
+            "steps",
+            "a",
+            "b",
+            ((0, 0, 0), (4, 0, 1)),
+            (
+                PassageCrossSectionSpec(0, 2, 3),
+                PassageCrossSectionSpec(1, 2, 3),
+            ),
+            floor_mode=PassageFloorMode.STEPS,
+        )
+        with self.assertRaisesRegex(
+            GeometryValidationError, "unsupported_passage_floor_mode"
+        ):
+            SemanticEnvironmentSpec(
+                regions=(_region(),),
+                passage_networks=(
+                    PassageNetworkSpec(
+                        "route",
+                        "underground",
+                        (
+                            PassageJunctionSpec("a", (0, 0, 0)),
+                            PassageJunctionSpec("b", (4, 0, 1)),
+                        ),
+                        (segment,),
+                    ),
+                ),
+            )
+
+    def test_identifiers_must_be_safe_for_files_and_model_names(self) -> None:
+        for unsafe_id in ("../escape", "nested/path", "has space", "line\nbreak"):
+            with self.subTest(unsafe_id=unsafe_id):
+                with self.assertRaisesRegex(
+                    GeometryValidationError, "invalid_identifier"
+                ):
+                    EnvironmentRegionSpec(
+                        unsafe_id,
+                        EnvironmentKind.SUBTERRANEAN,
+                        Bounds3D((-1, -1, -1), (1, 1, 1)),
+                    )
+        with self.assertRaisesRegex(GeometryValidationError, "invalid_identifier"):
+            EnvironmentRegionSpec(
+                42,  # type: ignore[arg-type]
+                EnvironmentKind.SUBTERRANEAN,
+                Bounds3D((-1, -1, -1), (1, 1, 1)),
+            )
+
+    def test_semantic_identifiers_are_globally_unique(self) -> None:
+        region = EnvironmentRegionSpec(
+            "region",
+            EnvironmentKind.SUBTERRANEAN,
+            Bounds3D((-20, -20, -20), (20, 20, 20)),
+        )
+        chamber = CavernChamberSpec("chamber", "region", (0, 0, 0), (10, 10, 10))
+        detail = DetailFieldSpec(
+            "shared",
+            "region",
+            "chamber",
+            FormationType.STALACTITE,
+            DetailSurfaceRole.OVERHEAD,
+            1,
+            (1, 1, 1),
+            (1, 1, 2),
+            1,
+        )
+        hero = HeroFeatureSpec(
+            "shared",
+            "region",
+            "chamber",
+            HeroFeatureType.ROCK_SPIRE,
+            (0, 0, -4),
+            (1, 1, 2),
+        )
+
+        with self.assertRaisesRegex(GeometryValidationError, "duplicate_semantic_id"):
+            SemanticEnvironmentSpec(
+                regions=(region,),
+                chambers=(chamber,),
+                detail_fields=(detail,),
+                hero_features=(hero,),
+            )
+
+    def test_authored_identifiers_cannot_collide_with_derived_instance_ids(
+        self,
+    ) -> None:
+        region = EnvironmentRegionSpec(
+            "derived_region",
+            EnvironmentKind.SUBTERRANEAN,
+            Bounds3D((-20, -20, -20), (20, 20, 20)),
+        )
+        chamber = CavernChamberSpec(
+            "derived_chamber", "derived_region", (0, 0, 0), (10, 10, 10)
+        )
+        detail = DetailFieldSpec(
+            "ceiling_teeth",
+            "derived_region",
+            "derived_chamber",
+            FormationType.STALACTITE,
+            DetailSurfaceRole.OVERHEAD,
+            1,
+            (1, 1, 1),
+            (1, 1, 2),
+            1,
+        )
+
+        with self.assertRaisesRegex(GeometryValidationError, "duplicate_semantic_id"):
+            SemanticEnvironmentSpec(
+                regions=(region,),
+                chambers=(chamber,),
+                detail_fields=(detail,),
+                hero_features=(
+                    HeroFeatureSpec(
+                        "ceiling_teeth_0000",
+                        "derived_region",
+                        "derived_chamber",
+                        HeroFeatureType.ROCK_SPIRE,
+                        (0, 0, -4),
+                        (1, 1, 2),
+                    ),
+                ),
+            )
+
+    def test_junction_opening_references_must_exist_in_the_same_region(self) -> None:
+        region = EnvironmentRegionSpec(
+            "opening_region",
+            EnvironmentKind.SUBTERRANEAN,
+            Bounds3D((-20, -20, -20), (20, 20, 20)),
+        )
+        chamber = CavernChamberSpec(
+            "opening_chamber", "opening_region", (0, 0, 0), (10, 10, 10)
+        )
+        network = PassageNetworkSpec(
+            "opening_route",
+            "opening_region",
+            (
+                PassageJunctionSpec(
+                    "opening_start", (0, 0, 0), opening_id="missing_opening"
+                ),
+                PassageJunctionSpec("opening_end", (4, 0, 0)),
+            ),
+            (
+                _segment(
+                    "opening_segment",
+                    "opening_start",
+                    "opening_end",
+                    ((0, 0, 0), (4, 0, 0)),
+                ),
+            ),
+        )
+
+        with self.assertRaisesRegex(
+            GeometryValidationError, "unknown_environment_opening"
+        ):
+            SemanticEnvironmentSpec(
+                regions=(region,), chambers=(chamber,), passage_networks=(network,)
+            )
+
     def test_round_trip_is_canonical_and_order_invariant(self) -> None:
         junctions = (
             PassageJunctionSpec("entrance", (0, 0, 0), open_boundary=True),
@@ -190,8 +486,8 @@ class TestSemanticEnvironmentModel(unittest.TestCase):
                     "underground",
                     "hall",
                     HeroFeatureType.ROCK_SPIRE,
-                    (4, 2, 0),
-                    (5, 4, 8),
+                    (2, 1, 1),
+                    (3, 3, 4),
                     semantic_tags=frozenset({"landmark", "perch"}),
                 ),
             ),

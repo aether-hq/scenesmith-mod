@@ -1,4 +1,8 @@
 {
+  "architecture": {
+    "mesh_path": "structures/rooms/prison_block/0bdfebec8ea2a75949ee73c30ffd40309ac466bf011b09a4a2e392034338d06f/room_geometry_prison_block.obj",
+    "sdf_path": "structures/rooms/prison_block/0bdfebec8ea2a75949ee73c30ffd40309ac466bf011b09a4a2e392034338d06f/room_geometry_prison_block.sdf"
+  },
   "description": "Underground prison room with a dug breach into a long lit escape tunnel",
   "entrypoint": "prison_escape.dmd.yaml",
   "lighting": {
@@ -130,9 +134,11 @@
   "tunnel": {
     "centerline_length_m": 70.18888640425128,
     "end_elevation_m": -5.0,
-    "environment_hash": "a2d13fecade6c3edf434c4ddfd237a112a64d34fe07f3fe541951ebdf1de33d3",
+    "environment_hash": "bb015ff258a2db0063f4e46173408bd3462356a25d4d803632342a9b3deeb62a",
+    "mesh_path": "structures/meshes/escape_tunnel_shell/aa70fc98bfa42462eca3e751643b4bf48aa6307d0dc22b982e1a16368d7aa080/escape_tunnel_shell.obj",
     "minimum_clearance_height_m": 3.0,
     "minimum_width_m": 3.4,
+    "sdf_path": "structures/meshes/escape_tunnel_shell/aa70fc98bfa42462eca3e751643b4bf48aa6307d0dc22b982e1a16368d7aa080/escape_tunnel_shell.sdf",
     "sections": 12,
     "semantic_source_id": "long_way_out",
     "visual_triangles": 8875

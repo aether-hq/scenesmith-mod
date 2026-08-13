@@ -1,0 +1,11 @@
+{
+  "after_repair_pass_rate": 1.0,
+  "after_repair_threshold": 0.85,
+  "after_repair_threshold_met": true,
+  "before_repair_pass_rate": 0.5,
+  "before_repair_threshold": 0.65,
+  "before_repair_threshold_met": false,
+  "executed_trials": 2,
+  "note": "Initial held-out evidence only; the specification requires ten runs per prompt before treating these rates as statistically meaningful.",
+  "overall_threshold_met": false
+}

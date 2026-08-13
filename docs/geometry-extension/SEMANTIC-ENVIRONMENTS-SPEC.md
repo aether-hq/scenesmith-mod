@@ -1,8 +1,8 @@
 # Semantic Environments Specification
 
-Status: active implementation contract (E0–E3 partial)
+Status: active implementation contract (E0–E3 hardening complete; later phases partial)
 
-Date: 2026-08-12
+Date: 2026-08-13
 
 Related documents:
 
@@ -125,6 +125,15 @@ Shared compiled products
 The semantic graph is authoritative. Tessellation density, collision
 simplification, chunk boundaries, and procedural samples are derived products
 and may be regenerated.
+
+The implemented `DerivedSceneContract` is the publication boundary for semantic
+scenes. It derives physical-gated topology and openings, collision/query
+surfaces, detail route vetoes, runtime product references, and provenance from
+one normalized semantic source. Each product is published as an atomic,
+content-addressed directory and exposed through an authenticated `ArtifactRef`
+that binds the semantic source hash, compiler version/options, and product
+hashes. New runtime consumers must use this contract; the separate shell/detail
+compile methods remain compatibility shims for existing exporters.
 
 ## 5. Normative semantic primitives
 
@@ -457,6 +466,10 @@ individual stalactites, collision hulls, or navigation polygons.
   library RNG behavior must not be the long-term reproducibility contract.
 - Unsupported or over-budget operations stop before export and return typed,
   actionable diagnostics.
+- JSON authoring is non-coercive: booleans, integers, and numbers must have the
+  corresponding JSON scalar type and all numbers must be finite.
+- Authored identifiers and predictable derived instance identifiers share one
+  safe, globally unique scene namespace.
 
 ## 8. Falsifiable requirements
 

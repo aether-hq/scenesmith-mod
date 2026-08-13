@@ -1,0 +1,291 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["semantic_environment"],
+  "properties": {
+    "semantic_environment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "regions",
+        "chambers",
+        "passage_networks",
+        "openings",
+        "detail_fields",
+        "hero_features"
+      ],
+      "properties": {
+        "schema_version": {"const": 1},
+        "regions": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"$ref": "#/$defs/region"}
+        },
+        "chambers": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/chamber"}
+        },
+        "passage_networks": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/network"}
+        },
+        "openings": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/opening"}
+        },
+        "detail_fields": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/detail"}
+        },
+        "hero_features": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/hero"}
+        }
+      }
+    }
+  },
+  "$defs": {
+    "id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]*$"},
+    "point3": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 3,
+      "items": {"type": "number"}
+    },
+    "point2": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "items": {"type": "number"}
+    },
+    "bounds": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["minimum", "maximum"],
+      "properties": {
+        "minimum": {"$ref": "#/$defs/point3"},
+        "maximum": {"$ref": "#/$defs/point3"}
+      }
+    },
+    "transform": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["translation", "rotation_rpy"],
+      "properties": {
+        "translation": {"$ref": "#/$defs/point3"},
+        "rotation_rpy": {"$ref": "#/$defs/point3"}
+      }
+    },
+    "region": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "kind", "bounds"],
+      "properties": {
+        "id": {"$ref": "#/$defs/id"},
+        "kind": {
+          "enum": ["constructed", "subterranean", "exterior", "hybrid"]
+        },
+        "bounds": {"$ref": "#/$defs/bounds"},
+        "transform": {"$ref": "#/$defs/transform"},
+        "material_context": {"type": "object"},
+        "detail_seed": {"type": "integer"},
+        "chunk_policy": {"type": "object"}
+      }
+    },
+    "chamber": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "region_id", "center", "size", "shape"],
+      "properties": {
+        "id": {"$ref": "#/$defs/id"},
+        "region_id": {"$ref": "#/$defs/id"},
+        "center": {"$ref": "#/$defs/point3"},
+        "size": {"$ref": "#/$defs/point3"},
+        "shape": {"enum": ["ellipsoid", "superellipsoid"]},
+        "orientation_rpy": {"$ref": "#/$defs/point3"},
+        "substrate_id": {"type": ["string", "null"]},
+        "semantic_tags": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "cross_section": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["station", "width", "height"],
+      "properties": {
+        "station": {"type": "number", "minimum": 0, "maximum": 1},
+        "width": {"type": "number", "exclusiveMinimum": 0},
+        "height": {"type": "number", "exclusiveMinimum": 0}
+      }
+    },
+    "junction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "position"],
+      "properties": {
+        "id": {"$ref": "#/$defs/id"},
+        "position": {"$ref": "#/$defs/point3"},
+        "chamber_id": {"type": ["string", "null"]},
+        "opening_id": {"type": ["string", "null"]},
+        "space_id": {"type": ["string", "null"]},
+        "level_id": {"type": ["string", "null"]},
+        "open_boundary": {"type": "boolean"},
+        "semantic_tags": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "segment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "start_junction_id",
+        "end_junction_id",
+        "path",
+        "cross_sections",
+        "profile",
+        "floor_mode",
+        "capabilities"
+      ],
+      "properties": {
+        "id": {"$ref": "#/$defs/id"},
+        "start_junction_id": {"$ref": "#/$defs/id"},
+        "end_junction_id": {"$ref": "#/$defs/id"},
+        "path": {
+          "type": "array",
+          "minItems": 2,
+          "items": {"$ref": "#/$defs/point3"}
+        },
+        "cross_sections": {
+          "type": "array",
+          "minItems": 2,
+          "items": {"$ref": "#/$defs/cross_section"}
+        },
+        "profile": {"enum": ["ellipse", "keyhole", "slot", "arched"]},
+        "floor_mode": {"enum": ["natural", "graded", "non_traversable"]},
+        "capabilities": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"enum": ["walk", "crawl", "climb", "swim", "fly"]}
+        },
+        "roughness_seed": {"type": ["integer", "null"]}
+      }
+    },
+    "network": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "region_id", "junctions", "segments"],
+      "properties": {
+        "id": {"$ref": "#/$defs/id"},
+        "region_id": {"$ref": "#/$defs/id"},
+        "junctions": {
+          "type": "array",
+          "minItems": 2,
+          "items": {"$ref": "#/$defs/junction"}
+        },
+        "segments": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"$ref": "#/$defs/segment"}
+        }
+      }
+    },
+    "opening": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "region_id",
+        "source_chamber_id",
+        "target",
+        "center",
+        "normal",
+        "size",
+        "depth",
+        "shape",
+        "passable",
+        "visible",
+        "weather_exposed"
+      ],
+      "properties": {
+        "id": {"$ref": "#/$defs/id"},
+        "region_id": {"$ref": "#/$defs/id"},
+        "source_chamber_id": {"$ref": "#/$defs/id"},
+        "target": {"enum": ["sky", "exterior"]},
+        "center": {"$ref": "#/$defs/point3"},
+        "normal": {"$ref": "#/$defs/point3"},
+        "size": {"$ref": "#/$defs/point2"},
+        "depth": {"type": "number", "exclusiveMinimum": 0},
+        "shape": {"enum": ["ellipse", "rectangle"]},
+        "passable": {"type": "boolean"},
+        "visible": {"type": "boolean"},
+        "weather_exposed": {"type": "boolean"}
+      }
+    },
+    "detail": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "region_id",
+        "target_chamber_id",
+        "formation_type",
+        "surface_role",
+        "count",
+        "min_size",
+        "max_size",
+        "seed",
+        "collision_policy"
+      ],
+      "properties": {
+        "id": {"$ref": "#/$defs/id"},
+        "region_id": {"$ref": "#/$defs/id"},
+        "target_chamber_id": {"$ref": "#/$defs/id"},
+        "formation_type": {
+          "enum": [
+            "stalactite",
+            "stalagmite",
+            "column",
+            "flowstone",
+            "boulder",
+            "rubble",
+            "scree"
+          ]
+        },
+        "surface_role": {"enum": ["overhead", "support", "boundary"]},
+        "count": {"type": "integer", "minimum": 1, "maximum": 10000},
+        "min_size": {"$ref": "#/$defs/point3"},
+        "max_size": {"$ref": "#/$defs/point3"},
+        "seed": {"type": "integer"},
+        "protect_passage_network_ids": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/id"}
+        },
+        "route_clearance": {"type": "number", "minimum": 0},
+        "collision_policy": {"enum": ["visual_only", "coarse", "full"]}
+      }
+    },
+    "hero": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "region_id",
+        "target_chamber_id",
+        "feature_type",
+        "anchor",
+        "size",
+        "collision_policy"
+      ],
+      "properties": {
+        "id": {"$ref": "#/$defs/id"},
+        "region_id": {"$ref": "#/$defs/id"},
+        "target_chamber_id": {"$ref": "#/$defs/id"},
+        "feature_type": {"enum": ["rock_spire", "boulder"]},
+        "anchor": {"$ref": "#/$defs/point3"},
+        "size": {"$ref": "#/$defs/point3"},
+        "collision_policy": {"enum": ["visual_only", "coarse", "full"]},
+        "semantic_tags": {"type": "array", "items": {"type": "string"}}
+      }
+    }
+  }
+}

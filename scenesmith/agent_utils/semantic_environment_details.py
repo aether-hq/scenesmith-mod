@@ -15,6 +15,7 @@ from scenesmith.agent_utils.semantic_environments import (
     EnvironmentRegionSpec,
     FormationType,
     HeroFeatureSpec,
+    HeroFeatureType,
     SemanticEnvironmentSpec,
 )
 from scenesmith.agent_utils.structural_compiler import (
@@ -22,6 +23,7 @@ from scenesmith.agent_utils.structural_compiler import (
     CompiledSurfacePatch,
     Triangle,
     TriangleMesh,
+    audit_triangle_mesh,
 )
 from scenesmith.agent_utils.structural_geometry import (
     GeometryValidationError,
@@ -33,6 +35,21 @@ from scenesmith.agent_utils.structural_geometry import (
 
 DETAIL_SAMPLER_VERSION = 1
 _MASK_64 = (1 << 64) - 1
+
+FORMATION_MESH_FAMILY = {
+    FormationType.STALACTITE: "cone",
+    FormationType.STALAGMITE: "cone",
+    FormationType.COLUMN: "cone",
+    FormationType.FLOWSTONE: "rounded",
+    FormationType.BOULDER: "rounded",
+    FormationType.RUBBLE: "rounded",
+    FormationType.SCREE: "rounded",
+}
+
+HERO_FORMATION_TYPE = {
+    HeroFeatureType.ROCK_SPIRE: FormationType.STALAGMITE,
+    HeroFeatureType.BOULDER: FormationType.BOULDER,
+}
 
 
 def _add(first: Point3, second: Point3) -> Point3:
@@ -178,7 +195,8 @@ def _masked(
     field_spec: DetailFieldSpec,
     environment: SemanticEnvironmentSpec,
     region: EnvironmentRegionSpec,
-) -> bool:
+    accepted_instances: tuple[DetailInstance, ...] = (),
+) -> str | None:
     lateral_radius = max(size[0], size[1]) / 2.0
     half_height = size[2] / 2.0
     instance_center = _add(anchor, _scale(axis, half_height))
@@ -190,30 +208,75 @@ def _masked(
             continue
         for segment in network.segments:
             path = tuple(_transform_point(point, region) for point in segment.path)
-            if any(
-                _distance_to_segment(instance_center, start, end) < clearance
-                for start, end in zip(path, path[1:])
-            ):
-                return True
+            spans = tuple(zip(path, path[1:]))
+            span_lengths = tuple(math.dist(start, end) for start, end in spans)
+            total_length = sum(span_lengths)
+            cumulative = 0.0
+            for (start, end), span_length in zip(spans, span_lengths):
+                span = _subtract(end, start)
+                amount = min(
+                    1.0,
+                    max(
+                        0.0,
+                        _dot(_subtract(instance_center, start), span)
+                        / (span_length * span_length),
+                    ),
+                )
+                station = (cumulative + amount * span_length) / total_length
+                width, height = _interpolate_segment_cross_section(segment, station)
+                passage_radius = max(width / 2.0, height)
+                if _distance_to_segment(instance_center, start, end) < (
+                    clearance + passage_radius
+                ):
+                    return "passage"
+                cumulative += span_length
     for opening in environment.openings:
         if opening.region_id != field_spec.region_id:
             continue
         center = _transform_point(opening.center, region)
         opening_clearance = max(opening.size) / 2.0 + instance_radius
         if math.dist(instance_center, center) < opening_clearance:
-            return True
+            return "opening"
     for feature in environment.hero_features:
         if feature.region_id != field_spec.region_id:
             continue
         center = _transform_point(feature.anchor, region)
         feature_clearance = max(feature.size) / 2.0 + instance_radius
         if math.dist(instance_center, center) < feature_clearance:
-            return True
-    return False
+            return "hero"
+    for accepted in accepted_instances:
+        accepted_lateral = max(accepted.size[0], accepted.size[1]) / 2.0
+        accepted_half_height = accepted.size[2] / 2.0
+        accepted_center = _add(
+            accepted.anchor, _scale(accepted.axis, accepted_half_height)
+        )
+        accepted_radius = math.hypot(accepted_lateral, accepted_half_height)
+        if (
+            math.dist(instance_center, accepted_center)
+            < instance_radius + accepted_radius
+        ):
+            return "detail_conflict"
+    return None
+
+
+def _interpolate_segment_cross_section(segment, station: float) -> tuple[float, float]:
+    for first, second in zip(segment.cross_sections, segment.cross_sections[1:]):
+        if station <= second.station + 1e-12:
+            span = second.station - first.station
+            amount = min(1.0, max(0.0, (station - first.station) / span))
+            return (
+                first.width + (second.width - first.width) * amount,
+                first.height + (second.height - first.height) * amount,
+            )
+    last = segment.cross_sections[-1]
+    return last.width, last.height
 
 
 def sample_detail_field(
-    field_spec: DetailFieldSpec, environment: SemanticEnvironmentSpec
+    field_spec: DetailFieldSpec,
+    environment: SemanticEnvironmentSpec,
+    *,
+    accepted_instances: tuple[DetailInstance, ...] = (),
 ) -> tuple[tuple[DetailInstance, ...], int]:
     """Sample a detail field deterministically while enforcing semantic masks."""
 
@@ -223,7 +286,8 @@ def sample_detail_field(
     region = region_by_id[field_spec.region_id]
     instances: list[DetailInstance] = []
     dropped = 0
-    maximum_candidates = max(field_spec.count * 64, field_spec.count)
+    mask_causes: dict[str, int] = {}
+    maximum_candidates = max(field_spec.count * 256, field_spec.count)
     for candidate in range(maximum_candidates):
         if len(instances) == field_spec.count:
             break
@@ -238,8 +302,18 @@ def sample_detail_field(
             * _sample_unit(field_spec.seed, candidate, axis + 2)
             for axis in range(3)
         )
-        if _masked(anchor, axis, size, field_spec, environment, region):
+        mask_cause = _masked(
+            anchor,
+            axis,
+            size,
+            field_spec,
+            environment,
+            region,
+            (*accepted_instances, *instances),
+        )
+        if mask_cause is not None:
             dropped += 1
+            mask_causes[mask_cause] = mask_causes.get(mask_cause, 0) + 1
             continue
         instances.append(
             DetailInstance(
@@ -254,10 +328,14 @@ def sample_detail_field(
             )
         )
     if len(instances) != field_spec.count:
+        cause_summary = ", ".join(
+            f"{cause}={count}" for cause, count in sorted(mask_causes.items())
+        )
         raise GeometryValidationError(
             "no_legal_detail_samples",
             f"placed {len(instances)} of {field_spec.count} requested samples after "
-            f"{maximum_candidates} deterministic attempts",
+            f"{maximum_candidates} deterministic attempts; mask causes: "
+            f"{cause_summary or 'none'}",
             entity_id=field_spec.field_id,
         )
     return tuple(instances), dropped
@@ -300,15 +378,11 @@ def _formation_mesh(
         instance.size[1] / 2.0,
         instance.size[2],
     )
-    if instance.formation_type in {
-        FormationType.BOULDER,
-        FormationType.RUBBLE,
-        FormationType.SCREE,
-        FormationType.FLOWSTONE,
-    }:
+    mesh_family = FORMATION_MESH_FAMILY[instance.formation_type]
+    if mesh_family == "rounded":
         rings = 5
-        vertices: list[Point3] = []
-        for ring in range(rings + 1):
+        vertices: list[Point3] = [world(0.0, 0.0, 0.0)]
+        for ring in range(1, rings):
             latitude = -math.pi / 2.0 + math.pi * ring / rings
             for segment in range(radial_segments):
                 angle = 2.0 * math.pi * segment / radial_segments
@@ -319,22 +393,36 @@ def _formation_mesh(
                         height / 2.0 + height / 2.0 * math.sin(latitude),
                     )
                 )
+        top_index = len(vertices)
+        vertices.append(world(0.0, 0.0, height))
         triangles: list[Triangle] = []
-        for ring in range(rings):
+        first_ring = 1
+        for segment in range(radial_segments):
+            following = (segment + 1) % radial_segments
+            triangles.append((0, first_ring + following, first_ring + segment))
+        for ring in range(rings - 2):
             for segment in range(radial_segments):
                 following = (segment + 1) % radial_segments
-                current = ring * radial_segments + segment
-                next_ring = (ring + 1) * radial_segments + segment
+                current = first_ring + ring * radial_segments + segment
+                next_ring = current + radial_segments
                 triangles.extend(
                     (
-                        (current, next_ring, ring * radial_segments + following),
                         (
-                            ring * radial_segments + following,
+                            current,
+                            first_ring + ring * radial_segments + following,
                             next_ring,
-                            (ring + 1) * radial_segments + following,
+                        ),
+                        (
+                            first_ring + ring * radial_segments + following,
+                            first_ring + (ring + 1) * radial_segments + following,
+                            next_ring,
                         ),
                     )
                 )
+        last_ring = first_ring + (rings - 2) * radial_segments
+        for segment in range(radial_segments):
+            following = (segment + 1) % radial_segments
+            triangles.append((last_ring + segment, last_ring + following, top_index))
         return TriangleMesh(tuple(vertices), tuple(triangles))
 
     base = tuple(
@@ -376,16 +464,49 @@ def _compile_instances(
     collision_policy: DetailCollisionPolicy,
 ) -> CompiledStructure:
     mesh = _combine_meshes(tuple(_formation_mesh(instance) for instance in instances))
-    roles = (
-        frozenset({SurfaceRole.NON_INTERACTIVE})
-        if collision_policy == DetailCollisionPolicy.VISUAL_ONLY
-        else frozenset({SurfaceRole.BOUNDARY})
+    collision_mesh = mesh
+    if collision_policy == DetailCollisionPolicy.COARSE:
+        collision_mesh = _combine_meshes(
+            tuple(
+                _formation_mesh(instance, radial_segments=6) for instance in instances
+            )
+        )
+    for label, audited_mesh in (
+        ("visual", mesh),
+        ("collision", collision_mesh),
+    ):
+        audit = audit_triangle_mesh(audited_mesh)
+        if (
+            not audit.is_closed
+            or not audit.is_winding_consistent
+            or audit.signed_volume <= 0.0
+        ):
+            raise GeometryValidationError(
+                "invalid_compiled_detail_mesh",
+                f"{label} detail mesh must be closed, consistently wound, and outward",
+                entity_id=source_id,
+            )
+    authored_roles = {instance.surface_role for instance in instances}
+    structural_roles = frozenset(
+        {
+            {
+                DetailSurfaceRole.OVERHEAD: SurfaceRole.OVERHEAD,
+                DetailSurfaceRole.SUPPORT: SurfaceRole.SUPPORT,
+                DetailSurfaceRole.BOUNDARY: SurfaceRole.BOUNDARY,
+            }[role]
+            for role in authored_roles
+        }
+        | (
+            {SurfaceRole.NON_INTERACTIVE}
+            if collision_policy == DetailCollisionPolicy.VISUAL_ONLY
+            else {SurfaceRole.BOUNDARY}
+        )
     )
     surfaces = tuple(
         CompiledSurfacePatch(
             surface=StructuralSurface(
                 surface_id=f"{source_id}_triangle_{triangle_index:06d}",
-                roles=roles,
+                roles=structural_roles,
                 source_id=source_id,
                 geometry_ref=f"triangle:{triangle_index}",
                 metadata={
@@ -399,24 +520,41 @@ def _compile_instances(
         )
         for triangle_index, triangle in enumerate(mesh.triangles)
     )
+    collision_surfaces = surfaces
+    if collision_policy == DetailCollisionPolicy.COARSE:
+        collision_surfaces = tuple(
+            CompiledSurfacePatch(
+                surface=StructuralSurface(
+                    surface_id=f"{source_id}_collision_triangle_{triangle_index:06d}",
+                    roles=structural_roles,
+                    source_id=source_id,
+                    geometry_ref=f"collision_triangle:{triangle_index}",
+                    metadata={
+                        "detail_source_id": source_id,
+                        "collision_policy": collision_policy.value,
+                        "sampler_version": DETAIL_SAMPLER_VERSION,
+                    },
+                ),
+                boundary=tuple(collision_mesh.vertices[index] for index in triangle),
+                normal=collision_mesh.triangle_normal(triangle_index),
+            )
+            for triangle_index, triangle in enumerate(collision_mesh.triangles)
+        )
     return CompiledStructure(
         structure_id=source_id,
         visual_mesh=mesh,
-        collision_mesh=mesh,
+        collision_mesh=collision_mesh,
         surfaces=surfaces,
         triangle_groups={"details": tuple(range(len(mesh.triangles)))},
         collision_enabled=collision_policy != DetailCollisionPolicy.VISUAL_ONLY,
+        collision_surfaces=collision_surfaces,
     )
 
 
 def _hero_instance(
     feature: HeroFeatureSpec, region: EnvironmentRegionSpec
 ) -> DetailInstance:
-    formation_type = (
-        FormationType.BOULDER
-        if feature.feature_type.value == "boulder"
-        else FormationType.STALAGMITE
-    )
+    formation_type = HERO_FORMATION_TYPE[feature.feature_type]
     return DetailInstance(
         instance_id=feature.feature_id,
         source_id=feature.feature_id,
@@ -438,7 +576,9 @@ def compile_environment_details(
     instances: list[DetailInstance] = []
     dropped = 0
     for field_spec in environment.detail_fields:
-        sampled, field_dropped = sample_detail_field(field_spec, environment)
+        sampled, field_dropped = sample_detail_field(
+            field_spec, environment, accepted_instances=tuple(instances)
+        )
         structures.append(
             _compile_instances(
                 field_spec.field_id, sampled, field_spec.collision_policy

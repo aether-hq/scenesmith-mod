@@ -21,25 +21,31 @@ class TestPrisonEscapeExample(unittest.TestCase):
             self.assertEqual(manifest["verification"]["blocked_connectors"], [])
             self.assertIn("escape_outlet", manifest["verification"]["walk_reachable"])
             self.assertEqual(manifest["wall_breach"]["width_m"], 3.6)
-            self.assertEqual(
-                manifest["tunnel"]["semantic_source_id"], "long_way_out"
-            )
+            self.assertEqual(manifest["tunnel"]["semantic_source_id"], "long_way_out")
             self.assertEqual(len(manifest["tunnel"]["environment_hash"]), 64)
 
+            layout = json.loads((output_dir / "structural_layout.json").read_text())
+            room_sdf_path = layout["room_geometries"]["prison_block"]["sdf_path"]
             for relative_path in (
                 "prison_escape.dmd.yaml",
                 "structural_layout.json",
                 "manifest.json",
                 "preview.svg",
-                "structures/rooms/prison_block/room_geometry_prison_block.sdf",
-                "structures/meshes/escape_tunnel_shell/escape_tunnel_shell.sdf",
+                room_sdf_path,
                 "details/lights/ceiling_lights.sdf",
             ):
                 self.assertTrue((output_dir / relative_path).is_file(), relative_path)
+            self.assertTrue((output_dir / manifest["tunnel"]["sdf_path"]).is_file())
+            self.assertTrue((output_dir / manifest["tunnel"]["mesh_path"]).is_file())
+            self.assertTrue(
+                (output_dir / manifest["architecture"]["sdf_path"]).is_file()
+            )
+            self.assertTrue(
+                (output_dir / manifest["architecture"]["mesh_path"]).is_file()
+            )
 
             exported = json.loads((output_dir / "manifest.json").read_text())
             self.assertEqual(exported, manifest)
-            layout = json.loads((output_dir / "structural_layout.json").read_text())
             self.assertIsNotNone(layout["semantic_environment"])
             self.assertEqual(layout["structural_meshes"], [])
 
@@ -48,11 +54,36 @@ class TestPrisonEscapeExample(unittest.TestCase):
         viewer = (example_dir / "viewer.html").read_text(encoding="utf-8")
 
         self.assertIn("PointerLockControls", viewer)
-        self.assertIn("room_geometry_prison_block.obj", viewer)
-        self.assertIn("escape_tunnel_shell.obj", viewer)
+        self.assertIn("manifest.architecture.mesh_path", viewer)
+        self.assertIn("manifest.tunnel.mesh_path", viewer)
         self.assertIn("ceiling_lights.obj", viewer)
         self.assertIn("generated/manifest.json", viewer)
         self.assertIn("mode === 'walk' ? 'fly' : 'walk'", viewer)
+
+    def test_checked_in_demo_manifest_references_current_content_addressed_bundle(
+        self,
+    ) -> None:
+        generated = (
+            Path(__file__).parents[2] / "examples" / "prison_escape" / "generated"
+        )
+        manifest = json.loads((generated / "manifest.json").read_text(encoding="utf-8"))
+        layout = json.loads(
+            (generated / "structural_layout.json").read_text(encoding="utf-8")
+        )
+
+        for product in ("architecture", "tunnel"):
+            for key in ("mesh_path", "sdf_path"):
+                relative = Path(manifest[product][key])
+                self.assertEqual(len(relative.parent.name), 64)
+                self.assertTrue((generated / relative).is_file())
+        self.assertEqual(
+            layout["room_geometries"]["prison_block"]["sdf_path"],
+            manifest["architecture"]["sdf_path"],
+        )
+        self.assertEqual(
+            layout["semantic_environment_geometry_path"],
+            manifest["tunnel"]["sdf_path"],
+        )
 
 
 if __name__ == "__main__":

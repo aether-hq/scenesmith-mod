@@ -58,6 +58,14 @@ jobs:
         timeout-minutes: 30
         run: uv run pytest tests/integration/ --testmon -x
 
+      - name: Gate generated semantic scenes in Drake
+        run: uv run python -m unittest tests.integration.test_semantic_scene_drake
+
+      - name: Gate generated semantic architecture rendering
+        env:
+          SCENESMITH_RUN_SEMANTIC_RENDER_TESTS: "1"
+        run: xvfb-run -a uv run python -m unittest tests.integration.test_semantic_scene_render
+
       - name: Save testmon cache
         uses: actions/cache/save@v4
         if: >-

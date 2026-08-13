@@ -7,8 +7,13 @@ form to GLTF/SDF, Blender, Drake, MuJoCo, or USD without re-deriving geometry.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
+import os
+import re
+import shutil
+import tempfile
 import xml.etree.ElementTree as ET
 
 from dataclasses import dataclass, field
@@ -114,6 +119,71 @@ class TriangleMesh:
 
 
 @dataclass(frozen=True)
+class MeshAudit:
+    """Topology/orientation facts shared by every geometry backend."""
+
+    boundary_edges: tuple[tuple[int, int], ...]
+    nonmanifold_edges: tuple[tuple[int, int], ...]
+    inconsistent_edges: tuple[tuple[int, int], ...]
+    signed_volume: float
+
+    @property
+    def is_closed(self) -> bool:
+        return not self.boundary_edges and not self.nonmanifold_edges
+
+    @property
+    def is_winding_consistent(self) -> bool:
+        return not self.nonmanifold_edges and not self.inconsistent_edges
+
+
+def audit_triangle_mesh(mesh: TriangleMesh) -> MeshAudit:
+    """Return dependency-free manifold, winding, and signed-volume evidence."""
+
+    # Independent generators often emit equal coordinates with separate OBJ
+    # indices.  Topology is audited on an exact deterministic positional weld,
+    # matching the serialization precision used by this compiler.
+    canonical_by_vertex: list[int] = []
+    representative_by_position: dict[Point3, int] = {}
+    for index, vertex in enumerate(mesh.vertices):
+        representative_by_position.setdefault(vertex, index)
+        canonical_by_vertex.append(representative_by_position[vertex])
+    edge_uses: dict[tuple[int, int], list[tuple[int, int]]] = {}
+    signed_volume = 0.0
+    for triangle in mesh.triangles:
+        a, b, c = (mesh.vertices[index] for index in triangle)
+        signed_volume += _dot(a, _cross(b, c)) / 6.0
+        for raw_directed in (
+            (triangle[0], triangle[1]),
+            (triangle[1], triangle[2]),
+            (triangle[2], triangle[0]),
+        ):
+            directed = (
+                canonical_by_vertex[raw_directed[0]],
+                canonical_by_vertex[raw_directed[1]],
+            )
+            edge_uses.setdefault(tuple(sorted(directed)), []).append(directed)
+    boundary_edges = tuple(
+        sorted(edge for edge, uses in edge_uses.items() if len(uses) == 1)
+    )
+    nonmanifold_edges = tuple(
+        sorted(edge for edge, uses in edge_uses.items() if len(uses) > 2)
+    )
+    inconsistent_edges = tuple(
+        sorted(
+            edge
+            for edge, uses in edge_uses.items()
+            if len(uses) == 2 and uses[0] != (uses[1][1], uses[1][0])
+        )
+    )
+    return MeshAudit(
+        boundary_edges=boundary_edges,
+        nonmanifold_edges=nonmanifold_edges,
+        inconsistent_edges=inconsistent_edges,
+        signed_volume=signed_volume,
+    )
+
+
+@dataclass(frozen=True)
 class CompiledSurfacePatch:
     """A semantic surface with an explicit ordered 3D boundary polygon."""
 
@@ -149,6 +219,7 @@ class CompiledStructure:
     collision_primitives: tuple[CollisionPrimitive, ...] = ()
     triangle_groups: Mapping[str, tuple[int, ...]] = field(default_factory=dict)
     collision_enabled: bool = True
+    collision_surfaces: tuple[CompiledSurfacePatch, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -158,6 +229,152 @@ class CompiledStructurePaths:
     mesh_path: Path
     sdf_path: Path
     surfaces_path: Path
+    collision_mesh_path: Path | None = None
+
+    @property
+    def artifact_hash(self) -> str:
+        return self.sdf_path.parent.name
+
+    @property
+    def artifact_ref(self) -> "ArtifactRef":
+        return ArtifactRef(
+            mesh_path=self.mesh_path,
+            sdf_path=self.sdf_path,
+            surfaces_path=self.surfaces_path,
+            collision_mesh_path=self.collision_mesh_path,
+        )
+
+
+@dataclass(frozen=True)
+class ArtifactRef:
+    """Authenticated reference to one atomically published artifact bundle."""
+
+    mesh_path: Path
+    sdf_path: Path
+    surfaces_path: Path
+    collision_mesh_path: Path | None = None
+
+    @property
+    def artifact_hash(self) -> str:
+        return self.sdf_path.parent.name
+
+    def verify(
+        self,
+        *,
+        expected_source_hash: str | None = None,
+        expected_compiler_version: str | None = None,
+    ) -> Mapping[str, object]:
+        """Authenticate identity and every byte before a consumer uses it."""
+
+        try:
+            manifest = json.loads(self.surfaces_path.read_text(encoding="utf-8"))
+            product_hashes = manifest["product_hashes"]
+            compilation = manifest["compilation"]
+        except (OSError, KeyError, TypeError, json.JSONDecodeError) as exc:
+            raise GeometryValidationError(
+                "invalid_artifact_manifest",
+                f"cannot read authenticated artifact manifest {self.surfaces_path}",
+            ) from exc
+        source_hash = compilation.get("source_content_hash")
+        compiler_version = compilation.get("compiler_version")
+        if expected_source_hash is not None and source_hash != expected_source_hash:
+            raise GeometryValidationError(
+                "artifact_source_mismatch", "artifact source content is stale"
+            )
+        if (
+            expected_compiler_version is not None
+            and compiler_version != expected_compiler_version
+        ):
+            raise GeometryValidationError(
+                "artifact_compiler_mismatch", "artifact compiler version is stale"
+            )
+        products = {
+            "mesh_sha256": self.mesh_path,
+            "sdf_sha256": self.sdf_path,
+        }
+        collision_name = manifest.get("collision_mesh")
+        if collision_name is not None:
+            collision_path = self.surfaces_path.parent / str(collision_name)
+            products["collision_mesh_sha256"] = collision_path
+            if (
+                self.collision_mesh_path is not None
+                and collision_path != self.collision_mesh_path
+            ):
+                raise GeometryValidationError(
+                    "artifact_path_mismatch",
+                    "collision product path disagrees with manifest",
+                )
+        for hash_name, path in products.items():
+            expected = product_hashes.get(hash_name)
+            if (
+                not path.is_file()
+                or hashlib.sha256(path.read_bytes()).hexdigest() != expected
+            ):
+                raise GeometryValidationError(
+                    "artifact_product_mismatch",
+                    f"artifact product hash mismatch: {path}",
+                )
+        semantic_payload = dict(manifest)
+        for key in (
+            "artifact_hash",
+            "compiler_version",
+            "source_content_hash",
+            "compilation",
+            "product_hashes",
+        ):
+            semantic_payload.pop(key, None)
+        semantic_hash = hashlib.sha256(
+            json.dumps(
+                semantic_payload,
+                sort_keys=True,
+                separators=(",", ":"),
+                allow_nan=False,
+            ).encode("utf-8")
+        ).hexdigest()
+        if semantic_hash != product_hashes.get("surface_semantics_sha256"):
+            raise GeometryValidationError(
+                "artifact_product_mismatch", "artifact surface semantics hash mismatch"
+            )
+        identity = _artifact_identity_payload(
+            structure_id=str(manifest["structure_id"]),
+            compilation=compilation,
+            product_hashes=product_hashes,
+        )
+        authenticated_hash = hashlib.sha256(identity).hexdigest()
+        if (
+            manifest.get("artifact_hash") != authenticated_hash
+            or self.artifact_hash != authenticated_hash
+        ):
+            raise GeometryValidationError(
+                "artifact_identity_mismatch", "artifact identity is not authenticated"
+            )
+        if (
+            manifest.get("compiler_version") != compiler_version
+            or manifest.get("source_content_hash") != source_hash
+        ):
+            raise GeometryValidationError(
+                "artifact_identity_mismatch",
+                "legacy manifest identity fields disagree with authenticated compilation",
+            )
+        return manifest
+
+
+def _artifact_identity_payload(
+    *,
+    structure_id: str,
+    compilation: Mapping[str, object],
+    product_hashes: Mapping[str, object],
+) -> bytes:
+    return json.dumps(
+        {
+            "compilation": compilation,
+            "product_hashes": product_hashes,
+            "structure_id": structure_id,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
 
 
 class _MeshBuilder:
@@ -1925,6 +2142,9 @@ def write_compiled_structure(
     *,
     model_name: str | None = None,
     link_name: str = "structure_link",
+    source_content_hash: str | None = None,
+    compiler_version: str = "structural-compiler-v1",
+    compile_options: Mapping[str, object] | None = None,
 ) -> CompiledStructurePaths:
     """Write OBJ, static SDF, and semantic-surface sidecar files.
 
@@ -1932,23 +2152,36 @@ def write_compiled_structure(
     primitives (currently ramps) use the closed collision triangle mesh.
     """
 
-    output_path = Path(output_dir)
-    output_path.mkdir(parents=True, exist_ok=True)
-    mesh_path = output_path / f"{compiled.structure_id}.obj"
-    sdf_path = output_path / f"{compiled.structure_id}.sdf"
-    surfaces_path = output_path / f"{compiled.structure_id}.surfaces.json"
-
-    mesh_path.write_text(
-        compiled.visual_mesh.to_obj(object_name=compiled.structure_id),
-        encoding="utf-8",
-    )
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", compiled.structure_id):
+        raise GeometryValidationError(
+            "invalid_identifier",
+            "compiled structure ID is not safe for a file or model name",
+            entity_id=compiled.structure_id,
+        )
+    if not str(compiler_version).strip():
+        raise ValueError("compiler_version must not be empty")
+    mesh_name = f"{compiled.structure_id}.obj"
+    sdf_name = f"{compiled.structure_id}.sdf"
+    surfaces_name = f"{compiled.structure_id}.surfaces.json"
+    mesh_text = compiled.visual_mesh.to_obj(object_name=compiled.structure_id)
+    collision_mesh_name: str | None = None
+    collision_mesh_bytes: bytes | None = None
+    if (
+        compiled.collision_enabled
+        and not compiled.collision_primitives
+        and compiled.collision_mesh != compiled.visual_mesh
+    ):
+        collision_mesh_name = f"{compiled.structure_id}.collision.obj"
+        collision_mesh_bytes = compiled.collision_mesh.to_obj(
+            object_name=f"{compiled.structure_id}_collision"
+        ).encode("utf-8")
 
     sdf = ET.Element("sdf", {"version": "1.12"})
     model = ET.SubElement(sdf, "model", {"name": model_name or compiled.structure_id})
     ET.SubElement(model, "static").text = "true"
     link = ET.SubElement(model, "link", {"name": link_name})
     visual = ET.SubElement(link, "visual", {"name": "structure_visual"})
-    _add_mesh_geometry(visual, mesh_path.name)
+    _add_mesh_geometry(visual, mesh_name)
 
     if not compiled.collision_enabled:
         pass
@@ -1975,18 +2208,21 @@ def write_compiled_structure(
             )
     else:
         collision = ET.SubElement(link, "collision", {"name": "structure_collision"})
-        _add_mesh_geometry(collision, mesh_path.name)
+        _add_mesh_geometry(collision, collision_mesh_name or mesh_name)
 
     ET.indent(sdf, space="  ")
-    ET.ElementTree(sdf).write(sdf_path, encoding="utf-8", xml_declaration=True)
+    sdf_bytes = ET.tostring(sdf, encoding="utf-8", xml_declaration=True)
 
     surface_data: dict[str, object] = {
         "schema_version": 1,
         "structure_id": compiled.structure_id,
-        "mesh": mesh_path.name,
+        "mesh": mesh_name,
+        "collision_mesh": collision_mesh_name,
         "bounds": [list(bound) for bound in compiled.visual_mesh.bounds],
         "visual_triangles": len(compiled.visual_mesh.triangles),
-        "collision_triangles": len(compiled.collision_mesh.triangles),
+        "collision_triangles": (
+            len(compiled.collision_mesh.triangles) if compiled.collision_enabled else 0
+        ),
         "triangle_groups": {
             group_name: list(indices)
             for group_name, indices in compiled.triangle_groups.items()
@@ -2062,12 +2298,104 @@ def write_compiled_structure(
             }
             for patch in compiled.surfaces
         ]
-    surfaces_path.write_text(
-        json.dumps(surface_data, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
+    mesh_bytes = mesh_text.encode("utf-8")
+    mesh_hash = hashlib.sha256(mesh_bytes).hexdigest()
+    sdf_hash = hashlib.sha256(sdf_bytes).hexdigest()
+    semantic_product_hash = hashlib.sha256(
+        json.dumps(surface_data, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    effective_source_hash = source_content_hash or semantic_product_hash
+    normalized_compile_options = dict(compile_options or {})
+    compilation = {
+        "compile_options": normalized_compile_options,
+        "compiler_version": compiler_version,
+        "link_name": link_name,
+        "model_name": model_name or compiled.structure_id,
+        "source_content_hash": effective_source_hash,
+    }
+    product_hashes = {
+        "mesh_sha256": mesh_hash,
+        "sdf_sha256": sdf_hash,
+        "surface_semantics_sha256": semantic_product_hash,
+    }
+    if collision_mesh_bytes is not None:
+        product_hashes["collision_mesh_sha256"] = hashlib.sha256(
+            collision_mesh_bytes
+        ).hexdigest()
+    artifact_hash = hashlib.sha256(
+        _artifact_identity_payload(
+            structure_id=compiled.structure_id,
+            compilation=compilation,
+            product_hashes=product_hashes,
+        )
+    ).hexdigest()
+    surface_data.update(
+        {
+            "artifact_hash": artifact_hash,
+            "compiler_version": compiler_version,
+            "source_content_hash": effective_source_hash,
+            "compilation": compilation,
+            "product_hashes": product_hashes,
+        }
     )
+    surfaces_bytes = (json.dumps(surface_data, indent=2, sort_keys=True) + "\n").encode(
+        "utf-8"
+    )
+
+    output_path = Path(output_dir)
+    artifact_path = output_path / artifact_hash
+    mesh_path = artifact_path / mesh_name
+    sdf_path = artifact_path / sdf_name
+    surfaces_path = artifact_path / surfaces_name
+    collision_mesh_path = (
+        artifact_path / collision_mesh_name if collision_mesh_name is not None else None
+    )
+    products = {
+        mesh_path: mesh_bytes,
+        sdf_path: sdf_bytes,
+        surfaces_path: surfaces_bytes,
+    }
+    if collision_mesh_path is not None and collision_mesh_bytes is not None:
+        products[collision_mesh_path] = collision_mesh_bytes
+    if artifact_path.exists():
+        if not all(
+            path.is_file() and path.read_bytes() == data
+            for path, data in products.items()
+        ):
+            raise GeometryValidationError(
+                "artifact_hash_collision",
+                "content-addressed artifact exists with different or incomplete products",
+                entity_id=compiled.structure_id,
+            )
+    else:
+        output_parent = output_path
+        output_parent.mkdir(parents=True, exist_ok=True)
+        staging_path = Path(
+            tempfile.mkdtemp(prefix=f".{compiled.structure_id}.", dir=output_parent)
+        )
+        try:
+            (staging_path / mesh_name).write_bytes(mesh_bytes)
+            (staging_path / sdf_name).write_bytes(sdf_bytes)
+            (staging_path / surfaces_name).write_bytes(surfaces_bytes)
+            if collision_mesh_name is not None and collision_mesh_bytes is not None:
+                (staging_path / collision_mesh_name).write_bytes(collision_mesh_bytes)
+            try:
+                os.replace(staging_path, artifact_path)
+            except OSError:
+                # Another equal writer may win the content-addressed publish
+                # race.  Accept it only after validating every product byte.
+                if not all(
+                    path.is_file() and path.read_bytes() == data
+                    for path, data in products.items()
+                ):
+                    raise
+                shutil.rmtree(staging_path, ignore_errors=True)
+        except Exception:
+            shutil.rmtree(staging_path, ignore_errors=True)
+            raise
     return CompiledStructurePaths(
         mesh_path=mesh_path,
         sdf_path=sdf_path,
         surfaces_path=surfaces_path,
+        collision_mesh_path=collision_mesh_path,
     )

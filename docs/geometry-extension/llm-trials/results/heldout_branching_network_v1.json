@@ -1,0 +1,421 @@
+{
+  "compiler_options": {
+    "max_cells": 500000,
+    "max_triangles": 500000,
+    "voxel_size": 2.1
+  },
+  "diagnostics": [],
+  "metrics": {
+    "chambers": 0,
+    "detail_fields": 0,
+    "detail_instances": 0,
+    "hero_features": 0,
+    "junctions": 6,
+    "openings": 0,
+    "passage_networks": 1,
+    "segments": 6,
+    "semantic_json_bytes": 4038,
+    "visual_triangles": 2096
+  },
+  "model": "claude-sonnet-5",
+  "predicates": {
+    "artifact_authenticated": true,
+    "closed_when_no_apertures": true,
+    "detail_instance_count": true,
+    "heldout_all_segments_walkable": true,
+    "heldout_at_least_two_dead_ends": true,
+    "heldout_central_degree_five": true,
+    "heldout_cycle_rank_one": true,
+    "heldout_meaningful_elevation_change": true,
+    "heldout_no_unrequested_primitives": true,
+    "heldout_variable_cross_sections": true,
+    "mesh_winding_consistent": true,
+    "semantic_sources_present": true
+  },
+  "prompt": "Held-out SceneSmith semantic authoring trial. Return only the schema-conforming object. Author a subterranean passage network with a central junction of degree five, five branches, one additional segment creating a cycle between two leaf branches, two dead ends, meaningful elevation changes, variable widths and heights, and walk capability. Use no chambers, openings, detail fields, or hero features. Use one region large enough to contain all geometry. IDs must be descriptive and globally unique. Every segment path endpoint must exactly match its referenced junction position. Keep every segment floor_mode natural and profile ellipse.",
+  "prompt_sha256": "bc5c83326d4be2ca2c0c73c3a57643444c21cb249c0cdb7924167ccd402bf06a",
+  "raw_response_sha256": "db49d0f34390a948e88641bc65c76e9c4fc4701a96112796540c10ef269dc73d",
+  "repair_attempts": 0,
+  "repairs": [],
+  "result": "PASS",
+  "run_timestamp_utc": "2026-08-13T07:25:00Z",
+  "semantic_environment": {
+    "chambers": [],
+    "detail_fields": [],
+    "hero_features": [],
+    "openings": [],
+    "passage_networks": [
+      {
+        "id": "network_five_way_karst",
+        "junctions": [
+          {
+            "id": "junction_central_nexus",
+            "position": [
+              0,
+              0,
+              0
+            ],
+            "semantic_tags": [
+              "junction",
+              "degree_five",
+              "hub"
+            ]
+          },
+          {
+            "id": "junction_north_upper",
+            "position": [
+              0,
+              40,
+              8
+            ],
+            "semantic_tags": [
+              "leaf",
+              "cycle_node"
+            ]
+          },
+          {
+            "id": "junction_east_terminus",
+            "position": [
+              38,
+              18,
+              -10
+            ],
+            "semantic_tags": [
+              "leaf"
+            ]
+          },
+          {
+            "id": "junction_south_lower",
+            "position": [
+              0,
+              -42,
+              -18
+            ],
+            "semantic_tags": [
+              "leaf",
+              "dead_end"
+            ]
+          },
+          {
+            "id": "junction_west_upper",
+            "position": [
+              -36,
+              16,
+              12
+            ],
+            "semantic_tags": [
+              "leaf",
+              "cycle_node"
+            ]
+          },
+          {
+            "id": "junction_southeast_lower",
+            "position": [
+              32,
+              -28,
+              -22
+            ],
+            "semantic_tags": [
+              "leaf",
+              "dead_end"
+            ]
+          }
+        ],
+        "region_id": "region_karst_network_01",
+        "segments": [
+          {
+            "capabilities": [
+              "walk"
+            ],
+            "cross_sections": [
+              {
+                "height": 3,
+                "station": 0,
+                "width": 2.6
+              },
+              {
+                "height": 2.4,
+                "station": 0.5,
+                "width": 2
+              },
+              {
+                "height": 2,
+                "station": 1,
+                "width": 1.5
+              }
+            ],
+            "end_junction_id": "junction_north_upper",
+            "floor_mode": "natural",
+            "id": "segment_nexus_to_north",
+            "path": [
+              [
+                0,
+                0,
+                0
+              ],
+              [
+                0,
+                20,
+                4
+              ],
+              [
+                0,
+                40,
+                8
+              ]
+            ],
+            "profile": "ellipse",
+            "roughness_seed": 1101,
+            "start_junction_id": "junction_central_nexus"
+          },
+          {
+            "capabilities": [
+              "walk"
+            ],
+            "cross_sections": [
+              {
+                "height": 2.8,
+                "station": 0,
+                "width": 3
+              },
+              {
+                "height": 2.2,
+                "station": 0.5,
+                "width": 2.2
+              },
+              {
+                "height": 1.8,
+                "station": 1,
+                "width": 1.4
+              }
+            ],
+            "end_junction_id": "junction_east_terminus",
+            "floor_mode": "natural",
+            "id": "segment_nexus_to_east",
+            "path": [
+              [
+                0,
+                0,
+                0
+              ],
+              [
+                20,
+                10,
+                -5
+              ],
+              [
+                38,
+                18,
+                -10
+              ]
+            ],
+            "profile": "ellipse",
+            "roughness_seed": 1102,
+            "start_junction_id": "junction_central_nexus"
+          },
+          {
+            "capabilities": [
+              "walk"
+            ],
+            "cross_sections": [
+              {
+                "height": 3.2,
+                "station": 0,
+                "width": 2.8
+              },
+              {
+                "height": 2.6,
+                "station": 0.5,
+                "width": 1.8
+              },
+              {
+                "height": 1.6,
+                "station": 1,
+                "width": 1.2
+              }
+            ],
+            "end_junction_id": "junction_south_lower",
+            "floor_mode": "natural",
+            "id": "segment_nexus_to_south",
+            "path": [
+              [
+                0,
+                0,
+                0
+              ],
+              [
+                0,
+                -22,
+                -9
+              ],
+              [
+                0,
+                -42,
+                -18
+              ]
+            ],
+            "profile": "ellipse",
+            "roughness_seed": 1103,
+            "start_junction_id": "junction_central_nexus"
+          },
+          {
+            "capabilities": [
+              "walk"
+            ],
+            "cross_sections": [
+              {
+                "height": 2.6,
+                "station": 0,
+                "width": 2.4
+              },
+              {
+                "height": 2.2,
+                "station": 0.5,
+                "width": 2
+              },
+              {
+                "height": 2,
+                "station": 1,
+                "width": 1.6
+              }
+            ],
+            "end_junction_id": "junction_west_upper",
+            "floor_mode": "natural",
+            "id": "segment_nexus_to_west",
+            "path": [
+              [
+                0,
+                0,
+                0
+              ],
+              [
+                -18,
+                8,
+                6
+              ],
+              [
+                -36,
+                16,
+                12
+              ]
+            ],
+            "profile": "ellipse",
+            "roughness_seed": 1104,
+            "start_junction_id": "junction_central_nexus"
+          },
+          {
+            "capabilities": [
+              "walk"
+            ],
+            "cross_sections": [
+              {
+                "height": 3.4,
+                "station": 0,
+                "width": 3.2
+              },
+              {
+                "height": 2.4,
+                "station": 0.5,
+                "width": 2
+              },
+              {
+                "height": 1.5,
+                "station": 1,
+                "width": 1.1
+              }
+            ],
+            "end_junction_id": "junction_southeast_lower",
+            "floor_mode": "natural",
+            "id": "segment_nexus_to_southeast",
+            "path": [
+              [
+                0,
+                0,
+                0
+              ],
+              [
+                16,
+                -14,
+                -11
+              ],
+              [
+                32,
+                -28,
+                -22
+              ]
+            ],
+            "profile": "ellipse",
+            "roughness_seed": 1105,
+            "start_junction_id": "junction_central_nexus"
+          },
+          {
+            "capabilities": [
+              "walk"
+            ],
+            "cross_sections": [
+              {
+                "height": 2,
+                "station": 0,
+                "width": 1.5
+              },
+              {
+                "height": 2.3,
+                "station": 0.5,
+                "width": 1.9
+              },
+              {
+                "height": 2.2,
+                "station": 1,
+                "width": 1.6
+              }
+            ],
+            "end_junction_id": "junction_west_upper",
+            "floor_mode": "natural",
+            "id": "segment_north_west_cycle_link",
+            "path": [
+              [
+                0,
+                40,
+                8
+              ],
+              [
+                -18,
+                28,
+                10
+              ],
+              [
+                -36,
+                16,
+                12
+              ]
+            ],
+            "profile": "ellipse",
+            "roughness_seed": 1106,
+            "start_junction_id": "junction_north_upper"
+          }
+        ]
+      }
+    ],
+    "regions": [
+      {
+        "bounds": {
+          "maximum": [
+            45,
+            50,
+            15
+          ],
+          "minimum": [
+            -45,
+            -55,
+            -30
+          ]
+        },
+        "detail_seed": 4471,
+        "id": "region_karst_network_01",
+        "kind": "subterranean"
+      }
+    ],
+    "schema_version": 1
+  },
+  "trial_id": "heldout_branching_network_v1"
+}

@@ -23,27 +23,74 @@ from scenesmith.agent_utils.structural_geometry import (
     GeometryValidationError,
     Point2,
     Point3,
-    Transform3D,
+    require_safe_identifier,
+    validate_global_identifiers,
 )
 
 SEMANTIC_ENVIRONMENT_SCHEMA_VERSION = 1
 _REFERENCE_TOLERANCE = 1e-6
+MAX_DETAIL_INSTANCES_PER_FIELD = 10_000
+MAX_DETAIL_INSTANCES_PER_SCENE = 50_000
+MAX_PASSAGE_SEGMENTS_PER_SCENE = 10_000
+MAX_PATH_POINTS_PER_SEGMENT = 10_000
+
+
+@dataclass(frozen=True)
+class SemanticTransform3D:
+    """Strict JSON-facing rigid transform for semantic authoring."""
+
+    translation: Point3 = (0.0, 0.0, 0.0)
+    rotation_rpy: Point3 = (0.0, 0.0, 0.0)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "translation", _point(self.translation, "translation"))
+        object.__setattr__(
+            self, "rotation_rpy", _point(self.rotation_rpy, "rotation_rpy")
+        )
+
+    def to_dict(self) -> dict[str, list[float]]:
+        return {
+            "translation": list(self.translation),
+            "rotation_rpy": list(self.rotation_rpy),
+        }
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any] | None) -> "SemanticTransform3D":
+        if data is None:
+            return cls()
+        _reject_unknown_fields(data, {"translation", "rotation_rpy"})
+        return cls(
+            translation=tuple(data.get("translation", (0.0, 0.0, 0.0))),
+            rotation_rpy=tuple(data.get("rotation_rpy", (0.0, 0.0, 0.0))),
+        )
 
 
 def _identifier(value: Any, label: str) -> str:
-    identifier = str(value).strip()
-    if not identifier:
-        raise GeometryValidationError("missing_id", f"{label} must not be empty")
-    return identifier
+    return require_safe_identifier(value, label)
+
+
+def _strict_bool(value: Any, label: str, *, entity_id: str | None = None) -> bool:
+    if type(value) is not bool:
+        raise GeometryValidationError(
+            "invalid_boolean", f"{label} must be a JSON boolean", entity_id=entity_id
+        )
+    return value
+
+
+def _strict_int(value: Any, label: str, *, entity_id: str | None = None) -> int:
+    if type(value) is not int:
+        raise GeometryValidationError(
+            "invalid_integer", f"{label} must be a JSON integer", entity_id=entity_id
+        )
+    return value
 
 
 def _finite(value: Any, label: str, *, entity_id: str | None = None) -> float:
-    try:
-        number = float(value)
-    except (TypeError, ValueError) as exc:
+    if type(value) not in {int, float}:
         raise GeometryValidationError(
-            "invalid_number", f"{label} must be numeric", entity_id=entity_id
-        ) from exc
+            "invalid_number", f"{label} must be a JSON number", entity_id=entity_id
+        )
+    number = float(value)
     if not math.isfinite(number):
         raise GeometryValidationError(
             "invalid_number", f"{label} must be finite", entity_id=entity_id
@@ -185,6 +232,21 @@ class DetailCollisionPolicy(str, Enum):
     FULL = "full"
 
 
+FORMATION_SURFACE_ROLES: Mapping[FormationType, frozenset[DetailSurfaceRole]] = {
+    FormationType.STALACTITE: frozenset({DetailSurfaceRole.OVERHEAD}),
+    FormationType.STALAGMITE: frozenset({DetailSurfaceRole.SUPPORT}),
+    FormationType.COLUMN: frozenset(
+        {DetailSurfaceRole.OVERHEAD, DetailSurfaceRole.SUPPORT}
+    ),
+    FormationType.FLOWSTONE: frozenset(
+        {DetailSurfaceRole.SUPPORT, DetailSurfaceRole.BOUNDARY}
+    ),
+    FormationType.BOULDER: frozenset({DetailSurfaceRole.SUPPORT}),
+    FormationType.RUBBLE: frozenset({DetailSurfaceRole.SUPPORT}),
+    FormationType.SCREE: frozenset({DetailSurfaceRole.SUPPORT}),
+}
+
+
 class HeroFeatureType(str, Enum):
     ROCK_SPIRE = "rock_spire"
     BOULDER = "boulder"
@@ -252,7 +314,7 @@ class EnvironmentRegionSpec:
     region_id: str
     kind: EnvironmentKind
     bounds: Bounds3D
-    transform: Transform3D = field(default_factory=Transform3D)
+    transform: SemanticTransform3D = field(default_factory=SemanticTransform3D)
     material_context: Mapping[str, str] = field(default_factory=dict)
     detail_seed: int = 0
     chunk_policy: Mapping[str, float | int] = field(default_factory=dict)
@@ -262,7 +324,11 @@ class EnvironmentRegionSpec:
         object.__setattr__(self, "kind", EnvironmentKind(self.kind))
         object.__setattr__(self, "material_context", dict(self.material_context))
         object.__setattr__(self, "chunk_policy", dict(self.chunk_policy))
-        object.__setattr__(self, "detail_seed", int(self.detail_seed))
+        object.__setattr__(
+            self,
+            "detail_seed",
+            _strict_int(self.detail_seed, "detail_seed", entity_id=self.region_id),
+        )
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -294,7 +360,7 @@ class EnvironmentRegionSpec:
             region_id=data["id"],
             kind=EnvironmentKind(data["kind"]),
             bounds=Bounds3D.from_dict(data["bounds"]),
-            transform=Transform3D.from_dict(data.get("transform")),
+            transform=SemanticTransform3D.from_dict(data.get("transform")),
             material_context=data.get("material_context", {}),
             detail_seed=data.get("detail_seed", 0),
             chunk_policy=data.get("chunk_policy", {}),
@@ -488,7 +554,11 @@ class PassageJunctionSpec:
                 "space_id and level_id must be provided together",
                 entity_id=junction_id,
             )
-        object.__setattr__(self, "open_boundary", bool(self.open_boundary))
+        object.__setattr__(
+            self,
+            "open_boundary",
+            _strict_bool(self.open_boundary, "open_boundary", entity_id=junction_id),
+        )
         object.__setattr__(
             self,
             "semantic_tags",
@@ -532,7 +602,7 @@ class PassageJunctionSpec:
             opening_id=data.get("opening_id"),
             space_id=data.get("space_id"),
             level_id=data.get("level_id"),
-            open_boundary=bool(data.get("open_boundary", False)),
+            open_boundary=data.get("open_boundary", False),
             semantic_tags=frozenset(data.get("semantic_tags", [])),
         )
 
@@ -626,7 +696,13 @@ class PassageSegmentSpec:
         object.__setattr__(self, "floor_mode", PassageFloorMode(self.floor_mode))
         object.__setattr__(self, "capabilities", capabilities)
         if self.roughness_seed is not None:
-            object.__setattr__(self, "roughness_seed", int(self.roughness_seed))
+            object.__setattr__(
+                self,
+                "roughness_seed",
+                _strict_int(
+                    self.roughness_seed, "roughness_seed", entity_id=segment_id
+                ),
+            )
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -903,9 +979,21 @@ class EnvironmentOpeningSpec:
             )
         object.__setattr__(self, "depth", depth)
         object.__setattr__(self, "shape", OpeningShape(self.shape))
-        object.__setattr__(self, "passable", bool(self.passable))
-        object.__setattr__(self, "visible", bool(self.visible))
-        object.__setattr__(self, "weather_exposed", bool(self.weather_exposed))
+        object.__setattr__(
+            self,
+            "passable",
+            _strict_bool(self.passable, "passable", entity_id=opening_id),
+        )
+        object.__setattr__(
+            self,
+            "visible",
+            _strict_bool(self.visible, "visible", entity_id=opening_id),
+        )
+        object.__setattr__(
+            self,
+            "weather_exposed",
+            _strict_bool(self.weather_exposed, "weather_exposed", entity_id=opening_id),
+        )
 
     @property
     def sky_exposed(self) -> bool:
@@ -957,9 +1045,9 @@ class EnvironmentOpeningSpec:
             size=tuple(data["size"]),
             depth=data["depth"],
             shape=OpeningShape(data.get("shape", "ellipse")),
-            passable=bool(data.get("passable", False)),
-            visible=bool(data.get("visible", True)),
-            weather_exposed=bool(data.get("weather_exposed", False)),
+            passable=data.get("passable", False),
+            visible=data.get("visible", True),
+            weather_exposed=data.get("weather_exposed", False),
         )
 
 
@@ -991,7 +1079,19 @@ class DetailFieldSpec:
         )
         object.__setattr__(self, "formation_type", FormationType(self.formation_type))
         object.__setattr__(self, "surface_role", DetailSurfaceRole(self.surface_role))
-        count = int(self.count)
+        if self.surface_role not in FORMATION_SURFACE_ROLES[self.formation_type]:
+            allowed = ", ".join(
+                sorted(
+                    role.value for role in FORMATION_SURFACE_ROLES[self.formation_type]
+                )
+            )
+            raise GeometryValidationError(
+                "unsupported_formation_surface",
+                f"formation '{self.formation_type.value}' supports surface roles: "
+                + allowed,
+                entity_id=field_id,
+            )
+        count = _strict_int(self.count, "count", entity_id=field_id)
         if count <= 0:
             raise GeometryValidationError(
                 "invalid_detail_count", "count must be positive", entity_id=field_id
@@ -1007,7 +1107,9 @@ class DetailFieldSpec:
             )
         object.__setattr__(self, "min_size", minimum)
         object.__setattr__(self, "max_size", maximum)
-        object.__setattr__(self, "seed", int(self.seed))
+        object.__setattr__(
+            self, "seed", _strict_int(self.seed, "seed", entity_id=field_id)
+        )
         protected = tuple(
             sorted(
                 _identifier(identifier, "protect_passage_network_id")
@@ -1184,7 +1286,8 @@ class SemanticEnvironmentSpec:
     schema_version: int = SEMANTIC_ENVIRONMENT_SCHEMA_VERSION
 
     def __post_init__(self) -> None:
-        if int(self.schema_version) != SEMANTIC_ENVIRONMENT_SCHEMA_VERSION:
+        schema_version = _strict_int(self.schema_version, "schema_version")
+        if schema_version != SEMANTIC_ENVIRONMENT_SCHEMA_VERSION:
             raise GeometryValidationError(
                 "unsupported_environment_schema",
                 f"schema_version must be {SEMANTIC_ENVIRONMENT_SCHEMA_VERSION}",
@@ -1211,10 +1314,84 @@ class SemanticEnvironmentSpec:
         _unique_ids(openings, "opening_id", "environment_opening")
         _unique_ids(detail_fields, "field_id", "detail_field")
         _unique_ids(hero_features, "feature_id", "hero_feature")
+        identifiers: list[tuple[str, str]] = [
+            *((item.region_id, "environment_region") for item in regions),
+            *((item.chamber_id, "cavern_chamber") for item in chambers),
+            *((item.network_id, "passage_network") for item in networks),
+            *((item.opening_id, "environment_opening") for item in openings),
+            *((item.field_id, "detail_field") for item in detail_fields),
+            *((item.feature_id, "hero_feature") for item in hero_features),
+            *(
+                (item.junction_id, "passage_junction")
+                for network in networks
+                for item in network.junctions
+            ),
+            *(
+                (item.segment_id, "passage_segment")
+                for network in networks
+                for item in network.segments
+            ),
+            *(
+                (f"{item.field_id}_{index:04d}", "detail_instance")
+                for item in detail_fields
+                for index in range(item.count)
+            ),
+        ]
+        try:
+            validate_global_identifiers(identifiers)
+        except GeometryValidationError as exc:
+            if exc.code != "duplicate_scene_id":
+                raise
+            raise GeometryValidationError(
+                "duplicate_semantic_id",
+                str(exc).split(": ", 1)[-1],
+            ) from exc
+        segment_count = sum(len(network.segments) for network in networks)
+        if segment_count > MAX_PASSAGE_SEGMENTS_PER_SCENE:
+            raise GeometryValidationError(
+                "semantic_budget_exceeded",
+                f"scene has {segment_count} passage segments; budget is "
+                f"{MAX_PASSAGE_SEGMENTS_PER_SCENE}",
+            )
+        for network in networks:
+            for segment in network.segments:
+                if len(segment.path) > MAX_PATH_POINTS_PER_SEGMENT:
+                    raise GeometryValidationError(
+                        "semantic_budget_exceeded",
+                        f"passage path has {len(segment.path)} points; budget is "
+                        f"{MAX_PATH_POINTS_PER_SEGMENT}",
+                        entity_id=segment.segment_id,
+                    )
+        for field_spec in detail_fields:
+            if field_spec.count > MAX_DETAIL_INSTANCES_PER_FIELD:
+                raise GeometryValidationError(
+                    "semantic_budget_exceeded",
+                    f"detail count {field_spec.count} exceeds per-field budget "
+                    f"{MAX_DETAIL_INSTANCES_PER_FIELD}",
+                    entity_id=field_spec.field_id,
+                )
+        total_details = sum(field_spec.count for field_spec in detail_fields)
+        if total_details > MAX_DETAIL_INSTANCES_PER_SCENE:
+            raise GeometryValidationError(
+                "semantic_budget_exceeded",
+                f"scene requests {total_details} detail instances; budget is "
+                f"{MAX_DETAIL_INSTANCES_PER_SCENE}",
+            )
         region_by_id = {item.region_id: item for item in regions}
         chamber_by_id = {item.chamber_id: item for item in chambers}
         network_by_id = {item.network_id: item for item in networks}
+        opening_by_id = {item.opening_id: item for item in openings}
         for chamber in chambers:
+            if chamber.shape not in {
+                CavernShape.ELLIPSOID,
+                CavernShape.SUPERELLIPSOID,
+            }:
+                raise GeometryValidationError(
+                    "unsupported_chamber_shape",
+                    f"chamber shape '{chamber.shape.value}' is not supported by the "
+                    "semantic compiler",
+                    entity_id=chamber.chamber_id,
+                )
             region = region_by_id.get(chamber.region_id)
             if region is None:
                 raise GeometryValidationError(
@@ -1269,7 +1446,27 @@ class SemanticEnvironmentSpec:
                             "junction position does not overlap its referenced chamber",
                             entity_id=junction.junction_id,
                         )
+                if junction.opening_id is not None:
+                    opening = opening_by_id.get(junction.opening_id)
+                    if opening is None:
+                        raise GeometryValidationError(
+                            "unknown_environment_opening",
+                            f"unknown opening '{junction.opening_id}'",
+                            entity_id=junction.junction_id,
+                        )
+                    if opening.region_id != network.region_id:
+                        raise GeometryValidationError(
+                            "cross_region_junction",
+                            "junction and referenced opening must share a region",
+                            entity_id=junction.junction_id,
+                        )
             for segment in network.segments:
+                if segment.floor_mode == PassageFloorMode.STEPS:
+                    raise GeometryValidationError(
+                        "unsupported_passage_floor_mode",
+                        "stepped passage floors are not supported by the semantic compiler",
+                        entity_id=segment.segment_id,
+                    )
                 if any(not region.bounds.contains(point) for point in segment.path):
                     raise GeometryValidationError(
                         "environment_bounds_exceeded",
@@ -1330,10 +1527,27 @@ class SemanticEnvironmentSpec:
                     "hero target chamber is missing or belongs to another region",
                     entity_id=feature.feature_id,
                 )
-            if not chamber.contains(feature.anchor):
+            half_size = tuple(value / 2.0 for value in feature.size)
+            envelope_points = tuple(
+                tuple(
+                    feature.anchor[axis] + signs[axis] * half_size[axis]
+                    for axis in range(3)
+                )
+                for signs in (
+                    (-1, -1, 0),
+                    (-1, 1, 0),
+                    (1, -1, 0),
+                    (1, 1, 0),
+                    (-1, -1, 1),
+                    (-1, 1, 1),
+                    (1, -1, 1),
+                    (1, 1, 1),
+                )
+            )
+            if not all(chamber.contains(point) for point in envelope_points):
                 raise GeometryValidationError(
                     "hero_outside_chamber",
-                    "hero anchor must lie inside its target chamber",
+                    "the complete hero envelope must lie inside its target chamber",
                     entity_id=feature.feature_id,
                 )
 
@@ -1347,7 +1561,11 @@ class SemanticEnvironmentSpec:
                     "a subterranean region requires a chamber or passage network",
                     entity_id=region.region_id,
                 )
-        object.__setattr__(self, "schema_version", int(self.schema_version))
+        object.__setattr__(
+            self,
+            "schema_version",
+            schema_version,
+        )
         object.__setattr__(self, "regions", regions)
         object.__setattr__(self, "chambers", chambers)
         object.__setattr__(self, "passage_networks", networks)
