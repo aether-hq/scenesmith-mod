@@ -1,0 +1,493 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SceneSmith Semantic Scene Gallery</title>
+  <meta name="description" content="Fly through every retained SceneSmith semantic-environment trial.">
+  <style>
+    :root {
+      color-scheme: dark;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      --ink: #090c0e;
+      --panel: rgba(13, 17, 19, .94);
+      --panel-soft: rgba(19, 24, 27, .84);
+      --line: rgba(255, 255, 255, .13);
+      --muted: #8d9698;
+      --paper: #edf0e9;
+      --amber: #e8b35c;
+      --mint: #82c7ae;
+      --danger: #e08472;
+    }
+    * { box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background: var(--ink); color: var(--paper); }
+    button, select { font: inherit; }
+    button { color: inherit; }
+    #stage { position: fixed; inset: 0; }
+    canvas { display: block; }
+    #sidebar {
+      position: fixed; z-index: 10; top: 18px; left: 18px; bottom: 18px; width: min(360px, calc(100vw - 36px));
+      display: flex; flex-direction: column; border: 1px solid var(--line); background: var(--panel);
+      box-shadow: 0 24px 70px rgba(0, 0, 0, .44); backdrop-filter: blur(16px);
+    }
+    .brand { padding: 18px 18px 15px; border-bottom: 1px solid var(--line); }
+    .eyebrow { color: var(--amber); font: 700 10px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .16em; text-transform: uppercase; }
+    h1 { margin: 7px 0 4px; font-size: 21px; letter-spacing: -.025em; }
+    .subtitle { color: var(--muted); font-size: 12px; line-height: 1.45; }
+    #scene-list { padding: 10px; display: grid; gap: 7px; border-bottom: 1px solid var(--line); max-height: 31%; overflow: auto; }
+    .scene-button {
+      width: 100%; padding: 10px 11px; display: grid; grid-template-columns: 1fr auto; gap: 4px 10px;
+      text-align: left; border: 1px solid transparent; background: transparent; cursor: pointer;
+    }
+    .scene-button:hover { background: rgba(255, 255, 255, .045); }
+    .scene-button.active { border-color: rgba(232, 179, 92, .55); background: rgba(232, 179, 92, .09); }
+    .scene-button strong { font-size: 12px; font-weight: 700; }
+    .scene-button small { color: var(--muted); font: 10px ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .scene-button .result { color: var(--mint); }
+    #details { min-height: 0; padding: 16px 18px 20px; overflow: auto; }
+    #scene-title { margin: 0 0 6px; font-size: 17px; }
+    #scene-meta { color: var(--muted); font: 10px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .metric-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin: 13px 0; }
+    .metric { padding: 8px; border: 1px solid var(--line); background: rgba(255,255,255,.025); }
+    .metric b { display: block; color: var(--paper); font-size: 13px; }
+    .metric span { color: var(--muted); font-size: 9px; text-transform: uppercase; letter-spacing: .08em; }
+    .section-title { margin: 15px 0 6px; color: var(--amber); font: 700 9px ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .12em; text-transform: uppercase; }
+    #prompt, #diagnostics { margin: 0; color: #b7bdba; font-size: 11px; line-height: 1.55; }
+    #diagnostics:empty::after { content: "No compiler diagnostics — passed first response."; color: var(--mint); }
+    #diagnostics li { margin-bottom: 5px; color: #d5a398; }
+    #toolbar {
+      position: fixed; z-index: 9; top: 18px; right: 18px; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 7px;
+      max-width: calc(100vw - 414px);
+    }
+    #toolbar button {
+      height: 34px; padding: 0 11px; border: 1px solid var(--line); background: var(--panel-soft); cursor: pointer;
+      font-size: 10px; text-transform: uppercase; letter-spacing: .07em;
+    }
+    #toolbar button:hover, #toolbar button.active { border-color: var(--amber); color: var(--amber); }
+    #telemetry {
+      position: fixed; z-index: 8; right: 18px; bottom: 18px; padding: 10px 12px; border: 1px solid var(--line);
+      background: var(--panel-soft); color: var(--muted); font: 10px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace;
+      text-align: right; pointer-events: none;
+    }
+    #crosshair { position: fixed; z-index: 7; left: 50%; top: 50%; width: 14px; height: 14px; transform: translate(-50%, -50%); opacity: .65; pointer-events: none; }
+    #crosshair::before, #crosshair::after { content: ""; position: absolute; background: white; }
+    #crosshair::before { left: 0; top: 6px; width: 14px; height: 1px; }
+    #crosshair::after { left: 6px; top: 0; width: 1px; height: 14px; }
+    #loading {
+      position: fixed; z-index: 20; inset: 0; display: grid; place-items: center; background: rgba(6, 8, 9, .91);
+      transition: opacity 180ms ease;
+    }
+    #loading.hidden { opacity: 0; pointer-events: none; }
+    .loading-card { width: min(420px, 80vw); }
+    .loading-card h2 { margin: 8px 0 13px; font-size: 28px; }
+    .track { height: 2px; overflow: hidden; background: #303638; }
+    #progress { width: 8%; height: 100%; background: var(--amber); transition: width 160ms ease; }
+    #status { margin-top: 10px; color: var(--muted); font: 11px ui-monospace, SFMono-Regular, Menlo, monospace; }
+    #error { position: fixed; z-index: 30; left: 50%; bottom: 22px; transform: translateX(-50%); display: none; width: min(640px, calc(100vw - 40px)); padding: 14px 16px; color: #ffe2dd; background: #481c18; border: 1px solid #a45046; white-space: pre-wrap; }
+    @media (max-width: 760px) {
+      #sidebar { top: auto; height: 43vh; width: calc(100vw - 24px); left: 12px; right: 12px; bottom: 12px; }
+      #scene-list { display: flex; overflow-x: auto; overflow-y: hidden; }
+      .scene-button { min-width: 190px; }
+      #details { display: none; }
+      #toolbar { top: 12px; right: 12px; max-width: calc(100vw - 24px); }
+      #telemetry { display: none; }
+    }
+  </style>
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.180.0/examples/jsm/"
+      }
+    }
+  </script>
+</head>
+<body>
+  <div id="stage"></div>
+  <aside id="sidebar">
+    <div class="brand">
+      <div class="eyebrow">SceneSmith semantic geometry</div>
+      <h1>Generated Scene Gallery</h1>
+      <div id="gallery-subtitle" class="subtitle">Discovering retained LLM-authored scenes…</div>
+    </div>
+    <div id="scene-list"></div>
+    <div id="details">
+      <h2 id="scene-title"></h2>
+      <div id="scene-meta"></div>
+      <div id="metrics" class="metric-grid"></div>
+      <div class="section-title">Original held-out prompt</div>
+      <p id="prompt"></p>
+      <div class="section-title">Compiler feedback</div>
+      <ul id="diagnostics"></ul>
+    </div>
+  </aside>
+  <nav id="toolbar">
+    <button id="reset-view">Reset view</button>
+    <button id="frame-view">Frame scene</button>
+    <button id="toggle-shell" class="active">Shell</button>
+    <button id="toggle-details" class="active">Details</button>
+    <button id="toggle-grid" class="active">Grid</button>
+  </nav>
+  <div id="crosshair"></div>
+  <div id="telemetry">WASD move · mouse look<br>Space / Shift vertical · Ctrl fast<br><span id="position">x 0.0 · y 0.0 · z 0.0</span></div>
+  <div id="loading">
+    <div class="loading-card">
+      <div class="eyebrow">Compiling meaning into geometry</div>
+      <h2 id="loading-title">Loading gallery</h2>
+      <div class="track"><div id="progress"></div></div>
+      <div id="status">Fetching generated manifest…</div>
+    </div>
+  </div>
+  <div id="error"></div>
+
+  <script type="module">
+    import * as THREE from 'three';
+    import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
+    import { OBJLoader } from 'three/addons/loaders/OBJLoader.js';
+
+    const stage = document.querySelector('#stage');
+    const sceneList = document.querySelector('#scene-list');
+    const gallerySubtitle = document.querySelector('#gallery-subtitle');
+    const loading = document.querySelector('#loading');
+    const loadingTitle = document.querySelector('#loading-title');
+    const progress = document.querySelector('#progress');
+    const status = document.querySelector('#status');
+    const errorPanel = document.querySelector('#error');
+    const positionLabel = document.querySelector('#position');
+
+    const world = new THREE.Scene();
+    world.background = new THREE.Color(0x080b0d);
+    world.fog = new THREE.FogExp2(0x080b0d, 0.0035);
+    const camera = new THREE.PerspectiveCamera(65, innerWidth / innerHeight, 0.05, 1600);
+    const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+    renderer.setSize(innerWidth, innerHeight);
+    renderer.setPixelRatio(Math.min(devicePixelRatio, 1.75));
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.08;
+    stage.appendChild(renderer.domElement);
+
+    const controls = new PointerLockControls(camera, renderer.domElement);
+    controls.pointerSpeed = 0.7;
+    const clock = new THREE.Clock();
+    const keys = new Set();
+    const loader = new OBJLoader();
+    let manifest;
+    let activeRecord;
+    let activeRoot;
+    let shellRoot;
+    let detailRoot;
+    let floorGrid;
+    let loadGeneration = 0;
+
+    world.add(new THREE.HemisphereLight(0x9fc4d4, 0x291c13, 1.45));
+    const keyLight = new THREE.DirectionalLight(0xffd9a3, 2.8);
+    keyLight.position.set(-35, 70, 25);
+    world.add(keyLight);
+    const fillLight = new THREE.DirectionalLight(0x75a3ca, 1.4);
+    fillLight.position.set(65, 20, -55);
+    world.add(fillLight);
+
+    const shellMaterial = new THREE.MeshStandardMaterial({
+      color: 0x6d5946, side: THREE.DoubleSide, roughness: 1, metalness: 0, flatShading: true
+    });
+    const detailPalette = {
+      stalactite: 0xb88d5b,
+      stalagmite: 0x8f6745,
+      column: 0xa47b50,
+      boulder: 0x77736c,
+      rubble: 0x6b6257,
+      scree: 0x786b5c,
+      flowstone: 0xb59c75,
+      rock_spire: 0x9e5d3b
+    };
+
+    function sceneToThree(value) {
+      return new THREE.Vector3(value[0], value[2], -value[1]);
+    }
+
+    function disposeObject(root) {
+      if (!root) return;
+      root.traverse(child => {
+        if (child.geometry) child.geometry.dispose();
+        if (child.material && child.material !== shellMaterial) child.material.dispose();
+      });
+      world.remove(root);
+    }
+
+    function decorateObject(object, material) {
+      object.rotation.x = -Math.PI / 2;
+      object.traverse(child => {
+        if (!child.isMesh) return;
+        child.material = material;
+        child.geometry.computeVertexNormals();
+        child.receiveShadow = true;
+      });
+      return object;
+    }
+
+    function metric(label, value) {
+      const root = document.createElement('div');
+      root.className = 'metric';
+      const count = document.createElement('b');
+      count.textContent = String(value ?? 0);
+      const caption = document.createElement('span');
+      caption.textContent = label;
+      root.append(count, caption);
+      return root;
+    }
+
+    function updateSceneInformation(scene) {
+      document.querySelector('#scene-title').textContent = scene.title;
+      document.querySelector('#scene-meta').textContent = `${scene.model} · ${scene.result} · ${scene.repair_attempts} repair turn${scene.repair_attempts === 1 ? '' : 's'} · ${scene.shell.triangles.toLocaleString()} shell triangles`;
+      document.querySelector('#metrics').replaceChildren(...[
+        metric('chambers', scene.metrics.chambers),
+        metric('passages', scene.metrics.segments),
+        metric('junctions', scene.metrics.junctions),
+        metric('openings', scene.metrics.openings),
+        metric('formations', scene.metrics.detail_instances),
+        metric('heroes', scene.metrics.hero_features)
+      ]);
+      document.querySelector('#prompt').textContent = scene.prompt;
+      const diagnostics = document.querySelector('#diagnostics');
+      diagnostics.replaceChildren();
+      for (const diagnostic of scene.diagnostics) {
+        const item = document.createElement('li');
+        item.textContent = diagnostic;
+        diagnostics.appendChild(item);
+      }
+    }
+
+    function renderSceneButtons() {
+      sceneList.replaceChildren();
+      manifest.scenes.forEach((scene, index) => {
+        const button = document.createElement('button');
+        button.className = 'scene-button';
+        button.dataset.sceneId = scene.id;
+        const title = document.createElement('strong');
+        title.textContent = `${String(index + 1).padStart(2, '0')} · ${scene.title}`;
+        const result = document.createElement('small');
+        result.className = 'result';
+        result.textContent = scene.result;
+        const geometry = document.createElement('small');
+        geometry.textContent = `${scene.shell.triangles.toLocaleString()} triangles · ${scene.details.length} detail layers`;
+        const repairs = document.createElement('small');
+        repairs.textContent = `${scene.repair_attempts} repairs`;
+        button.append(title, result, geometry, repairs);
+        button.addEventListener('click', () => loadScene(scene));
+        sceneList.appendChild(button);
+      });
+    }
+
+    function resetView() {
+      if (!activeRecord) return;
+      camera.position.copy(sceneToThree(activeRecord.camera.position));
+      const target = sceneToThree(activeRecord.camera.target);
+      if (camera.position.distanceTo(target) < 0.1) target.x += 1;
+      camera.lookAt(target);
+    }
+
+    function frameScene() {
+      if (!activeRecord) return;
+      const minimum = sceneToThree([
+        activeRecord.bounds.minimum[0],
+        activeRecord.bounds.maximum[1],
+        activeRecord.bounds.minimum[2]
+      ]);
+      const maximum = sceneToThree([
+        activeRecord.bounds.maximum[0],
+        activeRecord.bounds.minimum[1],
+        activeRecord.bounds.maximum[2]
+      ]);
+      const box = new THREE.Box3(
+        new THREE.Vector3(Math.min(minimum.x, maximum.x), Math.min(minimum.y, maximum.y), Math.min(minimum.z, maximum.z)),
+        new THREE.Vector3(Math.max(minimum.x, maximum.x), Math.max(minimum.y, maximum.y), Math.max(minimum.z, maximum.z))
+      );
+      const center = box.getCenter(new THREE.Vector3());
+      const size = box.getSize(new THREE.Vector3());
+      const distance = Math.max(size.x, size.y, size.z) * 0.78;
+      camera.position.copy(center).add(new THREE.Vector3(distance, distance * 0.55, distance));
+      camera.lookAt(center);
+    }
+
+    function rebuildGrid(scene) {
+      if (floorGrid) {
+        world.remove(floorGrid);
+        floorGrid.geometry.dispose();
+        floorGrid.material.dispose();
+      }
+      const size = Math.max(
+        scene.bounds.maximum[0] - scene.bounds.minimum[0],
+        scene.bounds.maximum[1] - scene.bounds.minimum[1],
+        20
+      );
+      const divisions = Math.max(10, Math.min(80, Math.round(size / 5)));
+      floorGrid = new THREE.GridHelper(size * 1.2, divisions, 0x795d37, 0x293033);
+      const center = sceneToThree([
+        (scene.bounds.minimum[0] + scene.bounds.maximum[0]) / 2,
+        (scene.bounds.minimum[1] + scene.bounds.maximum[1]) / 2,
+        scene.bounds.minimum[2]
+      ]);
+      floorGrid.position.copy(center);
+      floorGrid.position.y -= 0.15;
+      floorGrid.material.opacity = 0.32;
+      floorGrid.material.transparent = true;
+      world.add(floorGrid);
+    }
+
+    async function loadScene(scene) {
+      const generation = ++loadGeneration;
+      let nextRoot;
+      controls.unlock();
+      loading.classList.remove('hidden');
+      loadingTitle.textContent = scene.title;
+      status.textContent = 'Loading semantic shell…';
+      progress.style.width = '12%';
+      errorPanel.style.display = 'none';
+      try {
+        nextRoot = new THREE.Group();
+        const nextShell = new THREE.Group();
+        const nextDetails = new THREE.Group();
+        nextRoot.add(nextShell, nextDetails);
+
+        const shell = decorateObject(
+          await loader.loadAsync(`generated/${scene.shell.mesh_path}`),
+          shellMaterial
+        );
+        if (generation !== loadGeneration) {
+          disposeObject(nextRoot);
+          return;
+        }
+        nextShell.add(shell);
+        progress.style.width = '48%';
+
+        for (let index = 0; index < scene.details.length; index++) {
+          const detail = scene.details[index];
+          status.textContent = `Loading ${detail.id}…`;
+          const color = detailPalette[detail.formation_type] ?? 0x8c755e;
+          const material = new THREE.MeshStandardMaterial({
+            color, side: THREE.DoubleSide, roughness: .92, flatShading: true
+          });
+          const object = decorateObject(
+            await loader.loadAsync(`generated/${detail.mesh_path}`),
+            material
+          );
+          if (generation !== loadGeneration) {
+            disposeObject(object);
+            disposeObject(nextRoot);
+            return;
+          }
+          nextDetails.add(object);
+          progress.style.width = `${48 + ((index + 1) / Math.max(1, scene.details.length)) * 42}%`;
+        }
+
+        disposeObject(activeRoot);
+        activeRoot = nextRoot;
+        nextRoot = undefined;
+        shellRoot = nextShell;
+        detailRoot = nextDetails;
+        activeRecord = scene;
+        world.add(activeRoot);
+        rebuildGrid(scene);
+        resetView();
+        updateSceneInformation(scene);
+        sceneList.querySelectorAll('.scene-button').forEach(button => {
+          button.classList.toggle('active', button.dataset.sceneId === scene.id);
+        });
+        document.querySelector('#toggle-shell').classList.add('active');
+        document.querySelector('#toggle-details').classList.add('active');
+        document.querySelector('#toggle-grid').classList.add('active');
+        progress.style.width = '100%';
+        status.textContent = 'Ready — click the scene to capture the mouse.';
+        setTimeout(() => loading.classList.add('hidden'), 180);
+      } catch (error) {
+        disposeObject(nextRoot);
+        showError(error);
+      }
+    }
+
+    function showError(error) {
+      console.error(error);
+      loading.classList.add('hidden');
+      errorPanel.style.display = 'block';
+      const message = error instanceof Error ? error.message : String(error);
+      errorPanel.textContent = `Could not load the semantic gallery.\n${message}\n\nRun examples/semantic_gallery/serve_gallery.py to regenerate and serve it.`;
+    }
+
+    function updateMovement(delta) {
+      if (!controls.isLocked) return;
+      const forward = new THREE.Vector3();
+      camera.getWorldDirection(forward);
+      const right = new THREE.Vector3().crossVectors(forward, camera.up).normalize();
+      const movement = new THREE.Vector3();
+      if (keys.has('KeyW')) movement.add(forward);
+      if (keys.has('KeyS')) movement.sub(forward);
+      if (keys.has('KeyD')) movement.add(right);
+      if (keys.has('KeyA')) movement.sub(right);
+      if (keys.has('Space')) movement.y += 1;
+      if (keys.has('ShiftLeft') || keys.has('ShiftRight')) movement.y -= 1;
+      if (!movement.lengthSq()) return;
+      const fast = keys.has('ControlLeft') || keys.has('ControlRight');
+      const bounds = activeRecord?.bounds;
+      const sceneSize = bounds ? Math.max(...bounds.maximum.map((value, axis) => value - bounds.minimum[axis])) : 50;
+      const speed = Math.max(5, sceneSize * .08) * (fast ? 3 : 1);
+      camera.position.add(movement.normalize().multiplyScalar(speed * delta));
+    }
+
+    async function initialize() {
+      const response = await fetch('generated/manifest.json', { cache: 'no-store' });
+      if (!response.ok) throw new Error(`manifest request failed: ${response.status}`);
+      manifest = await response.json();
+      if (!Array.isArray(manifest.scenes) || !manifest.scenes.length) {
+        throw new Error('gallery manifest contains no available scenes');
+      }
+      gallerySubtitle.textContent = `${manifest.scene_count} retained scene${manifest.scene_count === 1 ? '' : 's'} · automatically compiled from held-out recipes`;
+      renderSceneButtons();
+      await loadScene(manifest.scenes[0]);
+    }
+
+    document.querySelector('#reset-view').addEventListener('click', resetView);
+    document.querySelector('#frame-view').addEventListener('click', frameScene);
+    document.querySelector('#toggle-shell').addEventListener('click', event => {
+      if (!shellRoot) return;
+      shellRoot.visible = !shellRoot.visible;
+      event.currentTarget.classList.toggle('active', shellRoot.visible);
+    });
+    document.querySelector('#toggle-details').addEventListener('click', event => {
+      if (!detailRoot) return;
+      detailRoot.visible = !detailRoot.visible;
+      event.currentTarget.classList.toggle('active', detailRoot.visible);
+    });
+    document.querySelector('#toggle-grid').addEventListener('click', event => {
+      if (!floorGrid) return;
+      floorGrid.visible = !floorGrid.visible;
+      event.currentTarget.classList.toggle('active', floorGrid.visible);
+    });
+    renderer.domElement.addEventListener('click', () => controls.lock());
+    addEventListener('keydown', event => {
+      keys.add(event.code);
+      if (event.repeat || !manifest) return;
+      const number = Number(event.key);
+      if (number >= 1 && number <= manifest.scenes.length) loadScene(manifest.scenes[number - 1]);
+      if (event.code === 'KeyR') resetView();
+    });
+    addEventListener('keyup', event => keys.delete(event.code));
+    addEventListener('resize', () => {
+      camera.aspect = innerWidth / innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(innerWidth, innerHeight);
+      renderer.setPixelRatio(Math.min(devicePixelRatio, 1.75));
+    });
+
+    function animate() {
+      requestAnimationFrame(animate);
+      updateMovement(Math.min(clock.getDelta(), .05));
+      positionLabel.textContent = `x ${camera.position.x.toFixed(1)} · y ${camera.position.y.toFixed(1)} · z ${camera.position.z.toFixed(1)}`;
+      renderer.render(world, camera);
+    }
+
+    initialize().catch(showError);
+    animate();
+  </script>
+</body>
+</html>
