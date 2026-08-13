@@ -55,6 +55,51 @@ class CollisionPair:
             return f"{self.object_a_id} collides with {self.object_b_id} (touching)"
 
 
+def _semantic_floor_penetration(
+    scene: RoomScene,
+    object_a_info: dict[str, str],
+    object_b_info: dict[str, str],
+) -> float | None:
+    """Measure floor penetration from scene bounds instead of Drake's contact pair.
+
+    Drake's signed-distance query can return the distance to a far corner of a
+    large floor box when a decomposed convex asset is exactly coplanar with the
+    floor.  That turns valid contact into a multi-metre penetration and sends the
+    design agent into an impossible move/remove loop.  SceneSmith already owns
+    the canonical object bounds and floor profile, so use those as the authority
+    for floor contact.  Returning ``None`` preserves the physics fallback for
+    legacy objects that do not carry bounds.
+    """
+    floor_a = object_a_info["name"] == "floor"
+    floor_b = object_b_info["name"] == "floor"
+    if floor_a == floor_b:
+        return None
+
+    object_info = object_b_info if floor_a else object_a_info
+    scene_object = scene.objects.get(UniqueID(object_info["id"]))
+    if scene_object is None:
+        return None
+
+    world_bounds = scene_object.compute_world_bounds()
+    if world_bounds is None:
+        return None
+    world_min, world_max = world_bounds
+
+    floor_profile = scene.room_geometry.floor_profile
+    sample_points = (
+        (world_min[0], world_min[1]),
+        (world_min[0], world_max[1]),
+        (world_max[0], world_min[1]),
+        (world_max[0], world_max[1]),
+    )
+    try:
+        floor_height = max(floor_profile.height_at(point) for point in sample_points)
+    except (ValueError, NotImplementedError):
+        return None
+
+    return max(0.0, float(floor_height - world_min[2]))
+
+
 def _get_furniture_id_for_manipuland(
     manipuland_id: str, scene: RoomScene
 ) -> str | None:
@@ -257,9 +302,19 @@ def compute_scene_collisions(
         is_floor_collision = (
             object_a_info["name"] == "floor" or object_b_info["name"] == "floor"
         )
+        measured_floor_penetration = None
         if is_floor_collision:
-            # Skip floor collisions that are within tolerance.
-            penetration_depth = abs(pair.distance)
+            # Scene bounds are authoritative for floor contact. Drake can report
+            # a far-corner distance for coplanar convex pieces against a large
+            # floor box, producing impossible multi-metre false positives.
+            measured_floor_penetration = _semantic_floor_penetration(
+                scene, object_a_info, object_b_info
+            )
+            penetration_depth = (
+                measured_floor_penetration
+                if measured_floor_penetration is not None
+                else abs(pair.distance)
+            )
             if penetration_depth <= floor_penetration_tolerance:
                 continue
 
@@ -284,7 +339,11 @@ def compute_scene_collisions(
             object_a_id=object_a_info["id"],
             object_b_name=object_b_info["name"],
             object_b_id=object_b_info["id"],
-            penetration_depth=abs(pair.distance),
+            penetration_depth=(
+                measured_floor_penetration
+                if measured_floor_penetration is not None
+                else abs(pair.distance)
+            ),
         )
 
         # Post-computation filtering: Apply distance-based filtering.

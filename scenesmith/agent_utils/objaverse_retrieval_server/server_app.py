@@ -114,6 +114,7 @@ class ObjaverseRetrievalApp(flask.Flask):
             preprocessed_path = self._objaverse_preprocessed_path or os.environ.get(
                 "OBJAVERSE_PREPROCESSED_PATH", "data/objathor-assets/preprocessed"
             )
+            derived_cache_path = os.environ.get("OBJAVERSE_DERIVED_CACHE_PATH")
 
             # Resolve relative paths to project root.
             data_path = Path(data_path)
@@ -128,6 +129,9 @@ class ObjaverseRetrievalApp(flask.Flask):
             config = ObjaverseConfig(
                 data_path=data_path,
                 preprocessed_path=preprocessed_path,
+                derived_cache_path=(
+                    Path(derived_cache_path) if derived_cache_path else None
+                ),
                 use_top_k=self._objaverse_top_k,
                 object_type_mapping=None,  # Will use defaults from __post_init__.
             )

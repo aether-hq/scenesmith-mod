@@ -53,6 +53,7 @@ from scenesmith.agent_utils.turn_trimming_session import TurnTrimmingSession
 from scenesmith.prompts import prompt_registry
 from scenesmith.utils.logging import BaseLogger
 from scenesmith.utils.openai import encode_image_to_base64
+from scenesmith.utils.inference import agents_sdk_model_name
 
 console_logger = logging.getLogger(__name__)
 
@@ -251,7 +252,7 @@ class BaseStatefulAgent(ABC):
         designer_config = self.cfg.agents.designer_agent
         return Agent(
             name=designer_config.name,
-            model=self.cfg.openai.model,
+            model=agents_sdk_model_name(self.cfg.openai.model),
             tools=tools,
             instructions=self.prompt_registry.get_prompt(
                 prompt_enum=prompt_enum,
@@ -284,7 +285,7 @@ class BaseStatefulAgent(ABC):
         critic_config = self.cfg.agents.critic_agent
         return Agent(
             name=critic_config.name,
-            model=self.cfg.openai.model,
+            model=agents_sdk_model_name(self.cfg.openai.model),
             tools=tools,
             instructions=self.prompt_registry.get_prompt(
                 prompt_enum=prompt_enum,
@@ -316,7 +317,7 @@ class BaseStatefulAgent(ABC):
         planner_config = self.cfg.agents.planner_agent
         return Agent(
             name=planner_config.name,
-            model=self.cfg.openai.model,
+            model=agents_sdk_model_name(self.cfg.openai.model),
             tools=tools,
             instructions=self.prompt_registry.get_prompt(
                 prompt_enum=prompt_enum,

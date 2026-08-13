@@ -1,5 +1,5 @@
 name: "designer_critique_instruction_stateful"
-version: "1.0"
+version: "1.2"
 description: "Instructions for addressing critiques in stateful agent"
 template_variables: ["instruction"]
 prompt: |
@@ -22,8 +22,18 @@ prompt: |
   11. Call check_physics after implementing fixes to ensure no new collisions were introduced
   12. If critique mentions passage blocking or reachability issues, use check_reachability
       to verify your fixes improved room traversability
-  13. FINAL VERIFICATION: Before completing, confirm zero collisions exist. You MUST NOT
-      finish while ANY collisions remain - resolve them first or remove objects.
+  13. PHYSICS HANDOFF: Make at most three focused physics-repair passes. Each pass must reduce
+      the collision count or maximum penetration without undoing a relationship fixed by an
+      earlier pass. After three passes, stop changing geometry and accurately report any
+      remaining collision pairs. SceneSmith's deterministic non-penetration projection runs
+      immediately after this semantic design stage and owns millimetre-scale separation.
+  14. Never oscillate between previously tried poses, progressively rescale a whole furniture
+      group, or move a coherent group back and forth. If a proposed transform recreates a
+      collision seen in an earlier pass, reject that transform and preserve the best measured
+      state. A requested functional correction can create a new collision, but it is only an
+      intermediate state: try the smallest coherent group correction, measure it, and either
+      keep the measured improvement or revert it. Do not continue agentic repair merely to
+      chase sub-centimetre contact that the deterministic projection stage can resolve.
 
   ## Return Format:
   Provide a summary including:

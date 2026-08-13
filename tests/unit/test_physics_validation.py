@@ -21,6 +21,7 @@ from scenesmith.agent_utils.physics_validation import (
     ThinCoveringBoundaryViolation,
     ThinCoveringOverlap,
     _get_furniture_id_for_manipuland,
+    _semantic_floor_penetration,
     compute_scene_collisions,
     compute_thin_covering_boundary_violations,
     filter_collisions_by_agent,
@@ -102,6 +103,48 @@ class TestComputeSceneCollisions(unittest.TestCase):
             sdf_path=self.floor_plan_path,
         )
         self.scene = RoomScene(room_geometry=room_geometry, scene_dir=test_data_dir)
+
+    def test_semantic_floor_contact_uses_canonical_bounds(self):
+        """Coplanar assets must not inherit Drake's far-corner floor distance."""
+        grounded = SceneObject(
+            object_id=UniqueID("grounded_bench"),
+            object_type=ObjectType.FURNITURE,
+            name="Grounded Bench",
+            description="Canonicalized bench",
+            transform=RigidTransform(),
+            bbox_min=np.array([-0.8, -0.5, 0.0]),
+            bbox_max=np.array([0.8, 0.5, 0.8]),
+        )
+        self.scene.add_object(grounded)
+
+        penetration = _semantic_floor_penetration(
+            self.scene,
+            {"name": "floor", "id": "room_geometry"},
+            {"name": grounded.name, "id": str(grounded.object_id)},
+        )
+
+        self.assertEqual(penetration, 0.0)
+
+    def test_semantic_floor_contact_reports_actual_below_floor_depth(self):
+        """The semantic contact gate must still expose real deep penetration."""
+        sunken = SceneObject(
+            object_id=UniqueID("sunken_bench"),
+            object_type=ObjectType.FURNITURE,
+            name="Sunken Bench",
+            description="Incorrectly placed bench",
+            transform=RigidTransform(np.array([0.0, 0.0, -0.12])),
+            bbox_min=np.array([-0.8, -0.5, 0.0]),
+            bbox_max=np.array([0.8, 0.5, 0.8]),
+        )
+        self.scene.add_object(sunken)
+
+        penetration = _semantic_floor_penetration(
+            self.scene,
+            {"name": sunken.name, "id": str(sunken.object_id)},
+            {"name": "floor", "id": "room_geometry"},
+        )
+
+        self.assertAlmostEqual(penetration, 0.12)
 
     def test_no_collisions_with_separated_objects(self):
         """Test that separated objects don't report collisions."""

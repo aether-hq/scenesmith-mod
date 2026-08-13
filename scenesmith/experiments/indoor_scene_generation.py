@@ -45,6 +45,10 @@ from scenesmith.utils.logging import ConsoleLogger, FileLoggingContext
 from scenesmith.utils.parallel import run_parallel_isolated
 from scenesmith.utils.print_utils import bold_green, yellow
 from scenesmith.wall_agents.stateful_wall_agent import StatefulWallAgent
+from scenesmith.aether.locked_inventory import (
+    load_accepted_stage_input,
+    seed_locked_inventory,
+)
 
 console_logger = logging.getLogger(__name__)
 
@@ -114,8 +118,8 @@ class RenderGPUAllocator:
         self._lock = Lock()
         console_logger.info(f"RenderGPUAllocator initialized with GPUs: {self._gpus}")
 
-    def _detect_gpus(self) -> list[int]:
-        """Detect available GPU indices, respecting CUDA_VISIBLE_DEVICES."""
+    def _detect_gpus(self) -> list[int | None]:
+        """Detect render devices, using ``None`` for Blender's CPU backend."""
         cuda_visible = os.environ.get("CUDA_VISIBLE_DEVICES")
         if cuda_visible:
             # Parse comma-separated GPU indices from CUDA_VISIBLE_DEVICES.
@@ -132,13 +136,15 @@ class RenderGPUAllocator:
         for i in range(16):
             if Path(f"/dev/nvidia{i}").exists():
                 gpus.append(i)
-        return gpus if gpus else [0]  # Default to GPU 0 if none detected.
+        # Passing 0 when no NVIDIA device exists makes Blender attempt a CUDA
+        # render and breaks the otherwise fully CPU-capable pipeline.
+        return gpus if gpus else [None]
 
-    def allocate(self) -> int:
+    def allocate(self) -> int | None:
         """Get next GPU in round-robin order.
 
         Returns:
-            GPU device index for BlenderServer.
+            GPU device index for BlenderServer, or ``None`` for CPU rendering.
         """
         with self._lock:
             gpu = self._gpus[self._counter % len(self._gpus)]
@@ -146,8 +152,8 @@ class RenderGPUAllocator:
             return gpu
 
     @property
-    def available_gpus(self) -> list[int]:
-        """Get list of available GPU indices."""
+    def available_gpus(self) -> list[int | None]:
+        """Get render devices; ``None`` represents the CPU backend."""
         return self._gpus.copy()
 
 
@@ -215,6 +221,29 @@ def _load_prompts_from_csv(csv_path: str) -> list[tuple[int, str]]:
             prompt = row[1]
             prompts_with_ids.append((scene_id, prompt))
     return prompts_with_ids
+
+
+def _accepted_stage_input_prompt(path: str | Path) -> str:
+    """Read the sole semantic prompt from an immutable Aether stage input.
+
+    An accepted contract is the source of truth for both topology and semantic
+    completion.  Allowing ``experiment.prompts`` to provide a second, divergent
+    description would let the downstream SceneSmith agents decorate a different
+    room than the one whose architecture was approved.
+    """
+    stage_input_path = Path(path)
+    with stage_input_path.open(encoding="utf-8") as file:
+        payload = json.load(file)
+    if payload.get("realization_engine") != "scenesmith":
+        raise ValueError("accepted stage input requires realization_engine=scenesmith")
+    if payload.get("pipeline_profile") != "full":
+        raise ValueError("accepted stage input requires pipeline_profile=full")
+    if payload.get("people_allowed") is not False:
+        raise ValueError("accepted scenic stage input must prohibit people")
+    prompt = payload.get("room_prompt")
+    if not isinstance(prompt, str) or not prompt.strip():
+        raise ValueError("accepted stage input requires a non-empty room_prompt")
+    return prompt.strip()
 
 
 def _export_scene_blend_file(
@@ -472,6 +501,7 @@ def _generate_room(
     stop_stage: str = "manipuland",
     house_layout: HouseLayout | None = None,
     render_gpu_id: int | None = None,
+    aether_stage_input: dict | None = None,
 ) -> RoomScene:
     """Generate a single room with furniture, wall/ceiling objects, and manipulands.
 
@@ -550,6 +580,12 @@ def _generate_room(
                 render_gpu_id=render_gpu_id,
             )
             try:
+                seed_locked_inventory(
+                    scene=scene,
+                    asset_manager=furniture_agent.asset_manager,
+                    stage_input=aether_stage_input,
+                    stage="furniture",
+                )
                 asyncio.run(furniture_agent.add_furniture(scene=scene))
             finally:
                 # Always cleanup server subprocesses.
@@ -682,6 +718,12 @@ def _generate_room(
                 render_gpu_id=render_gpu_id,
             )
             try:
+                seed_locked_inventory(
+                    scene=scene,
+                    asset_manager=wall_agent.asset_manager,
+                    stage_input=aether_stage_input,
+                    stage="wall-mounted",
+                )
                 asyncio.run(wall_agent.add_wall_objects(scene=scene))
             finally:
                 # Always cleanup server subprocesses.
@@ -741,6 +783,12 @@ def _generate_room(
                 render_gpu_id=render_gpu_id,
             )
             try:
+                seed_locked_inventory(
+                    scene=scene,
+                    asset_manager=ceiling_agent.asset_manager,
+                    stage_input=aether_stage_input,
+                    stage="ceiling-mounted",
+                )
                 asyncio.run(ceiling_agent.add_ceiling_objects(scene=scene))
             finally:
                 # Always cleanup server subprocesses.
@@ -801,7 +849,16 @@ def _generate_room(
             logger=logger,
             render_gpu_id=render_gpu_id,
         )
-        asyncio.run(manipuland_agent.add_manipulands(scene=scene))
+        try:
+            seed_locked_inventory(
+                scene=scene,
+                asset_manager=manipuland_agent.asset_manager,
+                stage_input=aether_stage_input,
+                stage="manipuland",
+            )
+            asyncio.run(manipuland_agent.add_manipulands(scene=scene))
+        finally:
+            manipuland_agent.cleanup()
         end_time = time.time()
         console_logger.info(
             f"Manipulands added to room {room_id} in "
@@ -910,6 +967,7 @@ def _run_sequential_room_generation(
     start_stage: str,
     stop_stage: str,
     render_gpu_id: int | None = None,
+    aether_stage_input: dict | None = None,
 ) -> dict[str, RoomScene]:
     """Generate rooms sequentially (existing behavior).
 
@@ -946,6 +1004,7 @@ def _run_sequential_room_generation(
                     stop_stage=stop_stage,
                     house_layout=house_layout,
                     render_gpu_id=render_gpu_id,
+                    aether_stage_input=aether_stage_input,
                 )
                 rooms[room_id] = room_scene
     return rooms
@@ -957,6 +1016,7 @@ def _generate_floor_plan_worker(
     cfg_dict: dict,
     experiment_run_id: str | None,
     render_gpu_id: int | None = None,
+    aether_stage_input_path: str | None = None,
 ) -> None:
     """Run floor plan generation in isolated subprocess.
 
@@ -1001,12 +1061,20 @@ def _generate_floor_plan_worker(
                     render_gpu_id=render_gpu_id,
                 )
                 try:
-                    house_layout = asyncio.run(
-                        floor_plan_agent.generate_house_layout(
-                            prompt=prompt,
+                    if aether_stage_input_path:
+                        with open(aether_stage_input_path) as file:
+                            stage_input = json.load(file)
+                        house_layout = floor_plan_agent.realize_accepted_house_layout(
+                            stage_input=stage_input,
                             output_dir=scene_path / "floor_plans",
                         )
-                    )
+                    else:
+                        house_layout = asyncio.run(
+                            floor_plan_agent.generate_house_layout(
+                                prompt=prompt,
+                                output_dir=scene_path / "floor_plans",
+                            )
+                        )
                 finally:
                     floor_plan_agent.cleanup()
 
@@ -1029,6 +1097,7 @@ def _generate_room_worker(
     experiment_run_id: str | None = None,
     house_layout_dict: dict | None = None,
     render_gpu_id: int | None = None,
+    aether_stage_input: dict | None = None,
 ) -> dict:
     """Worker function for parallel room generation.
 
@@ -1109,6 +1178,7 @@ def _generate_room_worker(
                 stop_stage=stop_stage,
                 house_layout=house_layout,
                 render_gpu_id=render_gpu_id,
+                aether_stage_input=aether_stage_input,
             )
 
         console_logger.info(f"Worker completed for room '{room_id}'")
@@ -1163,6 +1233,7 @@ def _run_parallel_room_generation(
     scene_id: int,
     experiment_run_id: str | None = None,
     render_gpu_id: int | None = None,
+    aether_stage_input: dict | None = None,
 ) -> dict[str, RoomScene]:
     """Generate rooms in parallel with fault tolerance.
 
@@ -1217,6 +1288,7 @@ def _run_parallel_room_generation(
             "experiment_run_id": experiment_run_id,
             "house_layout_dict": house_layout.to_dict(scene_dir=output_dir),
             "render_gpu_id": render_gpu_id,
+            "aether_stage_input": aether_stage_input,
         }
         tasks.append((room_id, _generate_room_worker, kwargs))
 
@@ -1266,12 +1338,12 @@ class IndoorSceneGenerationExperiment(BaseExperiment):
     }
 
     def __init__(self, cfg: DictConfig):
-        super().__init__(cfg=cfg)
         self.geometry_server: GeometryGenerationServer | None = None
         self.hssd_server: HssdRetrievalServer | None = None
         self.objaverse_server: ObjaverseRetrievalServer | None = None
         self.articulated_server: ArticulatedRetrievalServer | None = None
         self.materials_server: MaterialsRetrievalServer | None = None
+        super().__init__(cfg=cfg)
 
     def __del__(self):
         """Ensure servers are stopped when experiment is destroyed."""
@@ -1640,6 +1712,8 @@ class IndoorSceneGenerationExperiment(BaseExperiment):
         pipeline_cfg = cfg_dict["experiment"]["pipeline"]
         start_stage = pipeline_cfg["start_stage"]
         stop_stage = pipeline_cfg["stop_stage"]
+        aether_stage_input_path = pipeline_cfg.get("aether_stage_input")
+        aether_stage_input = load_accepted_stage_input(aether_stage_input_path)
 
         # Validate stages.
         if start_stage not in PIPELINE_STAGES:
@@ -1720,6 +1794,7 @@ class IndoorSceneGenerationExperiment(BaseExperiment):
                                         "cfg_dict": cfg_dict,
                                         "experiment_run_id": experiment_run_id,
                                         "render_gpu_id": render_gpu_id,
+                                        "aether_stage_input_path": aether_stage_input_path,
                                     },
                                 )
                             ],
@@ -1801,6 +1876,7 @@ class IndoorSceneGenerationExperiment(BaseExperiment):
                             scene_id=scene_id,
                             experiment_run_id=experiment_run_id,
                             render_gpu_id=render_gpu_id,
+                            aether_stage_input=aether_stage_input,
                         )
                     else:
                         rooms = _run_sequential_room_generation(
@@ -1810,6 +1886,7 @@ class IndoorSceneGenerationExperiment(BaseExperiment):
                             start_stage=room_start_stage,
                             stop_stage=room_stop_stage,
                             render_gpu_id=render_gpu_id,
+                            aether_stage_input=aether_stage_input,
                         )
 
                     # Build HouseScene from generated rooms.
@@ -1946,21 +2023,33 @@ class IndoorSceneGenerationExperiment(BaseExperiment):
 
     def generate_scenes(self) -> None:
         """Generate scenes with parallel support."""
-        # Load prompts from CSV or YAML config.
-        csv_path = self.cfg.experiment.csv_path
-        if csv_path:
-            prompts_with_ids = _load_prompts_from_csv(csv_path)
+        pipeline_cfg = self.cfg.experiment.pipeline
+        aether_stage_input_path = pipeline_cfg.get("aether_stage_input")
+
+        # An accepted Aether contract is the single semantic source.  CSV/YAML
+        # prompts remain available only for standalone SceneSmith experiments.
+        if aether_stage_input_path:
+            prompts_with_ids = [
+                (0, _accepted_stage_input_prompt(aether_stage_input_path))
+            ]
             console_logger.info(
-                f"Loaded {len(prompts_with_ids)} prompts from CSV: {csv_path}"
+                "Loaded the scene prompt from accepted Aether stage input: "
+                f"{aether_stage_input_path}"
             )
         else:
-            prompts = self.cfg.experiment.prompts
-            prompts_with_ids = list(enumerate(prompts))
+            csv_path = self.cfg.experiment.csv_path
+            if csv_path:
+                prompts_with_ids = _load_prompts_from_csv(csv_path)
+                console_logger.info(
+                    f"Loaded {len(prompts_with_ids)} prompts from CSV: {csv_path}"
+                )
+            else:
+                prompts = self.cfg.experiment.prompts
+                prompts_with_ids = list(enumerate(prompts))
 
         num_workers = min(self.cfg.experiment.num_workers, len(prompts_with_ids))
 
         # Get pipeline stage configuration.
-        pipeline_cfg = self.cfg.experiment.pipeline
         start_stage = pipeline_cfg.start_stage
         stop_stage = pipeline_cfg.stop_stage
         parallel_rooms = pipeline_cfg.parallel_rooms

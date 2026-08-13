@@ -1,0 +1,33 @@
+{
+  "contract_version": 1,
+  "state": "development",
+  "realization_engine": "scenesmith",
+  "pipeline_profile": "full",
+  "scenesmith_core_stages": [
+    "floor-plan",
+    "furniture",
+    "wall-mounted",
+    "ceiling-mounted",
+    "manipuland"
+  ],
+  "stages": [
+    "validate-contract",
+    "compile-locked-architecture",
+    "floor-plan",
+    "seed-locked-inventory",
+    "furniture",
+    "wall-mounted",
+    "ceiling-mounted",
+    "manipuland",
+    "contextual-completion",
+    "physical-validation",
+    "pbr-materials",
+    "blender-lighting",
+    "inspection",
+    "repair",
+    "browser-export",
+    "quality-verification"
+  ],
+  "qualified_execution_backends": [],
+  "blocking_stage": "contextual-completion"
+}

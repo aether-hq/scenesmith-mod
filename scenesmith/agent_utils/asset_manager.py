@@ -620,15 +620,32 @@ class AssetManager:
                     f"Canonicalizing HSSD mesh: up={vlm_physics.up_axis}, "
                     f"front={vlm_physics.front_axis} → +Y"
                 )
-                final_gltf_path = config.sdf_dir / f"{config.short_name}.gltf"
+                canonical_path = config.sdf_dir / f"{config.short_name}_canonical.gltf"
                 canonicalize_mesh(
                     gltf_path=gltf_path,
-                    output_path=final_gltf_path,
+                    output_path=canonical_path,
                     up_axis=vlm_physics.up_axis,
                     front_axis=vlm_physics.front_axis,
                     blender_server=self.blender_server,
                     object_type=request.object_type,
                 )
+
+                # Retrieval uses desired dimensions to rank candidates, but ranking
+                # does not put the selected mesh at the authored metric scale.  Apply
+                # the same uniform, proportion-preserving scale used by generated
+                # assets before collision and support geometry are calculated.
+                final_gltf_path = canonical_path
+                applied_scale = 1.0
+                desired_dimensions = request.desired_dimensions[index]
+                if desired_dimensions is not None:
+                    final_gltf_path = config.sdf_dir / f"{config.short_name}.gltf"
+                    final_gltf_path, applied_scale = scale_mesh_uniformly_to_dimensions(
+                        mesh_path=canonical_path,
+                        desired_dimensions=desired_dimensions,
+                        output_path=final_gltf_path,
+                        min_dimension_meters=self.min_mesh_dimension_meters,
+                        relative_threshold=self.mesh_relative_dimension_threshold,
+                    )
 
                 # Generate collision geometry via convex decomposition server.
                 collision_pieces = self._generate_collision_geometry(final_gltf_path)
@@ -679,7 +696,10 @@ class AssetManager:
                     additional_metadata={
                         "asset_source": "hssd",
                         "hssd_mesh_id": mesh_id,
+                        "requested_dimensions_m": desired_dimensions,
+                        "retrieval_scale_factor": applied_scale,
                     },
+                    scale_factor=applied_scale,
                 )
 
                 successful_objects.append(scene_obj)
@@ -825,15 +845,28 @@ class AssetManager:
                     f"Canonicalizing Objaverse mesh: up={vlm_physics.up_axis}, "
                     f"front={vlm_physics.front_axis} → +Y"
                 )
-                final_gltf_path = config.sdf_dir / f"{config.short_name}.gltf"
+                canonical_path = config.sdf_dir / f"{config.short_name}_canonical.gltf"
                 canonicalize_mesh(
                     gltf_path=gltf_path,
-                    output_path=final_gltf_path,
+                    output_path=canonical_path,
                     up_axis=vlm_physics.up_axis,
                     front_axis=vlm_physics.front_axis,
                     blender_server=self.blender_server,
                     object_type=request.object_type,
                 )
+
+                final_gltf_path = canonical_path
+                applied_scale = 1.0
+                desired_dimensions = request.desired_dimensions[index]
+                if desired_dimensions is not None:
+                    final_gltf_path = config.sdf_dir / f"{config.short_name}.gltf"
+                    final_gltf_path, applied_scale = scale_mesh_uniformly_to_dimensions(
+                        mesh_path=canonical_path,
+                        desired_dimensions=desired_dimensions,
+                        output_path=final_gltf_path,
+                        min_dimension_meters=self.min_mesh_dimension_meters,
+                        relative_threshold=self.mesh_relative_dimension_threshold,
+                    )
 
                 # Generate collision geometry via collision server.
                 collision_pieces = self._generate_collision_geometry(final_gltf_path)
@@ -883,6 +916,8 @@ class AssetManager:
                     additional_metadata={
                         "asset_source": "objaverse",
                         "objaverse_mesh_id": mesh_id,
+                        "requested_dimensions_m": desired_dimensions,
+                        "retrieval_scale_factor": applied_scale,
                     },
                 )
 

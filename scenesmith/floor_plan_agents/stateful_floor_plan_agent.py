@@ -52,6 +52,10 @@ from scenesmith.agent_utils.scoring import (
     scores_to_dict,
 )
 from scenesmith.agent_utils.workflow_tools import WorkflowTools
+from scenesmith.aether.accepted_layout import (
+    accepted_wall_thickness,
+    build_accepted_house_layout,
+)
 from scenesmith.floor_plan_agents.base_floor_plan_agent import BaseFloorPlanAgent
 from scenesmith.floor_plan_agents.tools.floor_plan_tools import FloorPlanTools
 from scenesmith.floor_plan_agents.tools.geometry_cache import (
@@ -61,6 +65,7 @@ from scenesmith.floor_plan_agents.tools.geometry_cache import (
     window_cache_key,
 )
 from scenesmith.floor_plan_agents.tools.vision_tools import FloorPlanVisionTools
+from scenesmith.floor_plan_agents.tools.materials_resolver import MaterialsResolver
 from scenesmith.floor_plan_agents.tools.wall_geometry import (
     WallDimensions,
     WallOpening,
@@ -374,6 +379,11 @@ class StatefulFloorPlanAgent(BaseStatefulAgent, BaseFloorPlanAgent):
         # Save scores to render directory.
         scores_dict = scores_to_dict(response)
         render_dir = vision_tools.last_render_dir
+        if render_dir is None:
+            raise RuntimeError(
+                "floor-plan critic completed without the required visual render; "
+                "the scene is not valid for scoring"
+            )
 
         # Always track the final render directory (separate from checkpoint logic).
         # This is needed because final critique uses update_checkpoint=False, but we
@@ -724,6 +734,50 @@ class StatefulFloorPlanAgent(BaseStatefulAgent, BaseFloorPlanAgent):
             shutil.rmtree(self._geometry_cache.cache_dir, ignore_errors=True)
             self._geometry_cache = None
 
+        return self.layout
+
+    def realize_accepted_house_layout(
+        self, stage_input: dict[str, Any], output_dir: Path
+    ) -> HouseLayout:
+        """Generate native geometry without permitting approved topology to drift."""
+        house_dir = output_dir.parent if output_dir else self.logger.output_dir
+        self.layout = build_accepted_house_layout(stage_input, house_dir=house_dir)
+        self._accepted_wall_thickness = accepted_wall_thickness(stage_input)
+        self.house_prompt = self.layout.house_prompt
+        self._geometry_cache = GeometryCache(cache_dir=house_dir / ".geometry_cache")
+
+        request = stage_input["request"]
+        theme = request["theme"]
+        resolver = MaterialsResolver(self._create_materials_config())
+        wall_description = (
+            f"interior wall material, {theme['timeline']}, {theme['genre']}, "
+            f"{theme['craft_character']}, {theme['wear_intent']}"
+        )
+        floor_description = (
+            f"durable interior floor material, {theme['timeline']}, {theme['genre']}, "
+            f"{theme['craft_character']}, {theme['wear_intent']}"
+        )
+        wall_material = resolver.get_material(wall_description)
+        floor_material = resolver.get_material(floor_description)
+        if wall_material is None or floor_material is None:
+            raise RuntimeError(
+                "accepted SceneSmith layout could not resolve both wall and floor PBR materials"
+            )
+        from scenesmith.agent_utils.house import RoomMaterials
+
+        room_id = self.layout.room_specs[0].room_id
+        self.layout.room_materials[room_id] = RoomMaterials(
+            wall_material=wall_material,
+            floor_material=floor_material,
+        )
+        self._generate_all_room_geometries(output_dir=output_dir)
+        layout_path = self.logger.output_dir / "house_layout.json"
+        with open(layout_path, "w") as file:
+            json.dump(self.layout.to_dict(), file, indent=2)
+        self._export_floor_plan(output_dir=output_dir)
+        if self._geometry_cache is not None:
+            shutil.rmtree(self._geometry_cache.cache_dir, ignore_errors=True)
+            self._geometry_cache = None
         return self.layout
 
     def _generate_all_room_geometries(self, output_dir: Path) -> None:
@@ -1293,7 +1347,7 @@ class StatefulFloorPlanAgent(BaseStatefulAgent, BaseFloorPlanAgent):
             RoomGeometry with walls, floor, and SDF.
         """
         wall_height = self.layout.wall_height
-        wall_thickness = self.cfg.wall_thickness
+        wall_thickness = getattr(self, "_accepted_wall_thickness", self.cfg.wall_thickness)
         floor_thickness = self.cfg.floor_thickness
 
         # Find the PlacedRoom for this spec.

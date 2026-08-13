@@ -1,13 +1,20 @@
 """Data loading utilities for Objaverse (ObjectThor) preprocessed indices and embeddings."""
 
+import gzip
 import json
 import logging
+import pickle
 
 from dataclasses import dataclass, field
 from pathlib import Path
 
 import numpy as np
+import trimesh
 import yaml
+
+from PIL import Image
+from trimesh.visual.material import PBRMaterial
+from trimesh.visual.texture import TextureVisuals
 
 console_logger = logging.getLogger(__name__)
 
@@ -182,14 +189,61 @@ def load_preprocessed_data(preprocessed_path: Path) -> ObjaversePreprocessedData
     )
 
 
-def construct_objaverse_mesh_path(data_path: Path, uid: str) -> Path:
-    """Construct the file path for an Objaverse mesh.
+def _vector_array(values: list[dict], *, keys: tuple[str, ...]) -> np.ndarray:
+    return np.asarray(
+        [[value[key] for key in keys] for value in values], dtype=np.float64
+    )
 
-    ObjectThor stores assets in {data_path}/assets/{uid}/{uid}.glb structure.
+
+def _load_texture(path: Path) -> Image.Image | None:
+    return Image.open(path) if path.is_file() else None
+
+
+def _convert_procedural_asset(asset_dir: Path, uid: str, output_path: Path) -> None:
+    source_path = asset_dir / f"{uid}.pkl.gz"
+    if not source_path.is_file():
+        raise FileNotFoundError(f"ObjectThor procedural mesh not found: {source_path}")
+    with gzip.open(source_path, "rb") as source:
+        payload = pickle.load(source)
+    vertices = _vector_array(payload["vertices"], keys=("x", "y", "z"))
+    faces = np.asarray(payload["triangles"], dtype=np.int64).reshape((-1, 3))
+    normals = _vector_array(payload["normals"], keys=("x", "y", "z"))
+    uv = _vector_array(payload["uvs"], keys=("x", "y"))
+    material = PBRMaterial(
+        name=f"objathor-{uid}",
+        baseColorTexture=_load_texture(asset_dir / "albedo.jpg"),
+        normalTexture=_load_texture(asset_dir / "normal.jpg"),
+        emissiveTexture=_load_texture(asset_dir / "emission.jpg"),
+        metallicFactor=0.0,
+        roughnessFactor=0.8,
+    )
+    mesh = trimesh.Trimesh(
+        vertices=vertices,
+        faces=faces,
+        vertex_normals=normals,
+        visual=TextureVisuals(uv=uv, material=material),
+        process=False,
+    )
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = output_path.with_suffix(".tmp.glb")
+    temporary.write_bytes(trimesh.exchange.gltf.export_glb(mesh))
+    temporary.replace(output_path)
+
+
+def construct_objaverse_mesh_path(
+    data_path: Path, uid: str, derived_cache_path: Path | None = None
+) -> Path:
+    """Return a cached GLB, converting the official ObjectThor asset if needed.
+
+    ObjectThor's official archive stores procedural mesh arrays in ``.pkl.gz``
+    alongside texture maps. SceneSmith consumes GLB, so selected retrieval
+    candidates are converted lazily and cached without rewriting the master.
 
     Args:
         data_path: Root directory of Objaverse data (containing assets/ subdir).
         uid: Objaverse mesh UID.
+        derived_cache_path: Optional writable root for derived GLBs. When set,
+            the immutable ObjectThor master is never modified.
 
     Returns:
         Path to the GLB mesh file.
@@ -197,10 +251,12 @@ def construct_objaverse_mesh_path(data_path: Path, uid: str) -> Path:
     Raises:
         FileNotFoundError: If the constructed path does not exist.
     """
-    # ObjectThor stores assets in assets/ subdirectory.
-    mesh_path = data_path / "assets" / uid / f"{uid}.glb"
-
-    if not mesh_path.exists():
-        raise FileNotFoundError(f"Objaverse mesh not found: {mesh_path}")
-
+    asset_dir = data_path / "assets" / uid
+    mesh_path = (
+        derived_cache_path / uid / f"{uid}.glb"
+        if derived_cache_path is not None
+        else asset_dir / f"{uid}.glb"
+    )
+    if not mesh_path.is_file():
+        _convert_procedural_asset(asset_dir, uid, mesh_path)
     return mesh_path

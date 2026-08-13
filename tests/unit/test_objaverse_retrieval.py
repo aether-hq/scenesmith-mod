@@ -1,6 +1,8 @@
 """Unit tests for Objaverse (ObjectThor) retrieval module."""
 
+import gzip
 import json
+import pickle
 import shutil
 import tempfile
 import unittest
@@ -109,7 +111,69 @@ class TestMeshPaths(unittest.TestCase):
 
         with self.assertRaises(FileNotFoundError) as cm:
             construct_objaverse_mesh_path(objaverse_dir, uid)
-        self.assertIn("Objaverse mesh not found", str(cm.exception))
+        self.assertIn("ObjectThor procedural mesh not found", str(cm.exception))
+
+    def test_official_procedural_asset_is_converted_and_cached_as_textured_glb(self):
+        """ObjectThor ships arrays plus maps, not the GLBs SceneSmith previously assumed."""
+        objaverse_dir = self.tmp_path / "objathor-assets"
+        uid = "official-format"
+        asset_dir = objaverse_dir / "assets" / uid
+        asset_dir.mkdir(parents=True)
+        payload = {
+            "vertices": [
+                {"x": 0.0, "y": 0.0, "z": 0.0},
+                {"x": 1.0, "y": 0.0, "z": 0.0},
+                {"x": 0.0, "y": 1.0, "z": 0.0},
+            ],
+            "triangles": [0, 1, 2],
+            "normals": [{"x": 0.0, "y": 0.0, "z": 1.0}] * 3,
+            "uvs": [
+                {"x": 0.0, "y": 0.0},
+                {"x": 1.0, "y": 0.0},
+                {"x": 0.0, "y": 1.0},
+            ],
+        }
+        with gzip.open(asset_dir / f"{uid}.pkl.gz", "wb") as target:
+            pickle.dump(payload, target)
+
+        path = construct_objaverse_mesh_path(objaverse_dir, uid)
+        first_mtime = path.stat().st_mtime_ns
+        cached = construct_objaverse_mesh_path(objaverse_dir, uid)
+
+        self.assertEqual(path, asset_dir / f"{uid}.glb")
+        self.assertGreater(path.stat().st_size, 0)
+        self.assertEqual(cached, path)
+        self.assertEqual(cached.stat().st_mtime_ns, first_mtime)
+
+    def test_official_asset_can_use_a_separate_derived_cache(self):
+        """A read-only master can be paired with a job-owned derived GLB cache."""
+        objaverse_dir = self.tmp_path / "objathor-assets"
+        cache_dir = self.tmp_path / "derived"
+        uid = "immutable-master"
+        asset_dir = objaverse_dir / "assets" / uid
+        asset_dir.mkdir(parents=True)
+        payload = {
+            "vertices": [
+                {"x": 0.0, "y": 0.0, "z": 0.0},
+                {"x": 1.0, "y": 0.0, "z": 0.0},
+                {"x": 0.0, "y": 1.0, "z": 0.0},
+            ],
+            "triangles": [0, 1, 2],
+            "normals": [{"x": 0.0, "y": 0.0, "z": 1.0}] * 3,
+            "uvs": [
+                {"x": 0.0, "y": 0.0},
+                {"x": 1.0, "y": 0.0},
+                {"x": 0.0, "y": 1.0},
+            ],
+        }
+        with gzip.open(asset_dir / f"{uid}.pkl.gz", "wb") as target:
+            pickle.dump(payload, target)
+
+        path = construct_objaverse_mesh_path(objaverse_dir, uid, cache_dir)
+
+        self.assertEqual(path, cache_dir / uid / f"{uid}.glb")
+        self.assertTrue(path.is_file())
+        self.assertFalse((asset_dir / f"{uid}.glb").exists())
 
 
 class TestClipSimilarity(unittest.TestCase):

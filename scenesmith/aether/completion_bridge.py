@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import copy
-
 from typing import Any, Protocol
 
 from .scene_census import (
@@ -15,7 +14,12 @@ from .scene_census import (
 
 
 class CompletionPlacementRuntime(Protocol):
-    """Linux-CUDA SceneSmith runtime owned by the deterministic placement worker."""
+    """SceneSmith runtime owned by the selected deterministic compute worker.
+
+    The protocol is independent of CPU, Metal, or CUDA.  An asset brief may
+    select a backend that has narrower hardware requirements, but the complete
+    SceneSmith stage chain itself does not.
+    """
 
     def place_asset_brief(
         self,

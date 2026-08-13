@@ -1467,7 +1467,10 @@ class RoomScene:
                 always_welded = is_thin_covering
             else:
                 always_welded = (
-                    is_thin_covering or is_wall_mounted or is_ceiling_mounted
+                    is_thin_covering
+                    or is_wall_mounted
+                    or is_ceiling_mounted
+                    or obj.immutable
                 )
             if free_objects is not None:
                 # Exclusive mode: ONLY objects in free_objects are free.

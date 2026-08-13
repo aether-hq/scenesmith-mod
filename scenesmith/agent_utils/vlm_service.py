@@ -2,7 +2,7 @@ import logging
 
 from typing import Any
 
-from openai import OpenAI
+from scenesmith.utils.inference import create_openai_client
 
 console_logger = logging.getLogger(__name__)
 
@@ -24,7 +24,7 @@ class VLMService:
                 Valid values: "default", "flex", "priority", or None to use
                 project default.
         """
-        self.client = OpenAI()
+        self.client = create_openai_client()
         # Cache for model type detection.
         self._reasoning_models = {"gpt-5", "gpt-5.2", "o3", "o4"}
         self.service_tier = service_tier

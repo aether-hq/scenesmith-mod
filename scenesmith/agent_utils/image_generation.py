@@ -12,6 +12,8 @@ from google import genai
 from google.genai import types
 from omegaconf import DictConfig
 from openai import OpenAI
+
+from scenesmith.utils.inference import create_openai_client
 from PIL import Image
 
 from scenesmith.prompts import PROMPTS_DATA_DIR
@@ -134,7 +136,7 @@ class OpenAIImageGenerator(BaseImageGenerator):
                 "OPENAI_API_KEY environment variable is required for OpenAI image "
                 "generation. Set it with: export OPENAI_API_KEY='your-key'"
             )
-        self.client = client or OpenAI()
+        self.client = client or create_openai_client()
         self.prompt_manager = PromptManager(prompts_dir=PROMPTS_DATA_DIR)
         self.image_quality = quality
         self.model = "gpt-image-1.5"

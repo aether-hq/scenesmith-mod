@@ -102,7 +102,9 @@ class ObjaverseRetriever:
             Loaded mesh (Y-up GLB format).
         """
         mesh_path = construct_objaverse_mesh_path(
-            data_path=self.config.data_path, uid=uid
+            data_path=self.config.data_path,
+            uid=uid,
+            derived_cache_path=self.config.derived_cache_path,
         )
 
         mesh = trimesh.load(mesh_path, force="mesh")

@@ -84,5 +84,12 @@ name = "blender"
 url = "https://download.blender.org/pypi/"
 explicit = true 
 
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
 [tool.uv.sources]
-bpy = { index = "blender" }                                                                                                                                                                                               
+bpy = { index = "blender" }
+torch = { index = "pytorch-cpu", marker = "sys_platform == 'linux'" }
+torchvision = { index = "pytorch-cpu", marker = "sys_platform == 'linux'" }

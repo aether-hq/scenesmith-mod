@@ -21,6 +21,7 @@ import bpy  # noqa: F401
 # isort: on
 
 from scenesmith.utils.logging import FileLoggingContext
+from scenesmith.utils.inference import configure_agents_sdk
 from scenesmith.utils.omegaconf import register_resolvers
 from scenesmith.utils.print_utils import cyan
 
@@ -31,6 +32,7 @@ def run_local(cfg: DictConfig):
     # Delay some imports in case they are not needed in non-local envs for submission.
     from scenesmith.experiments import build_experiment
 
+    configure_agents_sdk()
     start_time = time.time()
 
     # Resolve the config.

@@ -15,10 +15,13 @@ class ObjaverseConfig:
     """Configuration for Objaverse asset retrieval."""
 
     data_path: Path
-    """Path to ObjectThor assets directory (containing {uid}/{uid}.glb subdirectories)."""
+    """Path to ObjectThor assets (official procedural payloads, lazily cached as GLB)."""
 
     preprocessed_path: Path
     """Path to preprocessed data (indices, embeddings)."""
+
+    derived_cache_path: Path | None = None
+    """Writable cache for GLBs derived from the immutable ObjectThor payloads."""
 
     use_top_k: int = 5
     """Number of top CLIP candidates to consider before size ranking."""
@@ -30,6 +33,8 @@ class ObjaverseConfig:
         """Validate configuration and set defaults."""
         self.data_path = Path(self.data_path)
         self.preprocessed_path = Path(self.preprocessed_path)
+        if self.derived_cache_path is not None:
+            self.derived_cache_path = Path(self.derived_cache_path)
 
         if not self.data_path.exists():
             raise FileNotFoundError(
@@ -54,6 +59,7 @@ class ObjaverseConfig:
             f"Objaverse config initialized:\n"
             f"  data_path: {self.data_path}\n"
             f"  preprocessed_path: {self.preprocessed_path}\n"
+            f"  derived_cache_path: {self.derived_cache_path}\n"
             f"  top_k: {self.use_top_k}"
         )
 
@@ -70,6 +76,11 @@ class ObjaverseConfig:
         return cls(
             data_path=Path(cfg.data_path),
             preprocessed_path=Path(cfg.preprocessed_path),
+            derived_cache_path=(
+                Path(cfg.derived_cache_path)
+                if cfg.get("derived_cache_path") is not None
+                else None
+            ),
             use_top_k=cfg.use_top_k,
             object_type_mapping=dict(cfg.object_type_mapping),
         )

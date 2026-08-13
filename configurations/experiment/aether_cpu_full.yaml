@@ -1,0 +1,23 @@
+defaults:
+  - indoor_scene_generation
+
+# A single accepted Aether environment is executed deterministically in one
+# worker. All five SceneSmith agent stages still run in their canonical order.
+num_workers: 1
+pipeline:
+  start_stage: "floor_plan"
+  stop_stage: "manipuland"
+  resume_from_path: null
+  # Genesis supplies this immutable bundle path. When set, the floor-plan stage
+  # compiles its exact shell/openings instead of re-authoring them from prose.
+  aether_stage_input: null
+  parallel_rooms: false
+  max_parallel_rooms: 1
+
+# Drake's open-source IPOPT solver is available in the CPU image. SNOPT is not
+# a CPU/GPU distinction, but its commercial binary is not part of this image.
+projection:
+  furniture:
+    solver_name: "ipopt"
+  final:
+    solver_name: "ipopt"

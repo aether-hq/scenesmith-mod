@@ -258,6 +258,26 @@ class TestPromptSystem(unittest.TestCase):
         self.assertIsInstance(stateful_prompt, str)
         self.assertGreater(len(stateful_prompt), 100)
 
+    def test_furniture_repair_hands_remaining_contacts_to_projection(self):
+        """Semantic repair must terminate before deterministic collision projection."""
+        repair_prompt = prompt_manager.get_prompt(
+            prompt_name=FurnitureAgentPrompts.DESIGNER_CRITIQUE_INSTRUCTION_STATEFUL,
+            instruction="Resolve the measured furniture collisions.",
+        )
+
+        self.assertIn("at most three focused physics-repair passes", repair_prompt)
+        self.assertIn("deterministic non-penetration projection", repair_prompt)
+        self.assertIn("Never oscillate", repair_prompt)
+
+    def test_furniture_repair_prompt_preserves_best_bounded_state(self):
+        prompt = prompt_manager.get_prompt(
+            prompt_name=FurnitureAgentPrompts.DESIGNER_CRITIQUE_INSTRUCTION_STATEFUL,
+            instruction="Rotate the chairs toward the table and resolve resulting collisions.",
+        )
+        normalized = " ".join(prompt.split())
+        self.assertIn("preserve the best measured state", normalized)
+        self.assertIn("After three passes, stop changing geometry", normalized)
+
     def test_template_rendering(self):
         """Test rendering prompts with template variables."""
         rendered_prompt = prompt_manager.get_prompt(

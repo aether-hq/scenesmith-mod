@@ -1,0 +1,53 @@
+# CPU route: every SceneSmith design stage with public ObjectThor retrieval.
+defaults:
+  - cpu_full
+  - _self_
+
+furniture_agent:
+  asset_manager:
+    general_asset_source: "objaverse"
+  # Naturalistic variation belongs in the initial design, not in exact repair
+  # transforms.  A non-zero profile can reintroduce a collision after the agent
+  # has calculated a valid absolute pose, preventing deterministic convergence.
+  placement_noise:
+    natural_profile:
+      position_xy_std_meters: 0.0
+      rotation_yaw_std_degrees: 0.0
+    perfect_profile:
+      position_xy_std_meters: 0.0
+      rotation_yaw_std_degrees: 0.0
+
+wall_agent:
+  asset_manager:
+    general_asset_source: "objaverse"
+  placement_noise:
+    natural_profile:
+      position_along_wall_std_meters: 0.0
+      position_height_std_meters: 0.0
+      rotation_std_degrees: 0.0
+    perfect_profile:
+      position_along_wall_std_meters: 0.0
+      position_height_std_meters: 0.0
+      rotation_std_degrees: 0.0
+
+ceiling_agent:
+  asset_manager:
+    general_asset_source: "objaverse"
+  placement_noise:
+    natural_profile:
+      position_xy_std_meters: 0.0
+      rotation_yaw_std_degrees: 0.0
+    perfect_profile:
+      position_xy_std_meters: 0.0
+      rotation_yaw_std_degrees: 0.0
+
+manipuland_agent:
+  asset_manager:
+    general_asset_source: "objaverse"
+  placement_noise:
+    natural_profile:
+      position_xy_std_meters: 0.0
+      rotation_yaw_std_degrees: 0.0
+    perfect_profile:
+      position_xy_std_meters: 0.0
+      rotation_yaw_std_degrees: 0.0

@@ -1,0 +1,58 @@
+# CPU route: all five SceneSmith stages, HSSD retrieval, no CUDA-only SAM3D.
+defaults:
+  - config
+  - override /experiment: aether_cpu_full
+  - _self_
+
+floor_plan_agent:
+  openai:
+    model: "${oc.env:SCENESMITH_MODEL,openai/gpt-5-mini}"
+
+furniture_agent:
+  asset_manager:
+    general_asset_source: "hssd"
+    router:
+      enabled: false
+      strategies:
+        articulated:
+          enabled: false
+  openai:
+    model: "${oc.env:SCENESMITH_MODEL,openai/gpt-5-mini}"
+
+wall_agent:
+  asset_manager:
+    general_asset_source: "hssd"
+    router:
+      enabled: false
+      strategies:
+        articulated:
+          enabled: false
+  openai:
+    model: "${oc.env:SCENESMITH_MODEL,openai/gpt-5-mini}"
+
+ceiling_agent:
+  asset_manager:
+    general_asset_source: "hssd"
+    router:
+      enabled: false
+      strategies:
+        articulated:
+          enabled: false
+  openai:
+    model: "${oc.env:SCENESMITH_MODEL,openai/gpt-5-mini}"
+
+manipuland_agent:
+  asset_manager:
+    general_asset_source: "hssd"
+    router:
+      enabled: false
+      strategies:
+        articulated:
+          enabled: false
+  openai:
+    model: "${oc.env:SCENESMITH_MODEL,openai/gpt-5-mini}"
+  fill_simulation:
+    nlp_solver_name: "ipopt"
+  per_furniture_postprocessing:
+    projection:
+      solver_name: "ipopt"

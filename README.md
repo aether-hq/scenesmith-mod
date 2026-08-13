@@ -376,6 +376,11 @@ The `strategy: "generated"` uses either Hunyuan3D or SAM3D for open-set asset ge
 
 For asset retrieval using the ObjectThor subset of Objaverse:
 
+ObjectThor is the public conventional-asset route for the complete CPU profile. It does not
+remove or replace any SceneSmith design stage; it supplies real GLB meshes to the furniture,
+wall-mounted, ceiling-mounted, and manipuland agents. Use `--config-name cpu_full_objaverse`
+after the data and retrieval index below are present. The CUDA-only SAM3D route remains optional.
+
 1. **Download ObjectThor data** (~50GB assets + ~200MB features):
    ```sh
    bash scripts/download_objaverse_data.sh
