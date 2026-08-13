@@ -19,6 +19,7 @@ if str(REPOSITORY_ROOT) not in sys.path:
     sys.path.insert(0, str(REPOSITORY_ROOT))
 
 from examples.semantic_gallery.generate_gallery import (
+    DEFAULT_CONTROL_DIRECTORY,
     DEFAULT_OUTPUT_DIRECTORY,
     DEFAULT_TRIAL_DIRECTORY,
     generate_gallery,
@@ -80,12 +81,17 @@ def main() -> None:
     parser.add_argument("--no-generate", action="store_true")
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIRECTORY)
     parser.add_argument("--trials-dir", type=Path, default=DEFAULT_TRIAL_DIRECTORY)
+    parser.add_argument("--controls-dir", type=Path, default=DEFAULT_CONTROL_DIRECTORY)
     args = parser.parse_args()
 
     root = Path(__file__).resolve().parent
     if not args.no_generate:
         print("Discovering and compiling retained semantic scenes…")
-        generate_gallery(args.output_dir, trial_directory=args.trials_dir)
+        generate_gallery(
+            args.output_dir,
+            trial_directory=args.trials_dir,
+            control_directory=args.controls_dir,
+        )
     manifest_path = args.output_dir / "manifest.json"
     if not manifest_path.is_file():
         raise SystemExit(

@@ -3,8 +3,8 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>SceneSmith Semantic Scene Gallery</title>
-  <meta name="description" content="Fly through every retained SceneSmith semantic-environment trial.">
+  <title>SceneSmith Generated Scene Gallery</title>
+  <meta name="description" content="Fly through SceneSmith semantic geometry and control scenes.">
   <style>
     :root {
       color-scheme: dark;
@@ -106,16 +106,16 @@
   <div id="stage"></div>
   <aside id="sidebar">
     <div class="brand">
-      <div class="eyebrow">SceneSmith semantic geometry</div>
+      <div class="eyebrow">SceneSmith geometry regression gallery</div>
       <h1>Generated Scene Gallery</h1>
-      <div id="gallery-subtitle" class="subtitle">Discovering retained LLM-authored scenes…</div>
+      <div id="gallery-subtitle" class="subtitle">Discovering generated scenes and controls…</div>
     </div>
     <div id="scene-list"></div>
     <div id="details">
       <h2 id="scene-title"></h2>
       <div id="scene-meta"></div>
       <div id="metrics" class="metric-grid"></div>
-      <div class="section-title">Original held-out prompt</div>
+      <div class="section-title">Source prompt</div>
       <p id="prompt"></p>
       <div class="section-title">Compiler feedback</div>
       <ul id="diagnostics"></ul>
@@ -157,9 +157,13 @@
 
     const world = new THREE.Scene();
     world.background = new THREE.Color(0x080b0d);
-    world.fog = new THREE.FogExp2(0x080b0d, 0.0035);
+    world.fog = new THREE.FogExp2(0x080b0d, 0.002);
     const camera = new THREE.PerspectiveCamera(65, innerWidth / innerHeight, 0.05, 1600);
-    const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+    const renderer = new THREE.WebGLRenderer({
+      antialias: true,
+      powerPreference: 'high-performance',
+      preserveDrawingBuffer: true
+    });
     renderer.setSize(innerWidth, innerHeight);
     renderer.setPixelRatio(Math.min(devicePixelRatio, 1.75));
     renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -180,17 +184,17 @@
     let floorGrid;
     let loadGeneration = 0;
 
-    world.add(new THREE.HemisphereLight(0x9fc4d4, 0x291c13, 1.45));
-    const keyLight = new THREE.DirectionalLight(0xffd9a3, 2.8);
+    world.add(new THREE.AmbientLight(0xb9c2c1, 0.24));
+    world.add(new THREE.HemisphereLight(0x9fc4d4, 0x291c13, 1.15));
+    const keyLight = new THREE.DirectionalLight(0xffd9a3, 1.65);
     keyLight.position.set(-35, 70, 25);
     world.add(keyLight);
-    const fillLight = new THREE.DirectionalLight(0x75a3ca, 1.4);
+    const fillLight = new THREE.DirectionalLight(0x75a3ca, 0.85);
     fillLight.position.set(65, 20, -55);
     world.add(fillLight);
+    const headLight = new THREE.PointLight(0xffd6a0, 14, 0, 1.6);
+    world.add(headLight);
 
-    const shellMaterial = new THREE.MeshStandardMaterial({
-      color: 0x6d5946, side: THREE.DoubleSide, roughness: 1, metalness: 0, flatShading: true
-    });
     const detailPalette = {
       stalactite: 0xb88d5b,
       stalagmite: 0x8f6745,
@@ -201,6 +205,47 @@
       flowstone: 0xb59c75,
       rock_spire: 0x9e5d3b
     };
+    const materialPalette = {
+      dressing: 0x6ba7a1,
+      fixtures: 0x6f7c80,
+      furniture: 0xa85538,
+      practical_light: 0xffc45f
+    };
+
+    function sceneSize(scene) {
+      return Math.max(...scene.bounds.maximum.map(
+        (value, axis) => value - scene.bounds.minimum[axis]
+      ));
+    }
+
+    function makeShellMaterial(scene) {
+      const isControl = scene.representation === 'semantic_proxy_regression';
+      return new THREE.MeshStandardMaterial({
+        color: isControl ? 0x4d585a : 0x75604b,
+        emissive: isControl ? 0x121718 : 0x1d160f,
+        emissiveIntensity: .16,
+        side: THREE.DoubleSide,
+        roughness: .94,
+        metalness: isControl ? .08 : 0,
+        flatShading: isControl
+      });
+    }
+
+    function makeDetailMaterial(detail) {
+      const color = detailPalette[detail.formation_type]
+        ?? materialPalette[detail.material_key]
+        ?? 0x8c755e;
+      const practical = detail.material_key === 'practical_light';
+      return new THREE.MeshStandardMaterial({
+        color,
+        emissive: practical ? color : 0x17110c,
+        emissiveIntensity: practical ? 2.4 : .18,
+        side: THREE.DoubleSide,
+        roughness: practical ? .48 : .88,
+        metalness: detail.material_key === 'fixtures' ? .28 : 0,
+        flatShading: detail.kind === 'semantic_proxy_layer'
+      });
+    }
 
     function sceneToThree(value) {
       return new THREE.Vector3(value[0], value[2], -value[1]);
@@ -210,7 +255,7 @@
       if (!root) return;
       root.traverse(child => {
         if (child.geometry) child.geometry.dispose();
-        if (child.material && child.material !== shellMaterial) child.material.dispose();
+        if (child.material) child.material.dispose();
       });
       world.remove(root);
     }
@@ -239,15 +284,10 @@
 
     function updateSceneInformation(scene) {
       document.querySelector('#scene-title').textContent = scene.title;
-      document.querySelector('#scene-meta').textContent = `${scene.model} · ${scene.result} · ${scene.repair_attempts} repair turn${scene.repair_attempts === 1 ? '' : 's'} · ${scene.shell.triangles.toLocaleString()} shell triangles`;
-      document.querySelector('#metrics').replaceChildren(...[
-        metric('chambers', scene.metrics.chambers),
-        metric('passages', scene.metrics.segments),
-        metric('junctions', scene.metrics.junctions),
-        metric('openings', scene.metrics.openings),
-        metric('formations', scene.metrics.detail_instances),
-        metric('heroes', scene.metrics.hero_features)
-      ]);
+      document.querySelector('#scene-meta').textContent = `${scene.model} · ${scene.result} · ${scene.source_kind} · ${scene.shell.triangles.toLocaleString()} shell triangles`;
+      document.querySelector('#metrics').replaceChildren(
+        ...scene.summary_metrics.map(item => metric(item.label, item.value))
+      );
       document.querySelector('#prompt').textContent = scene.prompt;
       const diagnostics = document.querySelector('#diagnostics');
       diagnostics.replaceChildren();
@@ -270,7 +310,8 @@
         result.className = 'result';
         result.textContent = scene.result;
         const geometry = document.createElement('small');
-        geometry.textContent = `${scene.shell.triangles.toLocaleString()} triangles · ${scene.details.length} detail layers`;
+        const instances = scene.details.reduce((sum, item) => sum + (item.instance_count ?? 0), 0);
+        geometry.textContent = `${scene.shell.triangles.toLocaleString()} shell triangles · ${instances} semantic details`;
         const repairs = document.createElement('small');
         repairs.textContent = `${scene.repair_attempts} repairs`;
         button.append(title, result, geometry, repairs);
@@ -335,6 +376,16 @@
       world.add(floorGrid);
     }
 
+    function configureAtmosphere(scene) {
+      const size = sceneSize(scene);
+      world.fog.density = Math.min(.004, 1 / Math.max(60, size * 6));
+      camera.near = Math.max(.02, size / 10000);
+      camera.far = Math.max(100, size * 12);
+      camera.updateProjectionMatrix();
+      headLight.intensity = scene.representation === 'semantic_proxy_regression' ? 9 : 14;
+      headLight.distance = Math.max(40, size * 1.5);
+    }
+
     async function loadScene(scene) {
       const generation = ++loadGeneration;
       let nextRoot;
@@ -352,7 +403,7 @@
 
         const shell = decorateObject(
           await loader.loadAsync(`generated/${scene.shell.mesh_path}`),
-          shellMaterial
+          makeShellMaterial(scene)
         );
         if (generation !== loadGeneration) {
           disposeObject(nextRoot);
@@ -364,10 +415,7 @@
         for (let index = 0; index < scene.details.length; index++) {
           const detail = scene.details[index];
           status.textContent = `Loading ${detail.id}…`;
-          const color = detailPalette[detail.formation_type] ?? 0x8c755e;
-          const material = new THREE.MeshStandardMaterial({
-            color, side: THREE.DoubleSide, roughness: .92, flatShading: true
-          });
+          const material = makeDetailMaterial(detail);
           const object = decorateObject(
             await loader.loadAsync(`generated/${detail.mesh_path}`),
             material
@@ -388,6 +436,7 @@
         detailRoot = nextDetails;
         activeRecord = scene;
         world.add(activeRoot);
+        configureAtmosphere(scene);
         rebuildGrid(scene);
         resetView();
         updateSceneInformation(scene);
@@ -441,7 +490,7 @@
       if (!Array.isArray(manifest.scenes) || !manifest.scenes.length) {
         throw new Error('gallery manifest contains no available scenes');
       }
-      gallerySubtitle.textContent = `${manifest.scene_count} retained scene${manifest.scene_count === 1 ? '' : 's'} · automatically compiled from held-out recipes`;
+      gallerySubtitle.textContent = `${manifest.trial_count} retained LLM scenes · ${manifest.control_count} original-engine control · rebuilt on every launch`;
       renderSceneButtons();
       await loadScene(manifest.scenes[0]);
     }
@@ -482,6 +531,7 @@
     function animate() {
       requestAnimationFrame(animate);
       updateMovement(Math.min(clock.getDelta(), .05));
+      headLight.position.copy(camera.position);
       positionLabel.textContent = `x ${camera.position.x.toFixed(1)} · y ${camera.position.y.toFixed(1)} · z ${camera.position.z.toFixed(1)}`;
       renderer.render(world, camera);
     }

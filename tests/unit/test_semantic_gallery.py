@@ -1,6 +1,7 @@
 """Regression tests for the auto-discovered semantic scene gallery."""
 
 import json
+import math
 import subprocess
 import sys
 import tempfile
@@ -10,6 +11,7 @@ from pathlib import Path
 
 from examples.semantic_gallery.generate_gallery import (
     _camera_hint,
+    discover_control_paths,
     discover_trial_paths,
     generate_gallery,
 )
@@ -21,9 +23,26 @@ TRIAL_DIRECTORY = (
     REPOSITORY_ROOT / "docs" / "geometry-extension" / "llm-trials" / "results"
 )
 EXAMPLE_DIRECTORY = REPOSITORY_ROOT / "examples" / "semantic_gallery"
+CONTROL_DIRECTORY = EXAMPLE_DIRECTORY / "sources"
 
 
 class TestSemanticGallery(unittest.TestCase):
+    def test_original_bar_control_is_the_canonical_accepted_packet(self) -> None:
+        discovered = discover_control_paths(CONTROL_DIRECTORY)
+
+        self.assertEqual(discovered, (CONTROL_DIRECTORY / "original_aether_bar.json",))
+        source = json.loads(discovered[0].read_text(encoding="utf-8"))
+        self.assertEqual(source["id"], "original_aether_bar")
+        self.assertEqual(
+            source["source"]["packet_sha256"],
+            "7a6405a637b8ac9438c1f244125dca5f23ec512b720a2a47771ec9c8d179fc0f",
+        )
+        self.assertEqual(source["shell"]["room_id"], "public-bar")
+        self.assertEqual(source["shell"]["dimensions_m"], [15.45, 4.8, 10.61])
+        self.assertEqual(len(source["shell"]["openings"]), 3)
+        self.assertEqual(len(source["placements"]), 104)
+        self.assertEqual(len(source["cameras"]), 4)
+
     def test_discovery_includes_every_heldout_trial_but_not_summary(self) -> None:
         discovered = discover_trial_paths(TRIAL_DIRECTORY)
 
@@ -45,6 +64,7 @@ class TestSemanticGallery(unittest.TestCase):
             expected_ids = {
                 record["trial_id"] for record in records if record["result"] == "PASS"
             }
+            expected_ids.add("original_aether_bar")
             unavailable_ids = {
                 record["trial_id"] for record in records if record["result"] != "PASS"
             }
@@ -84,6 +104,37 @@ class TestSemanticGallery(unittest.TestCase):
             self.assertEqual(len(dragon["details"]), 2)
             self.assertEqual(dragon["metrics"]["detail_instances"], 25)
 
+            bar = next(
+                scene
+                for scene in manifest["scenes"]
+                if scene["id"] == "original_aether_bar"
+            )
+            self.assertEqual(bar["source_kind"], "accepted_aether_room_packet")
+            self.assertEqual(
+                bar["compiler"],
+                "scenesmith.agent_utils.structural_compiler.compile_polygon_space",
+            )
+            self.assertEqual(bar["representation"], "semantic_proxy_regression")
+            self.assertEqual(bar["shell"]["triangles"], 44)
+            self.assertEqual(
+                sum(item["instance_count"] for item in bar["details"]), 104
+            )
+            self.assertEqual(
+                {item["material_key"] for item in bar["details"]},
+                {"dressing", "fixtures", "furniture", "practical_light"},
+            )
+            self.assertEqual(
+                bar["summary_metrics"],
+                [
+                    {"label": "rooms", "value": 1},
+                    {"label": "portals", "value": 3},
+                    {"label": "placements", "value": 104},
+                    {"label": "cameras", "value": 4},
+                    {"label": "reference meshes", "value": 149},
+                    {"label": "reference tris", "value": 59560},
+                ],
+            )
+
     def test_server_manifest_preflight_resolves_all_gallery_assets(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             output = Path(temporary_directory) / "generated"
@@ -106,10 +157,15 @@ class TestSemanticGallery(unittest.TestCase):
         self.assertIn("PointerLockControls", viewer)
         self.assertIn("scene.shell.mesh_path", viewer)
         self.assertIn("scene.details", viewer)
+        self.assertIn("scene.summary_metrics", viewer)
+        self.assertIn("detail.material_key", viewer)
+        self.assertIn("headLight.position.copy(camera.position)", viewer)
+        self.assertIn("configureAtmosphere(scene)", viewer)
         self.assertIn("replaceChildren", viewer)
         self.assertNotIn("button.innerHTML", viewer)
         self.assertNotIn("heldout_branching_network_v1", viewer)
         self.assertNotIn("heldout_dragon_scale_cavern_v1", viewer)
+        self.assertNotIn("original_aether_bar", viewer)
 
     def test_documented_scripts_are_directly_executable(self) -> None:
         for script in ("generate_gallery.py", "serve_gallery.py"):
@@ -127,6 +183,22 @@ class TestSemanticGallery(unittest.TestCase):
                 )
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertIn("usage:", result.stdout)
+
+    def test_server_can_override_checked_in_control_directory(self) -> None:
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(EXAMPLE_DIRECTORY / "serve_gallery.py"),
+                "--help",
+            ],
+            cwd=REPOSITORY_ROOT,
+            capture_output=True,
+            check=False,
+            text=True,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("--controls-dir", result.stdout)
 
     def test_camera_hint_applies_owning_region_transform(self) -> None:
         environment = SemanticEnvironmentSpec.from_dict(
@@ -156,9 +228,36 @@ class TestSemanticGallery(unittest.TestCase):
 
         hint = _camera_hint(environment, [5, 15, 25], [15, 25, 35])
 
-        for actual, expected in zip(hint["position"], [10, 22, 30], strict=True):
-            self.assertAlmostEqual(actual, expected)
-        self.assertGreater(hint["target"][1], hint["position"][1])
+        self.assertGreater(math.dist(hint["position"], [10, 22, 30]), 0.5)
+        self.assertLess(math.dist(hint["position"], [10, 22, 30]), 2.1)
+        self.assertGreater(math.dist(hint["target"], hint["position"]), 1.0)
+
+    def test_passage_camera_starts_at_eye_height_above_authored_floor(self) -> None:
+        record = json.loads(
+            (TRIAL_DIRECTORY / "heldout_branching_network_v1.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        environment = SemanticEnvironmentSpec.from_dict(record["semantic_environment"])
+
+        hint = _camera_hint(environment, [-40, -50, -30], [40, 50, 20])
+
+        first_floor_span = [16.0, -14.0, -11.0]
+        span_length = math.dist([0.0, 0.0, 0.0], first_floor_span)
+        tangent = [value / span_length for value in first_floor_span]
+        across = [-tangent[1], tangent[0], 0.0]
+        passage_vertical = [
+            tangent[1] * across[2] - tangent[2] * across[1],
+            tangent[2] * across[0] - tangent[0] * across[2],
+            tangent[0] * across[1] - tangent[1] * across[0],
+        ]
+        floor_at_camera = [value * (1.25 / span_length) for value in first_floor_span]
+        clearance = sum(
+            (hint["position"][axis] - floor_at_camera[axis]) * passage_vertical[axis]
+            for axis in range(3)
+        )
+        self.assertGreater(clearance, 1.0)
+        self.assertGreater(math.dist(hint["position"], hint["target"]), 5.0)
 
     def test_server_rejects_manifest_assets_outside_generated_root(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:

@@ -1,0 +1,1806 @@
+{
+  "schema_version": 1,
+  "id": "original_aether_bar",
+  "title": "Original Aether Bar",
+  "prompt": "Approved grungy underworld cyberpunk bar for a discreet rear-booth meeting.",
+  "source": {
+    "kind": "accepted_aether_room_packet",
+    "scene_id": "aether-cyberpunk-bar-004",
+    "packet_sha256": "7a6405a637b8ac9438c1f244125dca5f23ec512b720a2a47771ec9c8d179fc0f",
+    "assembled_scene_sha256": "f05bfbd5cd17ec6e2dc7f308bf0cdb480969d3b33ec3e2e9304effd52e238bfe",
+    "reference_scene_sha256": "953474b6928c8c072e0d2c33bb692af877f34e567a89ac1b0dc2b246bdc4c7f7",
+    "reference_treatment": "Original Aether",
+    "reference_meshes": 149,
+    "reference_triangles": 59560,
+    "reference_semantic_objects": 110
+  },
+  "shell": {
+    "room_id": "public-bar",
+    "label": "Public Bar",
+    "dimensions_m": [
+      15.45,
+      4.8,
+      10.61
+    ],
+    "wall_thickness_m": 0.14,
+    "openings": [
+      {
+        "opening_id": "street-access-connection-opening",
+        "interface_id": "street-access-connection-interface",
+        "boundary": "west",
+        "shape": "rectangle",
+        "offset_m": 3.08,
+        "sill_m": 0,
+        "width_m": 1.2,
+        "height_m": 2.4,
+        "mechanism": "pocket",
+        "openness": 1,
+        "access": "public",
+        "connection_id": "street-access-connection",
+        "destination_label": "Street Access"
+      },
+      {
+        "opening_id": "stock-and-wash-connection-opening",
+        "interface_id": "stock-and-wash-connection-interface",
+        "boundary": "east",
+        "shape": "rectangle",
+        "offset_m": 6.15,
+        "sill_m": 0,
+        "width_m": 1.4,
+        "height_m": 2.4,
+        "mechanism": "pocket",
+        "openness": 1,
+        "access": "staff",
+        "connection_id": "stock-and-wash-connection",
+        "destination_label": "Stock And Wash"
+      },
+      {
+        "opening_id": "service-egress-connection-opening",
+        "interface_id": "service-egress-connection-interface",
+        "boundary": "west",
+        "shape": "rectangle",
+        "offset_m": 5.73,
+        "sill_m": 0,
+        "width_m": 1.2,
+        "height_m": 2.4,
+        "mechanism": "pocket",
+        "openness": 1,
+        "access": "staff",
+        "connection_id": "service-egress-connection",
+        "destination_label": "Service Egress"
+      }
+    ]
+  },
+  "cameras": [
+    {
+      "camera_id": "review-camera-1",
+      "label": "rear-booth-to-entry",
+      "position_m": [
+        1.061,
+        1.061,
+        1.6
+      ],
+      "target_m": [
+        14.389,
+        9.549,
+        1.6
+      ],
+      "focal_length_mm": 24,
+      "purpose": "Read the principals and entrance in one depth composition."
+    },
+    {
+      "camera_id": "review-camera-2",
+      "label": "public-threshold-reveal",
+      "position_m": [
+        14.389,
+        1.061,
+        1.6
+      ],
+      "target_m": [
+        1.061,
+        9.549,
+        1.6
+      ],
+      "focal_length_mm": 24,
+      "purpose": "Reveal public circulation, bar service, and the rear booth beyond."
+    },
+    {
+      "camera_id": "review-camera-3",
+      "label": "service-cross-room",
+      "position_m": [
+        14.389,
+        9.549,
+        1.6
+      ],
+      "target_m": [
+        1.061,
+        1.061,
+        1.6
+      ],
+      "focal_length_mm": 24,
+      "purpose": "Frame service activity as foreground masking for the private meeting."
+    },
+    {
+      "camera_id": "review-camera-4",
+      "label": "rear-booth-to-entry",
+      "position_m": [
+        1.061,
+        9.549,
+        1.6
+      ],
+      "target_m": [
+        14.389,
+        1.061,
+        1.6
+      ],
+      "focal_length_mm": 24,
+      "purpose": "Read the principals and entrance in one depth composition."
+    }
+  ],
+  "placements": [
+    {
+      "id": "service-counter-0",
+      "role": "service-counter",
+      "form": "counter",
+      "center": [
+        6.18,
+        1.6600000000000001,
+        0.54
+      ],
+      "size": [
+        6.8,
+        0.78,
+        1.08
+      ],
+      "yaw": 0
+    },
+    {
+      "id": "back-bar-0",
+      "role": "back-bar",
+      "form": "cabinet",
+      "center": [
+        6.18,
+        0.26,
+        0.46
+      ],
+      "size": [
+        6.6,
+        0.48,
+        0.92
+      ],
+      "yaw": 0
+    },
+    {
+      "id": "reserve-bottle-storage-0",
+      "role": "reserve-bottle-storage",
+      "form": "cabinet",
+      "center": [
+        15.19,
+        1.61,
+        0.925
+      ],
+      "size": [
+        1.1,
+        0.48,
+        1.85
+      ],
+      "yaw": 1.5707963267948966
+    },
+    {
+      "id": "reserve-bottle-storage-1",
+      "role": "reserve-bottle-storage",
+      "form": "cabinet",
+      "center": [
+        15.19,
+        2.79,
+        0.925
+      ],
+      "size": [
+        1.1,
+        0.48,
+        1.85
+      ],
+      "yaw": 1.5707963267948966
+    },
+    {
+      "id": "keg-storage-0",
+      "role": "keg-storage",
+      "form": "canister",
+      "center": [
+        15.2,
+        3.5900000000000003,
+        0.34
+      ],
+      "size": [
+        0.46,
+        0.46,
+        0.68
+      ],
+      "yaw": 1.5707963267948966
+    },
+    {
+      "id": "keg-storage-1",
+      "role": "keg-storage",
+      "form": "canister",
+      "center": [
+        15.2,
+        4.130000000000001,
+        0.34
+      ],
+      "size": [
+        0.46,
+        0.46,
+        0.68
+      ],
+      "yaw": 1.5707963267948966
+    },
+    {
+      "id": "keg-storage-2",
+      "role": "keg-storage",
+      "form": "canister",
+      "center": [
+        15.2,
+        4.67,
+        0.34
+      ],
+      "size": [
+        0.46,
+        0.46,
+        0.68
+      ],
+      "yaw": 1.5707963267948966
+    },
+    {
+      "id": "keg-storage-3",
+      "role": "keg-storage",
+      "form": "canister",
+      "center": [
+        15.2,
+        5.210000000000001,
+        0.34
+      ],
+      "size": [
+        0.46,
+        0.46,
+        0.68
+      ],
+      "yaw": 1.5707963267948966
+    },
+    {
+      "id": "under-counter-fridge-0",
+      "role": "under-counter-fridge",
+      "form": "fridge",
+      "center": [
+        0.34,
+        1.0499999999999998,
+        0.43
+      ],
+      "size": [
+        0.72,
+        0.64,
+        0.86
+      ],
+      "yaw": -1.5707963267948966
+    },
+    {
+      "id": "under-counter-fridge-1",
+      "role": "under-counter-fridge",
+      "form": "fridge",
+      "center": [
+        0.34,
+        1.8499999999999996,
+        0.43
+      ],
+      "size": [
+        0.72,
+        0.64,
+        0.86
+      ],
+      "yaw": -1.5707963267948966
+    },
+    {
+      "id": "waste-bin-0",
+      "role": "waste-bin",
+      "form": "bin",
+      "center": [
+        12.668999999999999,
+        0.26,
+        0.36
+      ],
+      "size": [
+        0.48,
+        0.48,
+        0.72
+      ],
+      "yaw": 0
+    },
+    {
+      "id": "recycling-bin-0",
+      "role": "recycling-bin",
+      "form": "bin",
+      "center": [
+        13.4415,
+        0.26,
+        0.36
+      ],
+      "size": [
+        0.48,
+        0.48,
+        0.72
+      ],
+      "yaw": 0
+    },
+    {
+      "id": "booth-table-0",
+      "role": "booth-table",
+      "form": "table",
+      "center": [
+        1.8134999999999997,
+        9.18,
+        0.37
+      ],
+      "size": [
+        1.35,
+        0.72,
+        0.74
+      ],
+      "yaw": -3.141592653589793
+    },
+    {
+      "id": "booth-table-1",
+      "role": "booth-table",
+      "form": "table",
+      "center": [
+        4.363499999999999,
+        9.18,
+        0.37
+      ],
+      "size": [
+        1.35,
+        0.72,
+        0.74
+      ],
+      "yaw": -3.141592653589793
+    },
+    {
+      "id": "booth-table-2",
+      "role": "booth-table",
+      "form": "table",
+      "center": [
+        6.913499999999999,
+        9.18,
+        0.37
+      ],
+      "size": [
+        1.35,
+        0.72,
+        0.74
+      ],
+      "yaw": -3.141592653589793
+    },
+    {
+      "id": "booth-table-3",
+      "role": "booth-table",
+      "form": "table",
+      "center": [
+        9.4635,
+        9.18,
+        0.37
+      ],
+      "size": [
+        1.35,
+        0.72,
+        0.74
+      ],
+      "yaw": -3.141592653589793
+    },
+    {
+      "id": "booth-table-4",
+      "role": "booth-table",
+      "form": "table",
+      "center": [
+        12.013499999999999,
+        9.18,
+        0.37
+      ],
+      "size": [
+        1.35,
+        0.72,
+        0.74
+      ],
+      "yaw": -3.141592653589793
+    },
+    {
+      "id": "booth-table-5",
+      "role": "booth-table",
+      "form": "table",
+      "center": [
+        14.5635,
+        9.18,
+        0.37
+      ],
+      "size": [
+        1.35,
+        0.72,
+        0.74
+      ],
+      "yaw": -3.141592653589793
+    },
+    {
+      "id": "public-table-0",
+      "role": "public-table",
+      "form": "round-table",
+      "center": [
+        5.324999999999999,
+        4.104999999999999,
+        0.375
+      ],
+      "size": [
+        0.9,
+        0.9,
+        0.75
+      ],
+      "yaw": 0
+    },
+    {
+      "id": "public-table-1",
+      "role": "public-table",
+      "form": "round-table",
+      "center": [
+        7.725,
+        4.104999999999999,
+        0.375
+      ],
+      "size": [
+        0.9,
+        0.9,
+        0.75
+      ],
+      "yaw": 0
+    },
+    {
+      "id": "public-table-2",
+      "role": "public-table",
+      "form": "round-table",
+      "center": [
+        10.125,
+        4.104999999999999,
+        0.375
+      ],
+      "size": [
+        0.9,
+        0.9,
+        0.75
+      ],
+      "yaw": 0
+    },
+    {
+      "id": "public-table-3",
+      "role": "public-table",
+      "form": "round-table",
+      "center": [
+        5.324999999999999,
+        6.504999999999999,
+        0.375
+      ],
+      "size": [
+        0.9,
+        0.9,
+        0.75
+      ],
+      "yaw": 0
+    },
+    {
+      "id": "public-table-4",
+      "role": "public-table",
+      "form": "round-table",
+      "center": [
+        7.725,
+        6.504999999999999,
+        0.375
+      ],
+      "size": [
+        0.9,
+        0.9,
+        0.75
+      ],
+      "yaw": 0
+    },
+    {
+      "id": "public-table-5",
+      "role": "public-table",
+      "form": "round-table",
+      "center": [
+        10.125,
+        6.504999999999999,
+        0.375
+      ],
+      "size": [
+        0.9,
+        0.9,
+        0.75
+      ],
+      "yaw": 0
+    },
+    {
+      "id": "booth-banquette-0",
+      "role": "booth-banquette",
+      "form": "couch",
+      "center": [
+        1.8134999999999997,
+        9.959999999999999,
+        0.675
+      ],
+      "size": [
+        1.45,
+        0.68,
+        1.35
+      ],
+      "yaw": 3.141592653589793
+    },
+    {
+      "id": "booth-banquette-1",
+      "role": "booth-banquette",
+      "form": "couch",
+      "center": [
+        1.8134999999999997,
+        8.4,
+        0.675
+      ],
+      "size": [
+        1.45,
+        0.68,
+        1.35
+      ],
+      "yaw": 0
+    },
+    {
+      "id": "booth-banquette-2",
+      "role": "booth-banquette",
+      "form": "couch",
+      "center": [
+        4.363499999999999,
+        9.959999999999999,
+        0.675
+      ],
+      "size": [
+        1.45,
+        0.68,
+        1.35
+      ],
+      "yaw": 3.141592653589793
+    },
+    {
+      "id": "booth-banquette-3",
+      "role": "booth-banquette",
+      "form": "couch",
+      "center": [
+        4.363499999999999,
+        8.4,
+        0.675
+      ],
+      "size": [
+        1.45,
+        0.68,
+        1.35
+      ],
+      "yaw": 0
+    },
+    {
+      "id": "booth-banquette-4",
+      "role": "booth-banquette",
+      "form": "couch",
+      "center": [
+        6.913499999999999,
+        9.959999999999999,
+        0.675
+      ],
+      "size": [
+        1.45,
+        0.68,
+        1.35
+      ],
+      "yaw": 3.141592653589793
+    },
+    {
+      "id": "booth-banquette-5",
+      "role": "booth-banquette",
+      "form": "couch",
+      "center": [
+        6.913499999999999,
+        8.4,
+        0.675
+      ],
+      "size": [
+        1.45,
+        0.68,
+        1.35
+      ],
+      "yaw": 0
+    },
+    {
+      "id": "booth-banquette-6",
+      "role": "booth-banquette",
+      "form": "couch",
+      "center": [
+        9.4635,
+        9.959999999999999,
+        0.675
+      ],
+      "size": [
+        1.45,
+        0.68,
+        1.35
+      ],
+      "yaw": 3.141592653589793
+    },
+    {
+      "id": "booth-banquette-7",
+      "role": "booth-banquette",
+      "form": "couch",
+      "center": [
+        9.4635,
+        8.4,
+        0.675
+      ],
+      "size": [
+        1.45,
+        0.68,
+        1.35
+      ],
+      "yaw": 0
+    },
+    {
+      "id": "booth-banquette-8",
+      "role": "booth-banquette",
+      "form": "couch",
+      "center": [
+        12.013499999999999,
+        9.959999999999999,
+        0.675
+      ],
+      "size": [
+        1.45,
+        0.68,
+        1.35
+      ],
+      "yaw": 3.141592653589793
+    },
+    {
+      "id": "booth-banquette-9",
+      "role": "booth-banquette",
+      "form": "couch",
+      "center": [
+        12.013499999999999,
+        8.4,
+        0.675
+      ],
+      "size": [
+        1.45,
+        0.68,
+        1.35
+      ],
+      "yaw": 0
+    },
+    {
+      "id": "booth-banquette-10",
+      "role": "booth-banquette",
+      "form": "couch",
+      "center": [
+        14.5635,
+        9.959999999999999,
+        0.675
+      ],
+      "size": [
+        1.45,
+        0.68,
+        1.35
+      ],
+      "yaw": 3.141592653589793
+    },
+    {
+      "id": "booth-banquette-11",
+      "role": "booth-banquette",
+      "form": "couch",
+      "center": [
+        14.5635,
+        8.4,
+        0.675
+      ],
+      "size": [
+        1.45,
+        0.68,
+        1.35
+      ],
+      "yaw": 0
+    },
+    {
+      "id": "bar-stool-0",
+      "role": "bar-stool",
+      "form": "stool",
+      "center": [
+        4.220000000000001,
+        2.37,
+        0.51
+      ],
+      "size": [
+        0.48,
+        0.48,
+        1.02
+      ],
+      "yaw": -3.141592653589793
+    },
+    {
+      "id": "bar-stool-1",
+      "role": "bar-stool",
+      "form": "stool",
+      "center": [
+        4.78,
+        2.37,
+        0.51
+      ],
+      "size": [
+        0.48,
+        0.48,
+        1.02
+      ],
+      "yaw": -3.141592653589793
+    },
+    {
+      "id": "bar-stool-2",
+      "role": "bar-stool",
+      "form": "stool",
+      "center": [
+        5.34,
+        2.37,
+        0.51
+      ],
+      "size": [
+        0.48,
+        0.48,
+        1.02
+      ],
+      "yaw": -3.141592653589793
+    },
+    {
+      "id": "bar-stool-3",
+      "role": "bar-stool",
+      "form": "stool",
+      "center": [
+        5.9,
+        2.37,
+        0.51
+      ],
+      "size": [
+        0.48,
+        0.48,
+        1.02
+      ],
+      "yaw": -3.141592653589793
+    },
+    {
+      "id": "bar-stool-4",
+      "role": "bar-stool",
+      "form": "stool",
+      "center": [
+        6.460000000000001,
+        2.37,
+        0.51
+      ],
+      "size": [
+        0.48,
+        0.48,
+        1.02
+      ],
+      "yaw": -3.141592653589793
+    },
+    {
+      "id": "bar-stool-5",
+      "role": "bar-stool",
+      "form": "stool",
+      "center": [
+        7.02,
+        2.37,
+        0.51
+      ],
+      "size": [
+        0.48,
+        0.48,
+        1.02
+      ],
+      "yaw": -3.141592653589793
+    },
+    {
+      "id": "bar-stool-6",
+      "role": "bar-stool",
+      "form": "stool",
+      "center": [
+        7.58,
+        2.37,
+        0.51
+      ],
+      "size": [
+        0.48,
+        0.48,
+        1.02
+      ],
+      "yaw": -3.141592653589793
+    },
+    {
+      "id": "bar-stool-7",
+      "role": "bar-stool",
+      "form": "stool",
+      "center": [
+        8.14,
+        2.37,
+        0.51
+      ],
+      "size": [
+        0.48,
+        0.48,
+        1.02
+      ],
+      "yaw": -3.141592653589793
+    },
+    {
+      "id": "public-chair-0",
+      "role": "public-chair",
+      "form": "chair",
+      "center": [
+        5.324999999999999,
+        4.894999999999999,
+        0.45
+      ],
+      "size": [
+        0.48,
+        0.52,
+        0.9
+      ],
+      "yaw": 3.141592653589793
+    },
+    {
+      "id": "public-chair-1",
+      "role": "public-chair",
+      "form": "chair",
+      "center": [
+        5.324999999999999,
+        3.3149999999999986,
+        0.45
+      ],
+      "size": [
+        0.48,
+        0.52,
+        0.9
+      ],
+      "yaw": 0
+    },
+    {
+      "id": "public-chair-2",
+      "role": "public-chair",
+      "form": "chair",
+      "center": [
+        8.514999999999999,
+        4.104999999999999,
+        0.45
+      ],
+      "size": [
+        0.48,
+        0.52,
+        0.9
+      ],
+      "yaw": 1.5707963267948966
+    },
+    {
+      "id": "public-chair-3",
+      "role": "public-chair",
+      "form": "chair",
+      "center": [
+        6.935,
+        4.104999999999999,
+        0.45
+      ],
+      "size": [
+        0.48,
+        0.52,
+        0.9
+      ],
+      "yaw": -1.5707963267948966
+    },
+    {
+      "id": "public-chair-4",
+      "role": "public-chair",
+      "form": "chair",
+      "center": [
+        10.915,
+        4.104999999999999,
+        0.45
+      ],
+      "size": [
+        0.48,
+        0.52,
+        0.9
+      ],
+      "yaw": 1.5707963267948966
+    },
+    {
+      "id": "public-chair-5",
+      "role": "public-chair",
+      "form": "chair",
+      "center": [
+        9.335,
+        4.104999999999999,
+        0.45
+      ],
+      "size": [
+        0.48,
+        0.52,
+        0.9
+      ],
+      "yaw": -1.5707963267948966
+    },
+    {
+      "id": "public-chair-6",
+      "role": "public-chair",
+      "form": "chair",
+      "center": [
+        5.324999999999999,
+        7.294999999999999,
+        0.45
+      ],
+      "size": [
+        0.48,
+        0.52,
+        0.9
+      ],
+      "yaw": 3.141592653589793
+    },
+    {
+      "id": "public-chair-7",
+      "role": "public-chair",
+      "form": "chair",
+      "center": [
+        5.324999999999999,
+        5.714999999999999,
+        0.45
+      ],
+      "size": [
+        0.48,
+        0.52,
+        0.9
+      ],
+      "yaw": 0
+    },
+    {
+      "id": "public-chair-8",
+      "role": "public-chair",
+      "form": "chair",
+      "center": [
+        8.514999999999999,
+        6.504999999999999,
+        0.45
+      ],
+      "size": [
+        0.48,
+        0.52,
+        0.9
+      ],
+      "yaw": 1.5707963267948966
+    },
+    {
+      "id": "public-chair-9",
+      "role": "public-chair",
+      "form": "chair",
+      "center": [
+        6.935,
+        6.504999999999999,
+        0.45
+      ],
+      "size": [
+        0.48,
+        0.52,
+        0.9
+      ],
+      "yaw": -1.5707963267948966
+    },
+    {
+      "id": "public-chair-10",
+      "role": "public-chair",
+      "form": "chair",
+      "center": [
+        10.915,
+        6.504999999999999,
+        0.45
+      ],
+      "size": [
+        0.48,
+        0.52,
+        0.9
+      ],
+      "yaw": 1.5707963267948966
+    },
+    {
+      "id": "public-chair-11",
+      "role": "public-chair",
+      "form": "chair",
+      "center": [
+        9.335,
+        6.504999999999999,
+        0.45
+      ],
+      "size": [
+        0.48,
+        0.52,
+        0.9
+      ],
+      "yaw": -1.5707963267948966
+    },
+    {
+      "id": "bottle-display-0",
+      "role": "bottle-display",
+      "form": "bottle",
+      "center": [
+        3.54,
+        0.045,
+        1.27
+      ],
+      "size": [
+        0.09,
+        0.09,
+        0.31
+      ],
+      "yaw": 0
+    },
+    {
+      "id": "bottle-display-1",
+      "role": "bottle-display",
+      "form": "bottle",
+      "center": [
+        4.02,
+        0.045,
+        1.27
+      ],
+      "size": [
+        0.09,
+        0.09,
+        0.31
+      ],
+      "yaw": 0
+    },
+    {
+      "id": "bottle-display-2",
+      "role": "bottle-display",
+      "form": "bottle",
+      "center": [
+        4.5,
+        0.045,
+        1.27
+      ],
+      "size": [
+        0.09,
+        0.09,
+        0.31
+      ],
+      "yaw": 0
+    },
+    {
+      "id": "bottle-display-3",
+      "role": "bottle-display",
+      "form": "bottle",
+      "center": [
+        4.98,
+        0.045,
+        1.27
+      ],
+      "size": [
+        0.09,
+        0.09,
+        0.31
+      ],
+      "yaw": 0
+    },
+    {
+      "id": "bottle-display-4",
+      "role": "bottle-display",
+      "form": "bottle",
+      "center": [
+        5.46,
+        0.045,
+        1.27
+      ],
+      "size": [
+        0.09,
+        0.09,
+        0.31
+      ],
+      "yaw": 0
+    },
+    {
+      "id": "bottle-display-5",
+      "role": "bottle-display",
+      "form": "bottle",
+      "center": [
+        5.9399999999999995,
+        0.045,
+        1.27
+      ],
+      "size": [
+        0.09,
+        0.09,
+        0.31
+      ],
+      "yaw": 0
+    },
+    {
+      "id": "bottle-display-6",
+      "role": "bottle-display",
+      "form": "bottle",
+      "center": [
+        6.42,
+        0.045,
+        1.27
+      ],
+      "size": [
+        0.09,
+        0.09,
+        0.31
+      ],
+      "yaw": 0
+    },
+    {
+      "id": "bottle-display-7",
+      "role": "bottle-display",
+      "form": "bottle",
+      "center": [
+        6.9,
+        0.045,
+        1.27
+      ],
+      "size": [
+        0.09,
+        0.09,
+        0.31
+      ],
+      "yaw": 0
+    },
+    {
+      "id": "bottle-display-8",
+      "role": "bottle-display",
+      "form": "bottle",
+      "center": [
+        7.38,
+        0.045,
+        1.27
+      ],
+      "size": [
+        0.09,
+        0.09,
+        0.31
+      ],
+      "yaw": 0
+    },
+    {
+      "id": "bottle-display-9",
+      "role": "bottle-display",
+      "form": "bottle",
+      "center": [
+        7.86,
+        0.045,
+        1.27
+      ],
+      "size": [
+        0.09,
+        0.09,
+        0.31
+      ],
+      "yaw": 0
+    },
+    {
+      "id": "bottle-display-10",
+      "role": "bottle-display",
+      "form": "bottle",
+      "center": [
+        8.34,
+        0.045,
+        1.27
+      ],
+      "size": [
+        0.09,
+        0.09,
+        0.31
+      ],
+      "yaw": 0
+    },
+    {
+      "id": "bottle-display-11",
+      "role": "bottle-display",
+      "form": "bottle",
+      "center": [
+        8.82,
+        0.045,
+        1.27
+      ],
+      "size": [
+        0.09,
+        0.09,
+        0.31
+      ],
+      "yaw": 0
+    },
+    {
+      "id": "bottle-display-12",
+      "role": "bottle-display",
+      "form": "bottle",
+      "center": [
+        3.54,
+        0.045,
+        1.69
+      ],
+      "size": [
+        0.09,
+        0.09,
+        0.31
+      ],
+      "yaw": 0
+    },
+    {
+      "id": "bottle-display-13",
+      "role": "bottle-display",
+      "form": "bottle",
+      "center": [
+        4.02,
+        0.045,
+        1.69
+      ],
+      "size": [
+        0.09,
+        0.09,
+        0.31
+      ],
+      "yaw": 0
+    },
+    {
+      "id": "bottle-display-14",
+      "role": "bottle-display",
+      "form": "bottle",
+      "center": [
+        4.5,
+        0.045,
+        1.69
+      ],
+      "size": [
+        0.09,
+        0.09,
+        0.31
+      ],
+      "yaw": 0
+    },
+    {
+      "id": "bottle-display-15",
+      "role": "bottle-display",
+      "form": "bottle",
+      "center": [
+        4.98,
+        0.045,
+        1.69
+      ],
+      "size": [
+        0.09,
+        0.09,
+        0.31
+      ],
+      "yaw": 0
+    },
+    {
+      "id": "bottle-display-16",
+      "role": "bottle-display",
+      "form": "bottle",
+      "center": [
+        5.46,
+        0.045,
+        1.69
+      ],
+      "size": [
+        0.09,
+        0.09,
+        0.31
+      ],
+      "yaw": 0
+    },
+    {
+      "id": "bottle-display-17",
+      "role": "bottle-display",
+      "form": "bottle",
+      "center": [
+        5.9399999999999995,
+        0.045,
+        1.69
+      ],
+      "size": [
+        0.09,
+        0.09,
+        0.31
+      ],
+      "yaw": 0
+    },
+    {
+      "id": "bottle-display-18",
+      "role": "bottle-display",
+      "form": "bottle",
+      "center": [
+        6.42,
+        0.045,
+        1.69
+      ],
+      "size": [
+        0.09,
+        0.09,
+        0.31
+      ],
+      "yaw": 0
+    },
+    {
+      "id": "bottle-display-19",
+      "role": "bottle-display",
+      "form": "bottle",
+      "center": [
+        6.9,
+        0.045,
+        1.69
+      ],
+      "size": [
+        0.09,
+        0.09,
+        0.31
+      ],
+      "yaw": 0
+    },
+    {
+      "id": "bottle-display-20",
+      "role": "bottle-display",
+      "form": "bottle",
+      "center": [
+        7.38,
+        0.045,
+        1.69
+      ],
+      "size": [
+        0.09,
+        0.09,
+        0.31
+      ],
+      "yaw": 0
+    },
+    {
+      "id": "bottle-display-21",
+      "role": "bottle-display",
+      "form": "bottle",
+      "center": [
+        7.86,
+        0.045,
+        1.69
+      ],
+      "size": [
+        0.09,
+        0.09,
+        0.31
+      ],
+      "yaw": 0
+    },
+    {
+      "id": "bottle-display-22",
+      "role": "bottle-display",
+      "form": "bottle",
+      "center": [
+        8.34,
+        0.045,
+        1.69
+      ],
+      "size": [
+        0.09,
+        0.09,
+        0.31
+      ],
+      "yaw": 0
+    },
+    {
+      "id": "bottle-display-23",
+      "role": "bottle-display",
+      "form": "bottle",
+      "center": [
+        8.82,
+        0.045,
+        1.69
+      ],
+      "size": [
+        0.09,
+        0.09,
+        0.31
+      ],
+      "yaw": 0
+    },
+    {
+      "id": "glass-rack-0",
+      "role": "glass-rack",
+      "form": "shelving",
+      "center": [
+        10.7,
+        0.15,
+        2.05
+      ],
+      "size": [
+        1.5,
+        0.3,
+        0.32
+      ],
+      "yaw": 0
+    },
+    {
+      "id": "light-switch-bank-0",
+      "role": "light-switch-bank",
+      "form": "switch",
+      "center": [
+        0.03,
+        4.550000000000001,
+        1.15
+      ],
+      "size": [
+        0.24,
+        0.06,
+        0.38
+      ],
+      "yaw": -1.5707963267948966
+    },
+    {
+      "id": "ventilation-grille-0",
+      "role": "ventilation-grille",
+      "form": "rack",
+      "center": [
+        15.405,
+        5.3,
+        3.15
+      ],
+      "size": [
+        0.92,
+        0.09,
+        0.34
+      ],
+      "yaw": 1.5707963267948966
+    },
+    {
+      "id": "ventilation-grille-1",
+      "role": "ventilation-grille",
+      "form": "rack",
+      "center": [
+        15.405,
+        6.3,
+        3.15
+      ],
+      "size": [
+        0.92,
+        0.09,
+        0.34
+      ],
+      "yaw": 1.5707963267948966
+    },
+    {
+      "id": "extract-control-0",
+      "role": "extract-control",
+      "form": "switch",
+      "center": [
+        15.41,
+        5.7294,
+        1.45
+      ],
+      "size": [
+        0.28,
+        0.08,
+        0.42
+      ],
+      "yaw": 1.5707963267948966
+    },
+    {
+      "id": "fire-extinguisher-0",
+      "role": "fire-extinguisher",
+      "form": "canister",
+      "center": [
+        0.11,
+        4.8806,
+        0.8500000000000001
+      ],
+      "size": [
+        0.22,
+        0.22,
+        0.64
+      ],
+      "yaw": -1.5707963267948966
+    },
+    {
+      "id": "exit-sign-0",
+      "role": "exit-sign",
+      "form": "screen",
+      "center": [
+        0.04,
+        5.6233,
+        2.75
+      ],
+      "size": [
+        0.72,
+        0.08,
+        0.24
+      ],
+      "yaw": -1.5707963267948966
+    },
+    {
+      "id": "general-practical-light-0",
+      "role": "general-practical-light",
+      "form": "downlight",
+      "center": [
+        4.125000000000001,
+        3.8049999999999993,
+        4.74
+      ],
+      "size": [
+        0.22,
+        0.22,
+        0.12
+      ],
+      "yaw": 0
+    },
+    {
+      "id": "general-practical-light-1",
+      "role": "general-practical-light",
+      "form": "downlight",
+      "center": [
+        6.525,
+        3.8049999999999993,
+        4.74
+      ],
+      "size": [
+        0.22,
+        0.22,
+        0.12
+      ],
+      "yaw": 0
+    },
+    {
+      "id": "general-practical-light-2",
+      "role": "general-practical-light",
+      "form": "downlight",
+      "center": [
+        8.925,
+        3.8049999999999993,
+        4.74
+      ],
+      "size": [
+        0.22,
+        0.22,
+        0.12
+      ],
+      "yaw": 0
+    },
+    {
+      "id": "general-practical-light-3",
+      "role": "general-practical-light",
+      "form": "downlight",
+      "center": [
+        11.325,
+        3.8049999999999993,
+        4.74
+      ],
+      "size": [
+        0.22,
+        0.22,
+        0.12
+      ],
+      "yaw": 0
+    },
+    {
+      "id": "general-practical-light-4",
+      "role": "general-practical-light",
+      "form": "downlight",
+      "center": [
+        4.125000000000001,
+        6.805,
+        4.74
+      ],
+      "size": [
+        0.22,
+        0.22,
+        0.12
+      ],
+      "yaw": 0
+    },
+    {
+      "id": "general-practical-light-5",
+      "role": "general-practical-light",
+      "form": "downlight",
+      "center": [
+        6.525,
+        6.805,
+        4.74
+      ],
+      "size": [
+        0.22,
+        0.22,
+        0.12
+      ],
+      "yaw": 0
+    },
+    {
+      "id": "general-practical-light-6",
+      "role": "general-practical-light",
+      "form": "downlight",
+      "center": [
+        8.925,
+        6.805,
+        4.74
+      ],
+      "size": [
+        0.22,
+        0.22,
+        0.12
+      ],
+      "yaw": 0
+    },
+    {
+      "id": "general-practical-light-7",
+      "role": "general-practical-light",
+      "form": "downlight",
+      "center": [
+        11.325,
+        6.805,
+        4.74
+      ],
+      "size": [
+        0.22,
+        0.22,
+        0.12
+      ],
+      "yaw": 0
+    },
+    {
+      "id": "task-practical-light-0",
+      "role": "task-practical-light",
+      "form": "pendant",
+      "center": [
+        6.525,
+        3.8049999999999997,
+        4.2
+      ],
+      "size": [
+        0.32,
+        0.32,
+        0.62
+      ],
+      "yaw": 0
+    },
+    {
+      "id": "task-practical-light-1",
+      "role": "task-practical-light",
+      "form": "pendant",
+      "center": [
+        8.925,
+        3.8049999999999997,
+        4.2
+      ],
+      "size": [
+        0.32,
+        0.32,
+        0.62
+      ],
+      "yaw": 0
+    },
+    {
+      "id": "task-practical-light-2",
+      "role": "task-practical-light",
+      "form": "pendant",
+      "center": [
+        6.525,
+        6.805,
+        4.2
+      ],
+      "size": [
+        0.32,
+        0.32,
+        0.62
+      ],
+      "yaw": 0
+    },
+    {
+      "id": "task-practical-light-3",
+      "role": "task-practical-light",
+      "form": "pendant",
+      "center": [
+        8.925,
+        6.805,
+        4.2
+      ],
+      "size": [
+        0.32,
+        0.32,
+        0.62
+      ],
+      "yaw": 0
+    },
+    {
+      "id": "beverage-taps-0",
+      "role": "beverage-taps",
+      "form": "rail",
+      "center": [
+        5.18,
+        1.3800000000000001,
+        1.34
+      ],
+      "size": [
+        1.35,
+        0.22,
+        0.52
+      ],
+      "yaw": 0
+    },
+    {
+      "id": "ice-well-0",
+      "role": "ice-well",
+      "form": "sink",
+      "center": [
+        7.08,
+        1.51,
+        1.205
+      ],
+      "size": [
+        0.72,
+        0.48,
+        0.25
+      ],
+      "yaw": 0
+    },
+    {
+      "id": "bar-sink-0",
+      "role": "bar-sink",
+      "form": "sink",
+      "center": [
+        8.129999999999999,
+        1.51,
+        1.205
+      ],
+      "size": [
+        0.72,
+        0.48,
+        0.25
+      ],
+      "yaw": 0
+    },
+    {
+      "id": "point-of-sale-0",
+      "role": "point-of-sale",
+      "form": "screen",
+      "center": [
+        3.53,
+        1.36,
+        1.25
+      ],
+      "size": [
+        0.38,
+        0.18,
+        0.34
+      ],
+      "yaw": 0
+    },
+    {
+      "id": "holographic-presence-0",
+      "role": "holographic-presence",
+      "form": "screen",
+      "center": [
+        6.174999999999999,
+        1.35,
+        1.605
+      ],
+      "size": [
+        0.64,
+        0.16,
+        1.05
+      ],
+      "yaw": 0
+    }
+  ]
+}

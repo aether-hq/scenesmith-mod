@@ -43,7 +43,7 @@ from scenesmith.agent_utils.structural_geometry import (
     UnsupportedGeometryError,
 )
 
-SEMANTIC_ENVIRONMENT_COMPILER_VERSION = "semantic-environment-v2"
+SEMANTIC_ENVIRONMENT_COMPILER_VERSION = "semantic-environment-v3"
 
 SEMANTIC_COMPILER_CAPABILITIES = {
     "chamber_shapes": {
@@ -569,11 +569,31 @@ def _extract_mesh(
         if key in edge_vertices:
             return edge_vertices[key]
         first_value, second_value = values[first], values[second]
-        denominator = first_value - second_value
-        amount = (
-            0.5 if abs(denominator) <= GEOMETRY_TOLERANCE else first_value / denominator
-        )
-        amount = min(1.0, max(0.0, amount))
+        if abs(first_value) <= GEOMETRY_TOLERANCE:
+            amount = 0.0
+        elif abs(second_value) <= GEOMETRY_TOLERANCE:
+            amount = 1.0
+        else:
+            # The passage/chamber union is nonlinear along a grid edge.  A
+            # single linear interpolation can place the extracted "surface"
+            # deep inside navigable free space on coarse grids.  Preserve the
+            # marching topology, then refine this known sign-changing edge
+            # against the authoritative implicit field.
+            lower, upper = 0.0, 1.0
+            lower_value = first_value
+            edge = _subtract(points[second], points[first])
+            for _iteration in range(24):
+                amount = (lower + upper) / 2.0
+                candidate = _add(points[first], _scale(edge, amount))
+                candidate_value = _union_value(primitives, candidate)
+                if abs(candidate_value) <= 1e-10:
+                    break
+                if (candidate_value <= 0.0) == (lower_value <= 0.0):
+                    lower, lower_value = amount, candidate_value
+                else:
+                    upper = amount
+            else:
+                amount = (lower + upper) / 2.0
         point = _add(
             points[first], _scale(_subtract(points[second], points[first]), amount)
         )
