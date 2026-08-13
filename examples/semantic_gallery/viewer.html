@@ -143,7 +143,9 @@
   <script type="module">
     import * as THREE from 'three';
     import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
+    import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
     import { OBJLoader } from 'three/addons/loaders/OBJLoader.js';
+    import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 
     const stage = document.querySelector('#stage');
     const sceneList = document.querySelector('#scene-list');
@@ -175,7 +177,8 @@
     controls.pointerSpeed = 0.7;
     const clock = new THREE.Clock();
     const keys = new Set();
-    const loader = new OBJLoader();
+    const objLoader = new OBJLoader();
+    const gltfLoader = new GLTFLoader();
     let manifest;
     let activeRecord;
     let activeRoot;
@@ -194,6 +197,8 @@
     world.add(fillLight);
     const headLight = new THREE.PointLight(0xffd6a0, 14, 0, 1.6);
     world.add(headLight);
+    const pmrem = new THREE.PMREMGenerator(renderer);
+    world.environment = pmrem.fromScene(new RoomEnvironment(), 0.03).texture;
 
     const detailPalette = {
       stalactite: 0xb88d5b,
@@ -219,7 +224,7 @@
     }
 
     function makeShellMaterial(scene) {
-      const isControl = scene.representation === 'semantic_proxy_regression';
+      const isControl = scene.representation === 'semantic_proxy_diagnostic';
       return new THREE.MeshStandardMaterial({
         color: isControl ? 0x4d585a : 0x75604b,
         emissive: isControl ? 0x121718 : 0x1d160f,
@@ -255,7 +260,14 @@
       if (!root) return;
       root.traverse(child => {
         if (child.geometry) child.geometry.dispose();
-        if (child.material) child.material.dispose();
+        const materials = Array.isArray(child.material) ? child.material : [child.material];
+        for (const material of materials) {
+          if (!material) continue;
+          for (const value of Object.values(material)) {
+            if (value?.isTexture) value.dispose();
+          }
+          material.dispose();
+        }
       });
       world.remove(root);
     }
@@ -271,6 +283,51 @@
       return object;
     }
 
+    function prepareFullFidelityObject(object) {
+      object.traverse(child => {
+        if (!child.isMesh) return;
+        child.castShadow = true;
+        child.receiveShadow = true;
+        const materials = Array.isArray(child.material) ? child.material : [child.material];
+        for (const material of materials) {
+          if (!material) continue;
+          material.envMapIntensity = .65;
+          material.needsUpdate = true;
+        }
+      });
+      return object;
+    }
+
+    function renderStats(scene, root) {
+      const materials = new Set();
+      const textures = new Set();
+      let meshes = 0;
+      let triangles = 0;
+      root.traverse(child => {
+        if (!child.isMesh) return;
+        meshes += 1;
+        const position = child.geometry?.attributes?.position;
+        triangles += child.geometry?.index
+          ? child.geometry.index.count / 3
+          : (position?.count ?? 0) / 3;
+        const childMaterials = Array.isArray(child.material) ? child.material : [child.material];
+        for (const material of childMaterials) {
+          if (!material) continue;
+          materials.add(material.uuid);
+          for (const value of Object.values(material)) {
+            if (value?.isTexture) textures.add(value.uuid);
+          }
+        }
+      });
+      return {
+        representation: scene.representation,
+        meshes,
+        triangles: Math.round(triangles),
+        materials: materials.size,
+        textures: textures.size
+      };
+    }
+
     function metric(label, value) {
       const root = document.createElement('div');
       root.className = 'metric';
@@ -284,7 +341,10 @@
 
     function updateSceneInformation(scene) {
       document.querySelector('#scene-title').textContent = scene.title;
-      document.querySelector('#scene-meta').textContent = `${scene.model} · ${scene.result} · ${scene.source_kind} · ${scene.shell.triangles.toLocaleString()} shell triangles`;
+      const geometryLabel = scene.representation === 'full_fidelity_gltf'
+        ? `${scene.scene_asset.expected_triangles.toLocaleString()} detailed triangles`
+        : `${scene.shell.triangles.toLocaleString()} shell triangles`;
+      document.querySelector('#scene-meta').textContent = `${scene.model} · ${scene.result} · ${scene.representation} · ${geometryLabel}`;
       document.querySelector('#metrics').replaceChildren(
         ...scene.summary_metrics.map(item => metric(item.label, item.value))
       );
@@ -310,8 +370,12 @@
         result.className = 'result';
         result.textContent = scene.result;
         const geometry = document.createElement('small');
-        const instances = scene.details.reduce((sum, item) => sum + (item.instance_count ?? 0), 0);
-        geometry.textContent = `${scene.shell.triangles.toLocaleString()} shell triangles · ${instances} semantic details`;
+        if (scene.representation === 'full_fidelity_gltf') {
+          geometry.textContent = `${scene.scene_asset.expected_triangles.toLocaleString()} detailed triangles · ${scene.scene_asset.expected_mesh_instances} meshes`;
+        } else {
+          const instances = scene.details.reduce((sum, item) => sum + (item.instance_count ?? 0), 0);
+          geometry.textContent = `${scene.shell.triangles.toLocaleString()} shell triangles · ${instances} semantic details`;
+        }
         const repairs = document.createElement('small');
         repairs.textContent = `${scene.repair_attempts} repairs`;
         button.append(title, result, geometry, repairs);
@@ -382,8 +446,13 @@
       camera.near = Math.max(.02, size / 10000);
       camera.far = Math.max(100, size * 12);
       camera.updateProjectionMatrix();
-      headLight.intensity = scene.representation === 'semantic_proxy_regression' ? 9 : 14;
+      headLight.intensity = scene.representation === 'full_fidelity_gltf'
+        ? 2.25
+        : (scene.representation === 'semantic_proxy_diagnostic' ? 9 : 14);
       headLight.distance = Math.max(40, size * 1.5);
+      world.fog.density = scene.representation === 'full_fidelity_gltf'
+        ? 0
+        : Math.min(.004, 1 / Math.max(60, size * 6));
     }
 
     async function loadScene(scene) {
@@ -401,32 +470,54 @@
         const nextDetails = new THREE.Group();
         nextRoot.add(nextShell, nextDetails);
 
-        const shell = decorateObject(
-          await loader.loadAsync(`generated/${scene.shell.mesh_path}`),
-          makeShellMaterial(scene)
-        );
-        if (generation !== loadGeneration) {
-          disposeObject(nextRoot);
-          return;
-        }
-        nextShell.add(shell);
-        progress.style.width = '48%';
-
-        for (let index = 0; index < scene.details.length; index++) {
-          const detail = scene.details[index];
-          status.textContent = `Loading ${detail.id}…`;
-          const material = makeDetailMaterial(detail);
-          const object = decorateObject(
-            await loader.loadAsync(`generated/${detail.mesh_path}`),
-            material
-          );
+        if (scene.representation === 'full_fidelity_gltf') {
+          status.textContent = 'Loading full-fidelity SceneSmith GLB…';
+          const gltf = await gltfLoader.loadAsync(`generated/${scene.scene_asset.path}`);
           if (generation !== loadGeneration) {
-            disposeObject(object);
             disposeObject(nextRoot);
             return;
           }
-          nextDetails.add(object);
-          progress.style.width = `${48 + ((index + 1) / Math.max(1, scene.details.length)) * 42}%`;
+          nextDetails.add(prepareFullFidelityObject(gltf.scene));
+          progress.style.width = '90%';
+        } else {
+          const shell = decorateObject(
+            await objLoader.loadAsync(`generated/${scene.shell.mesh_path}`),
+            makeShellMaterial(scene)
+          );
+          if (generation !== loadGeneration) {
+            disposeObject(nextRoot);
+            return;
+          }
+          nextShell.add(shell);
+          progress.style.width = '48%';
+
+          for (let index = 0; index < scene.details.length; index++) {
+            const detail = scene.details[index];
+            status.textContent = `Loading ${detail.id}…`;
+            const material = makeDetailMaterial(detail);
+            const object = decorateObject(
+              await objLoader.loadAsync(`generated/${detail.mesh_path}`),
+              material
+            );
+            if (generation !== loadGeneration) {
+              disposeObject(object);
+              disposeObject(nextRoot);
+              return;
+            }
+            nextDetails.add(object);
+            progress.style.width = `${48 + ((index + 1) / Math.max(1, scene.details.length)) * 42}%`;
+          }
+        }
+
+        const stats = renderStats(scene, nextRoot);
+        if (scene.representation === 'full_fidelity_gltf') {
+          const expected = scene.scene_asset;
+          if (stats.meshes < expected.expected_mesh_instances
+              || stats.triangles < expected.expected_triangles
+              || stats.materials < expected.expected_materials
+              || stats.textures < expected.expected_textures) {
+            throw new Error(`Full-fidelity bar failed its visual census: ${JSON.stringify(stats)}`);
+          }
         }
 
         disposeObject(activeRoot);
@@ -436,6 +527,7 @@
         detailRoot = nextDetails;
         activeRecord = scene;
         world.add(activeRoot);
+        window.__SCENESMITH_GALLERY_ACTIVE_RENDER_STATS__ = stats;
         configureAtmosphere(scene);
         rebuildGrid(scene);
         resetView();
@@ -490,7 +582,7 @@
       if (!Array.isArray(manifest.scenes) || !manifest.scenes.length) {
         throw new Error('gallery manifest contains no available scenes');
       }
-      gallerySubtitle.textContent = `${manifest.trial_count} retained LLM scenes · ${manifest.control_count} original-engine control · rebuilt on every launch`;
+      gallerySubtitle.textContent = `${manifest.trial_count} retained LLM scenes · ${manifest.control_count} regression controls · rebuilt on every launch`;
       renderSceneButtons();
       await loadScene(manifest.scenes[0]);
     }

@@ -115,6 +115,11 @@ Install the dependencies (including dev tools like pytest) into `.venv`:
 uv sync
 ```
 
+`requirements.txt` is also provided for pip-oriented tooling and delegates to
+the same project metadata. Structural polygon compilation requires
+`shapely>=2.1.2`; run project commands with `uv run ...` or activate `.venv` so
+they do not accidentally use a bare system Python.
+
 To install without dev dependencies:
 ```sh
 uv sync --no-dev

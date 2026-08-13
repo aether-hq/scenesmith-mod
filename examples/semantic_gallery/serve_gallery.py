@@ -50,10 +50,13 @@ def manifest_asset_paths(
         raise ValueError("gallery manifest scenes must be an array")
     for scene in scenes:
         try:
-            relative_paths = [
-                scene["shell"]["mesh_path"],
-                *(detail["mesh_path"] for detail in scene["details"]),
-            ]
+            if scene.get("scene_asset"):
+                relative_paths = [scene["scene_asset"]["path"]]
+            else:
+                relative_paths = [
+                    scene["shell"]["mesh_path"],
+                    *(detail["mesh_path"] for detail in scene["details"]),
+                ]
         except (KeyError, TypeError) as exc:
             raise ValueError("gallery manifest has an invalid scene product") from exc
         for relative in relative_paths:

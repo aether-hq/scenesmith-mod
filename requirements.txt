@@ -1,0 +1,9 @@
+# Compatibility entry point for pip-oriented tools and deployment systems.
+# The complete, locked environment is managed by pyproject.toml + uv.lock;
+# installing this file delegates to the same project metadata.
+-e .
+
+# Structural polygon compilation imports constrained_delaunay_triangles,
+# which is available in Shapely 2.1.2 and newer. Keep this explicit so filtered
+# or dependency-inspection workflows cannot silently omit the geometry backend.
+shapely>=2.1.2

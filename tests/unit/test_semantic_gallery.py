@@ -27,12 +27,19 @@ CONTROL_DIRECTORY = EXAMPLE_DIRECTORY / "sources"
 
 
 class TestSemanticGallery(unittest.TestCase):
-    def test_original_bar_control_is_the_canonical_accepted_packet(self) -> None:
+    def test_bar_controls_include_full_fidelity_visual_and_semantic_packet(
+        self,
+    ) -> None:
         discovered = discover_control_paths(CONTROL_DIRECTORY)
 
-        self.assertEqual(discovered, (CONTROL_DIRECTORY / "original_aether_bar.json",))
+        self.assertEqual(
+            discovered,
+            (
+                CONTROL_DIRECTORY / "original_aether_bar.json",
+                CONTROL_DIRECTORY / "original_scenesmith_bar.json",
+            ),
+        )
         source = json.loads(discovered[0].read_text(encoding="utf-8"))
-        self.assertEqual(source["id"], "original_aether_bar")
         self.assertEqual(
             source["source"]["packet_sha256"],
             "7a6405a637b8ac9438c1f244125dca5f23ec512b720a2a47771ec9c8d179fc0f",
@@ -42,6 +49,18 @@ class TestSemanticGallery(unittest.TestCase):
         self.assertEqual(len(source["shell"]["openings"]), 3)
         self.assertEqual(len(source["placements"]), 104)
         self.assertEqual(len(source["cameras"]), 4)
+
+        visual = json.loads(discovered[1].read_text(encoding="utf-8"))
+        self.assertEqual(visual["id"], "original_scenesmith_bar")
+        self.assertEqual(visual["source"]["kind"], "pinned_gltf_visual_baseline")
+        self.assertEqual(
+            visual["source"]["artifact_sha256"],
+            "90dad0948e638aa07c400ae2ea6d34cceb3ba259d59ea1656043691435d02f1d",
+        )
+        self.assertEqual(visual["expected"]["mesh_instances"], 280)
+        self.assertEqual(visual["expected"]["triangles"], 187086)
+        self.assertGreaterEqual(visual["expected"]["materials"], 50)
+        self.assertGreaterEqual(visual["expected"]["textures"], 50)
 
     def test_discovery_includes_every_heldout_trial_but_not_summary(self) -> None:
         discovered = discover_trial_paths(TRIAL_DIRECTORY)
@@ -65,6 +84,7 @@ class TestSemanticGallery(unittest.TestCase):
                 record["trial_id"] for record in records if record["result"] == "PASS"
             }
             expected_ids.add("original_aether_bar")
+            expected_ids.add("original_scenesmith_bar")
             unavailable_ids = {
                 record["trial_id"] for record in records if record["result"] != "PASS"
             }
@@ -72,6 +92,10 @@ class TestSemanticGallery(unittest.TestCase):
                 {scene["id"] for scene in manifest["scenes"]}, expected_ids
             )
             self.assertEqual(manifest["scene_count"], len(expected_ids))
+            control_start = manifest["trial_count"]
+            self.assertEqual(
+                manifest["scenes"][control_start]["id"], "original_scenesmith_bar"
+            )
             self.assertEqual(
                 {record["id"] for record in manifest["unavailable"]},
                 unavailable_ids,
@@ -86,9 +110,17 @@ class TestSemanticGallery(unittest.TestCase):
 
             for scene in manifest["scenes"]:
                 with self.subTest(scene=scene["id"]):
-                    self.assertTrue((output / scene["shell"]["mesh_path"]).is_file())
-                    self.assertEqual(len(scene["shell"]["artifact_hash"]), 64)
-                    self.assertGreater(scene["shell"]["triangles"], 0)
+                    if scene["representation"] == "full_fidelity_gltf":
+                        asset = scene["scene_asset"]
+                        self.assertEqual(asset["format"], "glb")
+                        self.assertTrue((output / asset["path"]).is_file())
+                        self.assertEqual(len(asset["sha256"]), 64)
+                    else:
+                        self.assertTrue(
+                            (output / scene["shell"]["mesh_path"]).is_file()
+                        )
+                        self.assertEqual(len(scene["shell"]["artifact_hash"]), 64)
+                        self.assertGreater(scene["shell"]["triangles"], 0)
                     self.assertEqual(len(scene["bounds"]["minimum"]), 3)
                     self.assertEqual(len(scene["bounds"]["maximum"]), 3)
                     for detail in scene["details"]:
@@ -114,7 +146,7 @@ class TestSemanticGallery(unittest.TestCase):
                 bar["compiler"],
                 "scenesmith.agent_utils.structural_compiler.compile_polygon_space",
             )
-            self.assertEqual(bar["representation"], "semantic_proxy_regression")
+            self.assertEqual(bar["representation"], "semantic_proxy_diagnostic")
             self.assertEqual(bar["shell"]["triangles"], 44)
             self.assertEqual(
                 sum(item["instance_count"] for item in bar["details"]), 104
@@ -135,6 +167,19 @@ class TestSemanticGallery(unittest.TestCase):
                 ],
             )
 
+            visual = next(
+                scene
+                for scene in manifest["scenes"]
+                if scene["id"] == "original_scenesmith_bar"
+            )
+            self.assertEqual(visual["representation"], "full_fidelity_gltf")
+            self.assertEqual(visual["scene_asset"]["expected_mesh_instances"], 280)
+            self.assertEqual(visual["scene_asset"]["expected_triangles"], 187086)
+            self.assertEqual(
+                visual["scene_asset"]["sha256"],
+                "90dad0948e638aa07c400ae2ea6d34cceb3ba259d59ea1656043691435d02f1d",
+            )
+
     def test_server_manifest_preflight_resolves_all_gallery_assets(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             output = Path(temporary_directory) / "generated"
@@ -143,7 +188,8 @@ class TestSemanticGallery(unittest.TestCase):
             paths = manifest_asset_paths(output, manifest)
 
             expected_count = sum(
-                1 + len(scene["details"]) for scene in manifest["scenes"]
+                (1 if scene.get("scene_asset") else 1 + len(scene["details"]))
+                for scene in manifest["scenes"]
             )
             self.assertEqual(len(paths), expected_count)
             self.assertTrue(all(path.is_file() for path in paths))
@@ -155,6 +201,8 @@ class TestSemanticGallery(unittest.TestCase):
         self.assertIn("generated/manifest.json", viewer)
         self.assertIn("manifest.scenes", viewer)
         self.assertIn("PointerLockControls", viewer)
+        self.assertIn("GLTFLoader", viewer)
+        self.assertIn("scene.scene_asset", viewer)
         self.assertIn("scene.shell.mesh_path", viewer)
         self.assertIn("scene.details", viewer)
         self.assertIn("scene.summary_metrics", viewer)

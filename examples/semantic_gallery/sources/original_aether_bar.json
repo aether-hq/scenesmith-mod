@@ -1,5 +1,6 @@
 {
   "schema_version": 1,
+  "gallery_order": 10,
   "id": "original_aether_bar",
   "title": "Original Aether Bar",
   "prompt": "Approved grungy underworld cyberpunk bar for a discreet rear-booth meeting.",

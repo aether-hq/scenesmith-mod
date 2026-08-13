@@ -8,6 +8,7 @@ import hashlib
 import json
 import math
 import os
+import shutil
 import sys
 import tempfile
 
@@ -53,8 +54,8 @@ DEFAULT_TRIAL_DIRECTORY = (
 )
 DEFAULT_OUTPUT_DIRECTORY = Path(__file__).resolve().parent / "generated"
 DEFAULT_CONTROL_DIRECTORY = Path(__file__).resolve().parent / "sources"
-GALLERY_SCHEMA_VERSION = 2
-GALLERY_COMPILER_VERSION = "semantic-gallery-v2"
+GALLERY_SCHEMA_VERSION = 3
+GALLERY_COMPILER_VERSION = "semantic-gallery-v3"
 
 
 def discover_trial_paths(trial_directory: Path | str) -> tuple[Path, ...]:
@@ -608,8 +609,8 @@ def _compile_bar_control(
     }
     return {
         "id": control_id,
-        "title": data["title"],
-        "model": "SceneSmith original control",
+        "title": "Aether Bar — Semantic Proxy Diagnostic",
+        "model": "Current structural compiler",
         "result": "PASS",
         "repair_attempts": 0,
         "prompt": data["prompt"],
@@ -627,7 +628,7 @@ def _compile_bar_control(
         "compiler": (
             "scenesmith.agent_utils.structural_compiler.compile_polygon_space"
         ),
-        "representation": "semantic_proxy_regression",
+        "representation": "semantic_proxy_diagnostic",
         "semantic_hash": source_hash,
         "reference": source,
         "bounds": {"minimum": minimum, "maximum": maximum},
@@ -645,8 +646,91 @@ def _compile_bar_control(
     }
 
 
+def _copy_file_atomic(source: Path, destination: Path) -> None:
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    file_descriptor, temporary_name = tempfile.mkstemp(
+        dir=destination.parent, prefix=f".{destination.name}.", suffix=".tmp"
+    )
+    try:
+        with os.fdopen(file_descriptor, "wb") as target, source.open("rb") as stream:
+            shutil.copyfileobj(stream, target)
+            target.flush()
+            os.fsync(target.fileno())
+        os.replace(temporary_name, destination)
+    except BaseException:
+        try:
+            os.unlink(temporary_name)
+        except FileNotFoundError:
+            pass
+        raise
+
+
+def _compile_gltf_visual_control(
+    data: Mapping[str, object],
+    output_directory: Path,
+    *,
+    descriptor_directory: Path,
+) -> dict[str, object]:
+    control_id = require_safe_identifier(data["id"], "control_id")
+    source = data["source"]
+    artifact_source = descriptor_directory.parent / source["artifact_path"]
+    if not artifact_source.is_file():
+        raise FileNotFoundError(
+            f"gallery visual baseline is missing: {artifact_source}"
+        )
+    artifact_bytes = artifact_source.read_bytes()
+    actual_hash = hashlib.sha256(artifact_bytes).hexdigest()
+    expected_hash = source["artifact_sha256"]
+    if actual_hash != expected_hash:
+        raise ValueError(
+            f"gallery visual baseline hash mismatch: expected {expected_hash}, "
+            f"got {actual_hash}"
+        )
+    artifact_destination = (
+        output_directory / "scenes" / control_id / "full_fidelity_scene.glb"
+    )
+    _copy_file_atomic(artifact_source, artifact_destination)
+    expected = data["expected"]
+    return {
+        "id": control_id,
+        "title": data["title"],
+        "model": "SceneSmith upstream scene 112",
+        "result": "PASS",
+        "repair_attempts": 0,
+        "prompt": data["prompt"],
+        "diagnostics": [],
+        "metrics": dict(expected),
+        "summary_metrics": [
+            {"label": "mesh instances", "value": expected["mesh_instances"]},
+            {"label": "triangles", "value": expected["triangles"]},
+            {"label": "materials", "value": expected["materials"]},
+            {"label": "textures", "value": expected["textures"]},
+            {"label": "images", "value": expected["images"]},
+            {"label": "semantic objects", "value": expected["semantic_objects"]},
+        ],
+        "source_kind": source["kind"],
+        "compiler": "pinned provider visual baseline",
+        "representation": "full_fidelity_gltf",
+        "reference": source,
+        "bounds": data["bounds"],
+        "camera": data["camera"],
+        "scene_asset": {
+            "format": "glb",
+            "path": _relative(artifact_destination, output_directory),
+            "sha256": actual_hash,
+            "bytes": len(artifact_bytes),
+            "expected_mesh_instances": expected["mesh_instances"],
+            "expected_triangles": expected["triangles"],
+            "expected_materials": expected["materials"],
+            "expected_textures": expected["textures"],
+        },
+        "shell": {"triangles": expected["triangles"]},
+        "details": [],
+    }
+
+
 def _compile_control(
-    data: Mapping[str, object], output_directory: Path
+    data: Mapping[str, object], output_directory: Path, *, descriptor_path: Path
 ) -> dict[str, object]:
     source = data.get("source")
     if (
@@ -654,6 +738,15 @@ def _compile_control(
         and source.get("kind") == "accepted_aether_room_packet"
     ):
         return _compile_bar_control(data, output_directory)
+    if (
+        isinstance(source, Mapping)
+        and source.get("kind") == "pinned_gltf_visual_baseline"
+    ):
+        return _compile_gltf_visual_control(
+            data,
+            output_directory,
+            descriptor_directory=descriptor_path.parent,
+        )
     raise ValueError(f"unsupported gallery control source: {source!r}")
 
 
@@ -705,9 +798,19 @@ def generate_gallery(
             )
             continue
         scenes.append(_compile_trial(data, output))
-    for path in control_paths:
+    control_records = [
+        (path, json.loads(path.read_text(encoding="utf-8"))) for path in control_paths
+    ]
+    control_records.sort(
+        key=lambda item: (item[1].get("gallery_order", 100), item[0].name)
+    )
+    for path, data in control_records:
         scenes.append(
-            _compile_control(json.loads(path.read_text(encoding="utf-8")), output)
+            _compile_control(
+                data,
+                output,
+                descriptor_path=path,
+            )
         )
     if not scenes:
         raise ValueError("no gallery scenes are available to render")

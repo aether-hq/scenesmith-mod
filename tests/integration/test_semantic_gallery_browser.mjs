@@ -42,6 +42,9 @@ try {
     await page.waitForTimeout(250);
     const sceneId = await button.getAttribute('data-scene-id');
     const title = await page.locator('#scene-title').textContent();
+    const renderStats = await page.locator('#scene-meta').evaluate(() => (
+      window.__SCENESMITH_GALLERY_ACTIVE_RENDER_STATS__
+    ));
     const pixels = await page.locator('canvas').evaluate(canvas => {
       const probe = document.createElement('canvas');
       probe.width = 128;
@@ -69,7 +72,14 @@ try {
       pixels.darkFraction < 0.98,
       `${sceneId} has no meaningfully illuminated architecture`,
     );
-    rendered.push({ sceneId, title, ...pixels });
+    if (sceneId === 'original_scenesmith_bar') {
+      assert.equal(renderStats.representation, 'full_fidelity_gltf');
+      assert.ok(renderStats.meshes >= 280, `full bar loaded only ${renderStats.meshes} meshes`);
+      assert.ok(renderStats.triangles >= 187_086, `full bar loaded only ${renderStats.triangles} triangles`);
+      assert.ok(renderStats.materials >= 50, `full bar loaded only ${renderStats.materials} materials`);
+      assert.ok(renderStats.textures >= 50, `full bar loaded only ${renderStats.textures} textures`);
+    }
+    rendered.push({ sceneId, title, ...pixels, ...renderStats });
   }
   assert.deepEqual(errors, []);
   process.stdout.write(`${JSON.stringify({ sceneCount, rendered })}\n`);
