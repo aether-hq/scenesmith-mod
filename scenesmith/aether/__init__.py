@@ -7,6 +7,13 @@ from .locked_inventory import (
     placements_for_stage,
     seed_locked_inventory,
 )
+from .native_placement import (
+    CeilingPlacementAdapter,
+    FloorPlacementAdapter,
+    SurfacePlacementAdapter,
+    WallPlacementAdapter,
+)
+from .physical_evidence import PhysicalEvidenceProvider, room_geometry_digest
 from .room_runtime import annotate_room_scene_instances
 from .runtime import DeterministicPlacementAdapter, SceneSmithCompletionRuntime
 from .scene_census import (
@@ -17,11 +24,16 @@ from .scene_census import (
 )
 
 __all__ = [
+    "CeilingPlacementAdapter",
     "CensusError",
     "CompletionPlacementRuntime",
     "DeterministicPlacementAdapter",
+    "FloorPlacementAdapter",
+    "PhysicalEvidenceProvider",
     "SceneSmithCompletionRuntime",
+    "SurfacePlacementAdapter",
     "TypedAssetSpec",
+    "WallPlacementAdapter",
     "acquire_completion_assets",
     "annotate_room_scene_instances",
     "build_scene_census",
@@ -31,5 +43,6 @@ __all__ = [
     "load_accepted_stage_input",
     "normalize_instance_id",
     "placements_for_stage",
+    "room_geometry_digest",
     "seed_locked_inventory",
 ]
