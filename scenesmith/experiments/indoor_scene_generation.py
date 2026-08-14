@@ -932,6 +932,27 @@ def _generate_room(
                 f"{end_time - start_time:.2f} seconds"
             )
 
+    if aether_stage_input is not None:
+        from scenesmith.aether.worker.pipeline import (
+            run_native_contextual_completion,
+        )
+
+        console_logger.info("Running mandatory Aether contextual completion")
+        completion_receipt = run_native_contextual_completion(
+            scene=scene,
+            stage_input=aether_stage_input,
+            cfg_dict=cfg_dict,
+            logger=logger,
+            house_layout=house_layout,
+            ceiling_height=room_geometry.wall_height,
+            render_gpu_id=render_gpu_id,
+            room_dir=room_dir,
+        )
+        console_logger.info(
+            "Contextual completion reached %s measured scenic objects",
+            completion_receipt["final_object_count"],
+        )
+
     # Log and export final scene.
     logger.log_scene(scene=scene, name="final_scene")
     _export_scene_blend_file(

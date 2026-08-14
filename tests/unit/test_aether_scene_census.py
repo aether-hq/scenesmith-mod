@@ -31,10 +31,14 @@ def _object(
         "description": role,
         "geometry_path": f"assets/{role}.glb",
         "support_surfaces": (
-            [{"surface_id": f"{object_id}-surface"}] if role == "service-counter" else []
+            [{"surface_id": f"{object_id}-surface"}]
+            if role == "service-counter"
+            else []
         ),
         "placement_info": (
-            {"parent_surface_id": parent_surface} if parent_surface is not None else None
+            {"parent_surface_id": parent_surface}
+            if parent_surface is not None
+            else None
         ),
         "metadata": {
             "aether_asset_id": f"fixture:{role}",
@@ -103,9 +107,37 @@ def test_unstamped_scene_smith_names_remain_semantic_roles():
     bottle = _object("bottle_0", "manipuland", "bottle")
     bottle["metadata"].pop("aether_role_id")
     census = build_scene_census(
-        _stage_input(), {"objects": {"bottle_0": bottle}}, _evidence(("bottle-0",)), round_index=0
+        _stage_input(),
+        {"objects": {"bottle_0": bottle}},
+        _evidence(("bottle-0",)),
+        round_index=0,
     )
     assert census["objects"][0]["role_id"] == "bottle"
+
+
+def test_unstamped_native_object_infers_functional_zone_from_measured_transform():
+    bottle = _object("bottle_0", "manipuland", "bottle")
+    bottle["metadata"].pop("aether_functional_zone_ids")
+    bottle["transform"] = {"translation": [2.0, 2.0, 0.3]}
+    stage_input = {
+        **_stage_input(),
+        "request": {
+            "shell": {"dimensions_m": [10, 4, 10]},
+            "functional_zones": [
+                {
+                    "zone_id": "north-east-service",
+                    "polygon_xy_m": [[5, 5], [10, 5], [10, 10], [5, 10]],
+                }
+            ],
+        },
+    }
+    census = build_scene_census(
+        stage_input,
+        {"objects": {"bottle_0": bottle}},
+        _evidence(("bottle-0",)),
+        round_index=0,
+    )
+    assert census["objects"][0]["functional_zone_ids"] == ["north-east-service"]
 
 
 def test_census_preserves_approved_instance_id_across_internal_scene_key():
@@ -159,7 +191,9 @@ class _Runtime:
             )
 
     def validation_evidence(self):
-        return _evidence(("service-counter", *(value.replace("_", "-") for value in self.placed)))
+        return _evidence(
+            ("service-counter", *(value.replace("_", "-") for value in self.placed))
+        )
 
 
 def test_completion_bridge_places_and_stamps_semantic_patch_objects():
@@ -210,7 +244,9 @@ def test_completion_bridge_places_and_stamps_semantic_patch_objects():
     result = execute_completion_patch(_stage_input(), patch, initial, _Runtime(state))
     assert result["placed_count"] == 2
     assert result["rejected_count"] == 0
-    assert [item["role_id"] for item in result["next_census"]["objects"]].count("bottle") == 2
+    assert [item["role_id"] for item in result["next_census"]["objects"]].count(
+        "bottle"
+    ) == 2
 
 
 def test_completion_bridge_rejects_mutation_hidden_behind_equal_object_count():
@@ -248,8 +284,12 @@ def test_completion_bridge_rejects_mutation_hidden_behind_equal_object_count():
 
     class MutatingRuntime(_Runtime):
         def place_asset_brief(self, operation, asset_brief, *, round_index):
-            ids = super().place_asset_brief(operation, asset_brief, round_index=round_index)
-            self.state["objects"]["service-counter"]["metadata"]["aether_asset_id"] = "changed"
+            ids = super().place_asset_brief(
+                operation, asset_brief, round_index=round_index
+            )
+            self.state["objects"]["service-counter"]["metadata"]["aether_asset_id"] = (
+                "changed"
+            )
             return ids
 
     with pytest.raises(CensusError, match="mutated or removed"):

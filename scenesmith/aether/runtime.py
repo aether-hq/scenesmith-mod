@@ -42,12 +42,14 @@ class SceneSmithCompletionRuntime:
         placement_adapters: dict[str, DeterministicPlacementAdapter],
         evidence_provider: Callable[[], dict[str, Any]],
         style_context: str,
+        asset_acquirer: Callable[..., Any] = acquire_completion_assets,
     ) -> None:
         self.scene = scene
         self.asset_managers = asset_managers
         self.placement_adapters = placement_adapters
         self.evidence_provider = evidence_provider
         self.style_context = style_context
+        self.asset_acquirer = asset_acquirer
 
     def place_asset_brief(
         self,
@@ -60,8 +62,10 @@ class SceneSmithCompletionRuntime:
         asset_manager = self.asset_managers.get(kind)
         adapter = self.placement_adapters.get(kind)
         if asset_manager is None or adapter is None:
-            raise CensusError(f"SceneSmith completion operation {kind} is not configured")
-        result = acquire_completion_assets(
+            raise CensusError(
+                f"SceneSmith completion operation {kind} is not configured"
+            )
+        result = self.asset_acquirer(
             asset_manager,
             operation,
             asset_brief,

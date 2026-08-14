@@ -12,12 +12,19 @@ import argparse
 import hashlib
 import json
 import os
+import shutil
 import subprocess
 import sys
 import time
 from pathlib import Path
 
-CORE_STAGES = ("floor-plan", "furniture", "wall-mounted", "ceiling-mounted", "manipuland")
+CORE_STAGES = (
+    "floor-plan",
+    "furniture",
+    "wall-mounted",
+    "ceiling-mounted",
+    "manipuland",
+)
 _CHECKPOINTS = {
     "floor-plan": "scene_000/house_layout.json",
     "furniture": "scene_000/room_*/scene_states/scene_after_furniture/scene_state.json",
@@ -137,6 +144,17 @@ def main() -> None:
     }
     (arguments.output / "scenesmith-core-receipt.json").write_text(
         json.dumps(core_receipt, indent=2) + "\n"
+    )
+
+    completion_artifact = _find_one(
+        native_output,
+        "scene_000/room_*/contextual_completion/*-completion-receipt-*.json",
+    )
+    completion_receipt = json.loads(completion_artifact.read_text())
+    if completion_receipt.get("job_id") != stage_input["job_id"]:
+        raise RuntimeError("contextual-completion receipt identifies a different job")
+    shutil.copyfile(
+        completion_artifact, arguments.output / "contextual-completion-receipt.json"
     )
 
     # Post stages are intentionally a separate hard gate.  This file proves the

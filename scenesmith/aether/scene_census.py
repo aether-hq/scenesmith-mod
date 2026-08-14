@@ -17,7 +17,9 @@ class CensusError(RuntimeError):
 
 
 def canonical_digest(value: object) -> str:
-    encoded = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    encoded = json.dumps(
+        value, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+    )
     return hashlib.sha256(encoded.encode()).hexdigest()
 
 
@@ -102,7 +104,9 @@ def _semantic_role(item: dict[str, Any]) -> str:
     # role target even before an Aether repair operation has stamped explicit
     # provenance.  Prefixing every fallback as ``scene-detail-*`` made real
     # bottles invisible to a ``bottle`` target and manufactured deficits.
-    return _slug(str(item.get("name") or item.get("object_type")), prefix="scene-detail")
+    return _slug(
+        str(item.get("name") or item.get("object_type")), prefix="scene-detail"
+    )
 
 
 def _object_class(item: dict[str, Any]) -> str:
@@ -110,10 +114,51 @@ def _object_class(item: dict[str, Any]) -> str:
     explicit = metadata.get("aether_object_class")
     if explicit in {"scenic-object", "person"}:
         return explicit
-    return "person" if str(item.get("object_type")).lower() in {"person", "human"} else "scenic-object"
+    return (
+        "person"
+        if str(item.get("object_type")).lower() in {"person", "human"}
+        else "scenic-object"
+    )
 
 
-def _zone_ids(item: dict[str, Any]) -> tuple[str, ...]:
+def _point_in_polygon(
+    point: tuple[float, float], polygon: tuple[tuple[float, float], ...]
+) -> bool:
+    x, y = point
+    inside = False
+    previous = polygon[-1]
+    for current in polygon:
+        x1, y1 = previous
+        x2, y2 = current
+        if (y1 > y) != (y2 > y):
+            crossing = x1 + (y - y1) * (x2 - x1) / (y2 - y1)
+            if crossing > x:
+                inside = not inside
+        previous = current
+    return inside
+
+
+def _inferred_zone_ids(
+    item: dict[str, Any], stage_input: dict[str, Any]
+) -> tuple[str, ...]:
+    translation = (item.get("transform") or {}).get("translation")
+    if not isinstance(translation, (list, tuple)) or len(translation) < 2:
+        return ()
+    request = stage_input["request"]
+    width, _, depth = (float(value) for value in request["shell"]["dimensions_m"])
+    point = (float(translation[0]), float(translation[1]))
+    matched = []
+    for zone in request["functional_zones"]:
+        polygon = tuple(
+            (float(value[0]) - width / 2, float(value[1]) - depth / 2)
+            for value in zone["polygon_xy_m"]
+        )
+        if polygon and _point_in_polygon(point, polygon):
+            matched.append(_slug(str(zone["zone_id"]), prefix="zone"))
+    return tuple(matched)
+
+
+def _zone_ids(item: dict[str, Any], stage_input: dict[str, Any]) -> tuple[str, ...]:
     raw = (item.get("metadata") or {}).get("aether_functional_zone_ids", ())
     if isinstance(raw, str):
         raw = (raw,)
@@ -121,7 +166,8 @@ def _zone_ids(item: dict[str, Any]) -> tuple[str, ...]:
         raise CensusError(
             f"scene object {item.get('object_id')} has malformed functional-zone metadata"
         )
-    return tuple(dict.fromkeys(_slug(str(value), prefix="zone") for value in raw))
+    explicit = tuple(dict.fromkeys(_slug(str(value), prefix="zone") for value in raw))
+    return explicit or _inferred_zone_ids(item, stage_input)
 
 
 def _support_parent_by_surface(objects: dict[str, dict[str, Any]]) -> dict[str, str]:
@@ -139,7 +185,9 @@ def _require_validation_evidence(
 ) -> None:
     expected = stage_input.get("locked_architecture_sha256")
     if evidence.get("architecture_sha256") != expected:
-        raise CensusError("physical validation did not preserve the locked architecture digest")
+        raise CensusError(
+            "physical validation did not preserve the locked architecture digest"
+        )
     baseline_geometry = evidence.get("baseline_room_geometry_sha256")
     current_geometry = evidence.get("current_room_geometry_sha256")
     if not baseline_geometry or not current_geometry:
@@ -191,12 +239,16 @@ def build_scene_census(
             continue
         instance_id = _scene_instance_id(item, str(raw_id))
         if instance_id in seen_ids:
-            raise CensusError(f"normalizing SceneSmith ids produced duplicate {instance_id}")
+            raise CensusError(
+                f"normalizing SceneSmith ids produced duplicate {instance_id}"
+            )
         seen_ids.add(instance_id)
         placement = item.get("placement_info") or {}
         surface_id = placement.get("parent_surface_id")
         parent_id = support_parents.get(str(surface_id)) if surface_id else None
-        view_ids = visible.get(raw_id, visible.get(str(raw_id), visible.get(instance_id, ())))
+        view_ids = visible.get(
+            raw_id, visible.get(str(raw_id), visible.get(instance_id, ()))
+        )
         if not isinstance(view_ids, (list, tuple)):
             raise CensusError(f"visibility evidence for {raw_id} must be a list")
         objects.append(
@@ -205,14 +257,18 @@ def build_scene_census(
                 "role_id": _semantic_role(item),
                 "object_class": _object_class(item),
                 "asset_id": _asset_id(item, scene_root),
-                "functional_zone_ids": list(_zone_ids(item)),
+                "functional_zone_ids": list(_zone_ids(item, stage_input)),
                 "supported_by_instance_id": parent_id,
                 "supported": instance_id in supported,
                 "pbr_complete": instance_id in pbr_complete,
                 "visible_view_ids": [
-                    _slug(str(view_id), prefix="inspection-view") for view_id in view_ids
+                    _slug(str(view_id), prefix="inspection-view")
+                    for view_id in view_ids
                 ],
-                "locked": bool(item.get("immutable") or (item.get("metadata") or {}).get("aether_locked")),
+                "locked": bool(
+                    item.get("immutable")
+                    or (item.get("metadata") or {}).get("aether_locked")
+                ),
             }
         )
     return {
@@ -221,7 +277,9 @@ def build_scene_census(
         "round_index": round_index,
         "architecture_sha256": validation_evidence["architecture_sha256"],
         "objects": objects,
-        "clear_circulation_route_ids": validation_evidence["clear_circulation_route_ids"],
+        "clear_circulation_route_ids": validation_evidence[
+            "clear_circulation_route_ids"
+        ],
         "clear_story_position_ids": validation_evidence["clear_story_position_ids"],
         "collision_instance_ids": [
             _evidence_instance_id(value, raw_objects)
