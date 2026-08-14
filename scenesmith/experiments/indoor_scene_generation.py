@@ -952,6 +952,18 @@ def _generate_room(
             "Contextual completion reached %s measured scenic objects",
             completion_receipt["final_object_count"],
         )
+        from scenesmith.aether.worker.pbr_inspector import (
+            inspect_scene_assets,
+            write_pbr_qualification,
+        )
+
+        qualification = inspect_scene_assets(scene.to_state_dict(), room_dir)
+        write_pbr_qualification(qualification, room_dir / "pbr")
+        console_logger.info(
+            "PBR qualification found %s/%s complete scenic assets",
+            len(qualification["pbr_complete_instance_ids"]),
+            qualification["scene_object_count"],
+        )
 
     # Log and export final scene.
     logger.log_scene(scene=scene, name="final_scene")

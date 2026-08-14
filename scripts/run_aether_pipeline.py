@@ -157,14 +157,35 @@ def main() -> None:
         completion_artifact, arguments.output / "contextual-completion-receipt.json"
     )
 
+    pbr_artifact = _find_one(
+        native_output,
+        "scene_000/room_*/pbr/pbr-qualification-*.json",
+    )
+    pbr_qualification = json.loads(pbr_artifact.read_text())
+    shutil.copyfile(pbr_artifact, arguments.output / "pbr-qualification.json")
+    incomplete = pbr_qualification.get("incomplete_instance_ids")
+    if not isinstance(incomplete, list):
+        raise RuntimeError("PBR qualification omitted incomplete instance evidence")
+    if incomplete:
+        _write_failure(
+            arguments.output,
+            code="pbr-repair-required",
+            message=(
+                f"{len(incomplete)} scenic assets lack required PBR evidence; "
+                "the material-repair stage has not yet qualified replacements"
+            ),
+        )
+        raise SystemExit(79)
+
     # Post stages are intentionally a separate hard gate.  This file proves the
     # native core completed, but cannot satisfy Genesis's finished receipt contract.
     _write_failure(
         arguments.output,
         code="finished-postprocessor-unavailable",
         message=(
-            "all five native SceneSmith stages completed, but contextual completion, "
-            "PBR/lighting, inspection/repair, and browser export have no qualified worker"
+            "native SceneSmith and contextual completion passed, and all assets passed PBR "
+            "qualification, but Blender lighting, inspection/repair, and browser export have "
+            "no qualified worker"
         ),
     )
     raise SystemExit(78)

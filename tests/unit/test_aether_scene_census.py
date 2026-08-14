@@ -153,6 +153,25 @@ def test_census_preserves_approved_instance_id_across_internal_scene_key():
     assert census["collision_instance_ids"] == ["approved-service-counter"]
 
 
+def test_census_content_addresses_composite_member_geometry(tmp_path):
+    (tmp_path / "tray.glb").write_bytes(b"tray")
+    (tmp_path / "glass.glb").write_bytes(b"glass")
+    item = _object("filled_tray", "manipuland", "filled-tray")
+    item["geometry_path"] = None
+    item["metadata"].pop("aether_asset_id")
+    item["metadata"]["composite_type"] = "filled_container"
+    item["metadata"]["container_asset"] = {"geometry_path": "tray.glb"}
+    item["metadata"]["fill_assets"] = [{"geometry_path": "glass.glb"}]
+    census = build_scene_census(
+        _stage_input(),
+        {"objects": {"filled_tray": item}},
+        _evidence(("filled-tray",)),
+        round_index=0,
+        scene_root=tmp_path,
+    )
+    assert census["objects"][0]["asset_id"].startswith("composite-sha256:")
+
+
 class _Runtime:
     def __init__(self, state):
         self.state = copy.deepcopy(state)

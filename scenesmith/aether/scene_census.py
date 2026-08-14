@@ -8,6 +8,8 @@ import re
 from pathlib import Path
 from typing import Any
 
+from .artifact_paths import composite_geometry_paths, resolve_scene_path
+
 _ARCHITECTURE_TYPES = {"wall", "floor"}
 _SLUG_PATTERN = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 
@@ -84,11 +86,20 @@ def _asset_id(item: dict[str, Any], scene_root: Path | None) -> str:
             return f"{source}:{identifier}"
     geometry = item.get("geometry_path")
     if geometry:
-        path = Path(geometry)
-        if scene_root is not None and not path.is_absolute():
-            path = scene_root / path
+        path = (
+            Path(geometry)
+            if scene_root is None
+            else resolve_scene_path(geometry, scene_root)
+        )
         if path.is_file():
             return f"geometry-sha256:{hashlib.sha256(path.read_bytes()).hexdigest()}"
+    if scene_root is not None:
+        members = composite_geometry_paths(item, scene_root)
+        if members and all(path.is_file() for path in members):
+            member_hashes = [
+                hashlib.sha256(path.read_bytes()).hexdigest() for path in members
+            ]
+            return f"composite-sha256:{canonical_digest(member_hashes)}"
     raise CensusError(
         f"scene object {item.get('object_id')} has no content-addressed asset identity"
     )
