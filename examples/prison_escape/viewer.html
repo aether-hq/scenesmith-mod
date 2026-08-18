@@ -213,13 +213,13 @@
     const assets = [
       {
         name: 'prison architecture',
-        url: 'generated/structures/rooms/prison_block/room_geometry_prison_block.obj',
+        url: null,
         material: material({ color: 0x555b5d, roughness: 0.97 }),
         collide: true
       },
       {
         name: 'escape tunnel',
-        url: 'generated/structures/meshes/escape_tunnel_shell/escape_tunnel_shell.obj',
+        url: null,
         material: material({ color: 0x5a3927, roughness: 1.0 }),
         collide: true
       },
@@ -258,12 +258,15 @@
       progress.style.width = `${16 + ((index + 1) / assets.length) * 56}%`;
     }
 
-    async function addLighting() {
-      loadingStatus.textContent = 'Mounting authored lights…';
-      const manifest = await fetch('generated/manifest.json').then(response => {
+    async function loadManifest() {
+      return fetch('generated/manifest.json').then(response => {
         if (!response.ok) throw new Error(`manifest request failed: ${response.status}`);
         return response.json();
       });
+    }
+
+    async function addLighting(manifest) {
+      loadingStatus.textContent = 'Mounting authored lights…';
       scene.add(new THREE.HemisphereLight(0x526477, 0x191008, 0.52));
       pointLights = manifest.lighting.mounts.map((mount, index) => {
         const light = new THREE.PointLight(index < 3 ? 0xffca79 : 0xffa84d, index < 3 ? 26 : 34, index < 3 ? 11 : 13, 1.8);
@@ -314,8 +317,11 @@
     async function loadScene() {
       if (!renderer.capabilities.isWebGL2) throw new Error('This demo requires WebGL 2.');
       progress.style.width = '12%';
+      const manifest = await loadManifest();
+      assets.find(asset => asset.name === 'prison architecture').url = `generated/${manifest.architecture.mesh_path}`;
+      assets.find(asset => asset.name === 'escape tunnel').url = `generated/${manifest.tunnel.mesh_path}`;
       for (let index = 0; index < assets.length; index++) await loadAsset(assets[index], index);
-      await addLighting();
+      await addLighting(manifest);
       addDust();
       progress.style.width = '100%';
       loadingStatus.textContent = 'Route clear. Scene ready.';

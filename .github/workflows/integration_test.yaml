@@ -34,6 +34,11 @@ jobs:
         with:
           python-version-file: ".python-version"
 
+      - name: Set up Node for gallery browser gate
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
       - name: Install system dependencies for rendering
         run: |
           sudo apt-get update
@@ -57,6 +62,26 @@ jobs:
       - name: Run integration tests
         timeout-minutes: 30
         run: uv run pytest tests/integration/ --testmon -x
+
+      - name: Gate generated semantic scenes in Drake
+        run: uv run python -m unittest tests.integration.test_semantic_scene_drake
+
+      - name: Gate generated semantic architecture rendering
+        env:
+          SCENESMITH_RUN_SEMANTIC_RENDER_TESTS: "1"
+        run: xvfb-run -a uv run python -m unittest tests.integration.test_semantic_scene_render
+
+      - name: Install gallery browser
+        run: |
+          npm install --no-save playwright@1.55.0
+          npx playwright install --with-deps chromium
+
+      - name: Gate generated gallery in Chromium
+        run: |
+          uv run python examples/semantic_gallery/serve_gallery.py --no-open &
+          gallery_server_pid=$!
+          trap 'kill "$gallery_server_pid"' EXIT
+          node tests/integration/test_semantic_gallery_browser.mjs
 
       - name: Save testmon cache
         uses: actions/cache/save@v4

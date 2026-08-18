@@ -36,6 +36,8 @@ from scenesmith.agent_utils.structural_geometry import (
     SurfaceRole,
     Transform3D,
     default_ground_level,
+    require_safe_identifier,
+    validate_global_identifiers,
     validate_structural_references,
 )
 from scenesmith.utils.material import Material
@@ -558,6 +560,7 @@ class PlacedRoom:
     """Optional arbitrary local footprint; None retains the legacy rectangle."""
 
     def __post_init__(self) -> None:
+        self.room_id = require_safe_identifier(self.room_id, "room_id")
         self.position = _finite_xy_position(self.position, entity_id=self.room_id)
         self.level_id = self.level_id.strip()
         if not self.level_id:
@@ -680,6 +683,7 @@ class RoomSpec:
     """Optional ceiling profile; None uses the layout/level nominal height."""
 
     def __post_init__(self) -> None:
+        self.room_id = require_safe_identifier(self.room_id, "room_id")
         self.position = _finite_xy_position(self.position, entity_id=self.room_id)
         self.level_id = self.level_id.strip()
         if not self.level_id:
@@ -1194,8 +1198,14 @@ class HouseLayout:
     semantic_environment_geometry_path: Path | None = None
     """Compiled SDF path for the semantic environment shell."""
 
+    semantic_environment_source_hash: str | None = None
+    """Semantic content hash used to compile the current environment shell."""
+
     semantic_detail_geometry_paths: dict[str, Path] = field(default_factory=dict)
     """Compiled SDF paths for semantic detail fields and hero features."""
+
+    semantic_detail_source_hash: str | None = None
+    """Semantic content hash used to compile the current detail products."""
 
     platforms: list[PlatformSpec] = field(default_factory=list)
     """Raised/sunken platforms, mezzanines, balconies, bridges, and catwalks."""
@@ -1310,6 +1320,83 @@ class HouseLayout:
                 space_level_ids=space_level_ids,
                 level_ids=[level.level_id for level in self.levels],
             )
+        # Wall openings are a compatibility projection of canonical Door and
+        # Window records and may appear on both sides of a shared wall.  Count
+        # each logical legacy opening once so aliases do not look like separate
+        # scene entities, while still checking them against every other kind.
+        canonical_opening_ids = {door.id for door in self.doors} | {
+            window.id for window in self.windows
+        }
+        legacy_opening_ids = sorted(
+            {
+                opening.opening_id
+                for room in self.placed_rooms
+                for wall in room.walls
+                for opening in wall.openings
+                if opening.opening_id not in canonical_opening_ids
+            }
+        )
+        primary_identifiers: list[tuple[str, str]] = [
+            *((spec.room_id, "room") for spec in self.room_specs),
+            *((level.level_id, "level") for level in self.levels),
+            *((connector.connector_id, "connector") for connector in self.connectors),
+            *((portal.portal_id, "portal") for portal in self.portals),
+            *((mesh.mesh_id, "structural_mesh") for mesh in self.structural_meshes),
+            *((platform.platform_id, "platform") for platform in self.platforms),
+            *(
+                (heightfield.heightfield_id, "heightfield")
+                for heightfield in self.heightfields
+            ),
+            *((door.id, "door") for door in self.doors),
+            *((window.id, "window") for window in self.windows),
+            *((opening_id, "legacy_opening") for opening_id in legacy_opening_ids),
+        ]
+        if self.semantic_environment is not None:
+            semantic = self.semantic_environment
+            primary_identifiers.extend(
+                [
+                    *(
+                        (item.region_id, "environment_region")
+                        for item in semantic.regions
+                    ),
+                    *(
+                        (item.chamber_id, "cavern_chamber")
+                        for item in semantic.chambers
+                    ),
+                    *(
+                        (item.network_id, "passage_network")
+                        for item in semantic.passage_networks
+                    ),
+                    *(
+                        (item.opening_id, "environment_opening")
+                        for item in semantic.openings
+                    ),
+                    *(
+                        (item.field_id, "detail_field")
+                        for item in semantic.detail_fields
+                    ),
+                    *(
+                        (item.feature_id, "hero_feature")
+                        for item in semantic.hero_features
+                    ),
+                    *(
+                        (item.junction_id, "passage_junction")
+                        for network in semantic.passage_networks
+                        for item in network.junctions
+                    ),
+                    *(
+                        (item.segment_id, "passage_segment")
+                        for network in semantic.passage_networks
+                        for item in network.segments
+                    ),
+                    *(
+                        (f"{item.field_id}_{index:04d}", "detail_instance")
+                        for item in semantic.detail_fields
+                        for index in range(item.count)
+                    ),
+                ]
+            )
+        validate_global_identifiers(primary_identifiers)
         replacement_spaces = [
             mesh.space_id for mesh in self.structural_meshes if mesh.replaces_room_shell
         ]
@@ -1369,9 +1456,47 @@ class HouseLayout:
                 structure_id=structure_id,
             ),
         )
-        paths = write_compiled_structure(compiled, output_dir)
+        source_hash = self.semantic_environment.content_hash()
+        paths = write_compiled_structure(
+            compiled,
+            output_dir,
+            source_content_hash=source_hash,
+            compiler_version="semantic-environment-v2",
+            compile_options={
+                "max_cells": max_cells,
+                "max_triangles": max_triangles,
+                "structure_id": structure_id,
+                "voxel_size": voxel_size,
+            },
+        )
         self.semantic_environment_geometry_path = paths.sdf_path
+        self.semantic_environment_source_hash = source_hash
         return paths
+
+    def derive_scene_contract(
+        self,
+        output_dir: Path,
+        *,
+        voxel_size: float = 0.5,
+        max_cells: int = 2_000_000,
+        max_triangles: int = 500_000,
+    ):
+        """Derive semantic geometry, collision, topology, and artifacts together.
+
+        New callers should use this method instead of invoking the shell and
+        detail compilers independently.  The older compile methods remain as
+        compatibility shims for existing scene exporters.
+        """
+
+        from scenesmith.agent_utils.scene_contract import derive_scene_contract
+
+        return derive_scene_contract(
+            self,
+            output_dir,
+            voxel_size=voxel_size,
+            max_cells=max_cells,
+            max_triangles=max_triangles,
+        )
 
     def compile_semantic_environment_details(self, output_dir: Path) -> dict[str, Path]:
         """Compile seeded geological details and hero features to SDF assets."""
@@ -1383,14 +1508,20 @@ class HouseLayout:
         )
         from scenesmith.agent_utils.structural_compiler import write_compiled_structure
 
+        source_hash = self.semantic_environment.content_hash()
         compiled = compile_environment_details(self.semantic_environment)
         paths: dict[str, Path] = {}
         for structure in compiled.structures:
             written = write_compiled_structure(
-                structure, output_dir / structure.structure_id
+                structure,
+                output_dir / structure.structure_id,
+                source_content_hash=source_hash,
+                compiler_version="semantic-environment-details-v1",
+                compile_options={"sampler_version": 1},
             )
             paths[structure.structure_id] = written.sdf_path
         self.semantic_detail_geometry_paths = paths
+        self.semantic_detail_source_hash = source_hash
         return dict(paths)
 
     def build_topology(self):
@@ -1970,10 +2101,12 @@ class HouseLayout:
                 if self.semantic_environment_geometry_path is not None
                 else None
             ),
+            "semantic_environment_source_hash": self.semantic_environment_source_hash,
             "semantic_detail_geometry_paths": {
                 detail_id: safe_relative_path(path, scene_dir)
                 for detail_id, path in self.semantic_detail_geometry_paths.items()
             },
+            "semantic_detail_source_hash": self.semantic_detail_source_hash,
             "platforms": [platform.to_dict() for platform in self.platforms],
             "platform_geometry_paths": {
                 platform_id: safe_relative_path(path, scene_dir)
@@ -2238,6 +2371,19 @@ class HouseLayout:
                 "Semantic environment geometry has not been compiled. "
                 "Call compile_semantic_environment() before exporting the house."
             )
+        if (
+            self.semantic_environment_source_hash
+            != self.semantic_environment.content_hash()
+        ):
+            raise ValueError(
+                "Semantic environment geometry is stale. "
+                "Call compile_semantic_environment() before exporting the house."
+            )
+        self._validate_semantic_artifact(
+            self.semantic_environment_geometry_path,
+            self.semantic_environment_source_hash,
+            expected_compiler_version="semantic-environment-v2",
+        )
         sdf_path = self.semantic_environment_geometry_path
         formatted_path = (
             f"file://{sdf_path.absolute()}"
@@ -2270,9 +2416,19 @@ class HouseLayout:
                 + ", ".join(sorted(missing))
                 + ". Call compile_semantic_environment_details() before exporting."
             )
+        if self.semantic_detail_source_hash != self.semantic_environment.content_hash():
+            raise ValueError(
+                "Semantic detail geometry is stale. Call "
+                "compile_semantic_environment_details() before exporting."
+            )
         directives = ""
         for detail_id in sorted(expected):
             sdf_path = self.semantic_detail_geometry_paths[detail_id]
+            self._validate_semantic_artifact(
+                sdf_path,
+                self.semantic_detail_source_hash,
+                expected_compiler_version="semantic-environment-details-v1",
+            )
             formatted_path = (
                 f"file://{sdf_path.absolute()}"
                 if base_dir is None
@@ -2286,6 +2442,52 @@ class HouseLayout:
     parent: house_frame
     child: environment_detail_{detail_id}::structure_link"""
         return directives
+
+    @staticmethod
+    def _validate_semantic_artifact(
+        sdf_path: Path,
+        expected_source_hash: str,
+        *,
+        expected_compiler_version: str,
+    ) -> None:
+        """Reject missing, stale, or corrupted content-addressed products."""
+        try:
+            from scenesmith.agent_utils.structural_compiler import ArtifactRef
+
+            sidecar_path = sdf_path.with_suffix(".surfaces.json")
+            manifest = json.loads(sidecar_path.read_text(encoding="utf-8"))
+            ArtifactRef(
+                mesh_path=sidecar_path.parent / manifest["mesh"],
+                sdf_path=sdf_path,
+                surfaces_path=sidecar_path,
+                collision_mesh_path=(
+                    sidecar_path.parent / manifest["collision_mesh"]
+                    if manifest.get("collision_mesh")
+                    else None
+                ),
+            ).verify(
+                expected_source_hash=expected_source_hash,
+                expected_compiler_version=expected_compiler_version,
+            )
+        except (
+            OSError,
+            KeyError,
+            TypeError,
+            json.JSONDecodeError,
+            GeometryValidationError,
+        ) as exc:
+            message = str(exc)
+            if "source" in message:
+                label = "source hash mismatch"
+            elif "identity" in message or "compiler" in message:
+                label = "artifact identity mismatch"
+            elif "surface semantics" in message:
+                label = "surface hash mismatch"
+            elif "product hash" in message:
+                label = "product hash mismatch"
+            else:
+                label = "artifact manifest is invalid"
+            raise ValueError(f"Semantic {label}: {sdf_path}") from exc
 
     def _heightfield_drake_directives(self, base_dir: Path | None = None) -> str:
         """Generate model/weld directives for room-local heightfields."""
@@ -2396,6 +2598,8 @@ class HouseLayout:
                 "semantic_detail_geometry_paths", {}
             ).items()
         }
+        semantic_environment_source_hash = data.get("semantic_environment_source_hash")
+        semantic_detail_source_hash = data.get("semantic_detail_source_hash")
         platform_geometry_paths = {
             platform_id: (house_dir / path if house_dir is not None else Path(path))
             for platform_id, path in data.get("platform_geometry_paths", {}).items()
@@ -2453,7 +2657,9 @@ class HouseLayout:
             structural_mesh_geometry_paths=structural_mesh_geometry_paths,
             semantic_environment=semantic_environment,
             semantic_environment_geometry_path=semantic_environment_geometry_path,
+            semantic_environment_source_hash=semantic_environment_source_hash,
             semantic_detail_geometry_paths=semantic_detail_geometry_paths,
+            semantic_detail_source_hash=semantic_detail_source_hash,
             platforms=platforms,
             platform_geometry_paths=platform_geometry_paths,
             heightfields=heightfields,
@@ -2507,10 +2713,12 @@ class HouseLayout:
                 if self.semantic_environment_geometry_path is not None
                 else None
             ),
+            "semantic_environment_source_hash": self.semantic_environment_source_hash,
             "semantic_detail_geometry_paths": {
                 detail_id: str(path)
                 for detail_id, path in self.semantic_detail_geometry_paths.items()
             },
+            "semantic_detail_source_hash": self.semantic_detail_source_hash,
             "platforms": [platform.to_dict() for platform in self.platforms],
             "platform_geometry_paths": {
                 platform_id: str(path)

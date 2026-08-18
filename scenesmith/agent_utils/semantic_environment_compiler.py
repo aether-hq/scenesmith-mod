@@ -19,6 +19,7 @@ from scenesmith.agent_utils.semantic_environments import (
     EnvironmentOpeningSpec,
     EnvironmentRegionSpec,
     OpeningShape,
+    OpeningTarget,
     PassageFloorMode,
     PassageNetworkSpec,
     PassageProfile,
@@ -30,6 +31,7 @@ from scenesmith.agent_utils.structural_compiler import (
     CompiledSurfacePatch,
     Triangle,
     TriangleMesh,
+    audit_triangle_mesh,
 )
 from scenesmith.agent_utils.structural_geometry import (
     GEOMETRY_TOLERANCE,
@@ -40,6 +42,38 @@ from scenesmith.agent_utils.structural_geometry import (
     SurfaceRole,
     UnsupportedGeometryError,
 )
+
+SEMANTIC_ENVIRONMENT_COMPILER_VERSION = "semantic-environment-v3"
+
+SEMANTIC_COMPILER_CAPABILITIES = {
+    "chamber_shapes": {
+        CavernShape.ELLIPSOID: True,
+        CavernShape.SUPERELLIPSOID: True,
+        CavernShape.LOFT: False,
+        CavernShape.VAULTED: False,
+        CavernShape.MESH: False,
+    },
+    "passage_profiles": {
+        PassageProfile.ELLIPSE: True,
+        PassageProfile.KEYHOLE: True,
+        PassageProfile.SLOT: True,
+        PassageProfile.ARCHED: True,
+    },
+    "passage_floor_modes": {
+        PassageFloorMode.NATURAL: True,
+        PassageFloorMode.GRADED: True,
+        PassageFloorMode.STEPS: False,
+        PassageFloorMode.NON_TRAVERSABLE: True,
+    },
+    "opening_shapes": {
+        OpeningShape.ELLIPSE: True,
+        OpeningShape.RECTANGLE: True,
+    },
+    "opening_targets": {
+        OpeningTarget.SKY: True,
+        OpeningTarget.EXTERIOR: True,
+    },
+}
 
 
 def _add(first: Point3, second: Point3) -> Point3:
@@ -535,11 +569,31 @@ def _extract_mesh(
         if key in edge_vertices:
             return edge_vertices[key]
         first_value, second_value = values[first], values[second]
-        denominator = first_value - second_value
-        amount = (
-            0.5 if abs(denominator) <= GEOMETRY_TOLERANCE else first_value / denominator
-        )
-        amount = min(1.0, max(0.0, amount))
+        if abs(first_value) <= GEOMETRY_TOLERANCE:
+            amount = 0.0
+        elif abs(second_value) <= GEOMETRY_TOLERANCE:
+            amount = 1.0
+        else:
+            # The passage/chamber union is nonlinear along a grid edge.  A
+            # single linear interpolation can place the extracted "surface"
+            # deep inside navigable free space on coarse grids.  Preserve the
+            # marching topology, then refine this known sign-changing edge
+            # against the authoritative implicit field.
+            lower, upper = 0.0, 1.0
+            lower_value = first_value
+            edge = _subtract(points[second], points[first])
+            for _iteration in range(24):
+                amount = (lower + upper) / 2.0
+                candidate = _add(points[first], _scale(edge, amount))
+                candidate_value = _union_value(primitives, candidate)
+                if abs(candidate_value) <= 1e-10:
+                    break
+                if (candidate_value <= 0.0) == (lower_value <= 0.0):
+                    lower, lower_value = amount, candidate_value
+                else:
+                    upper = amount
+            else:
+                amount = (lower + upper) / 2.0
         point = _add(
             points[first], _scale(_subtract(points[second], points[first]), amount)
         )
@@ -641,7 +695,37 @@ def _extract_mesh(
             "open-boundary clipping removed every triangle",
             entity_id=options.structure_id,
         )
-    return TriangleMesh(tuple(vertices), tuple(filtered_triangles))
+    # Intersections that land exactly on a grid vertex can be discovered from
+    # several tetrahedron edges.  Welding those equal coordinates is required
+    # for an indexed manifold rather than merely a visually closed surface.
+    welded_vertices: list[Point3] = []
+    welded_index: dict[Point3, int] = {}
+    remap: list[int] = []
+    for vertex in vertices:
+        weld_key = tuple(round(component, 12) for component in vertex)
+        if weld_key not in welded_index:
+            welded_index[weld_key] = len(welded_vertices)
+            welded_vertices.append(vertex)
+        remap.append(welded_index[weld_key])
+    welded_triangles: list[Triangle] = []
+    seen_faces: set[tuple[int, int, int]] = set()
+    for triangle in filtered_triangles:
+        welded = tuple(remap[index] for index in triangle)
+        if len(set(welded)) != 3:
+            continue
+        canonical = tuple(sorted(welded))
+        if canonical in seen_faces:
+            continue
+        seen_faces.add(canonical)
+        welded_triangles.append(welded)  # type: ignore[arg-type]
+    used = sorted({index for triangle in welded_triangles for index in triangle})
+    compact_index = {old: new for new, old in enumerate(used)}
+    compact_vertices = tuple(welded_vertices[index] for index in used)
+    compact_triangles = tuple(
+        tuple(compact_index[index] for index in triangle)
+        for triangle in welded_triangles
+    )
+    return TriangleMesh(compact_vertices, compact_triangles)  # type: ignore[arg-type]
 
 
 def _surface_roles(
@@ -661,6 +745,55 @@ def _surface_roles(
     return frozenset({SurfaceRole.BOUNDARY, SurfaceRole.ATTACHMENT})
 
 
+def _require_declared_manifold(
+    mesh: TriangleMesh,
+    primitives: tuple[_ImplicitPrimitive, ...],
+    options: SemanticCompileOptions,
+) -> None:
+    """Allow only boundary loops attributable to authored open planes."""
+
+    audit = audit_triangle_mesh(mesh)
+    if audit.nonmanifold_edges or audit.inconsistent_edges:
+        raise GeometryValidationError(
+            "nonmanifold_compiled_environment",
+            f"collision shell has {len(audit.nonmanifold_edges)} nonmanifold edges "
+            f"and {len(audit.inconsistent_edges)} inconsistent oriented edges",
+            entity_id=options.structure_id,
+        )
+    declared_planes = tuple(
+        (primitive, origin, inward)
+        for primitive in primitives
+        for origin, inward in primitive.open_planes
+    )
+    undeclared: list[tuple[int, int]] = []
+    # Marching tetrahedra removes triangles by centroid, so the surviving loop
+    # may sit up to roughly three voxels from the analytic cap plane.
+    tolerance = options.voxel_size * 3.0
+    for edge in audit.boundary_edges:
+        midpoint = tuple(
+            (mesh.vertices[edge[0]][axis] + mesh.vertices[edge[1]][axis]) / 2.0
+            for axis in range(3)
+        )
+        if not any(
+            abs(_dot(_subtract(midpoint, origin), inward)) <= tolerance
+            for _primitive, origin, inward in declared_planes
+        ):
+            undeclared.append(edge)
+    if undeclared:
+        raise GeometryValidationError(
+            "undeclared_boundary_edge",
+            f"collision shell has {len(undeclared)} boundary edges outside all "
+            "declared apertures",
+            entity_id=options.structure_id,
+        )
+    if audit.boundary_edges and not declared_planes:
+        raise GeometryValidationError(
+            "nonmanifold_compiled_environment",
+            f"closed collision shell has {len(audit.boundary_edges)} boundary edges",
+            entity_id=options.structure_id,
+        )
+
+
 def compile_semantic_environment(
     environment: SemanticEnvironmentSpec,
     *,
@@ -671,6 +804,7 @@ def compile_semantic_environment(
     options = options or SemanticCompileOptions()
     primitives = _build_primitives(environment)
     mesh = _extract_mesh(primitives, options)
+    _require_declared_manifold(mesh, primitives, options)
     groups: dict[str, list[int]] = {}
     surfaces: list[CompiledSurfacePatch] = []
     for triangle_index, triangle in enumerate(mesh.triangles):
@@ -726,6 +860,23 @@ def compile_semantic_environment(
                 boundary=tuple(mesh.vertices[index] for index in triangle),
                 normal=normal,
             )
+        )
+    opening_source_ids = {
+        patch.surface.metadata["semantic_source_id"]
+        for patch in surfaces
+        if patch.surface.metadata["semantic_source_kind"] == "environment_opening"
+    }
+    missing_openings = sorted(
+        opening.opening_id
+        for opening in environment.openings
+        if opening.opening_id not in opening_source_ids
+    )
+    if missing_openings:
+        raise GeometryValidationError(
+            "declared_opening_missing",
+            "declared openings did not create physical apertures: "
+            + ", ".join(missing_openings),
+            entity_id=options.structure_id,
         )
     return CompiledStructure(
         structure_id=options.structure_id,

@@ -8,6 +8,7 @@ any generative model service.  Mesh compilation lives in separate modules.
 from __future__ import annotations
 
 import math
+import re
 
 from dataclasses import dataclass, field
 from enum import Enum
@@ -85,11 +86,50 @@ class UnsupportedGeometryError(GeometryValidationError):
         super().__init__("unsupported_geometry", message, entity_id=entity_id)
 
 
-def _require_id(value: str, label: str) -> str:
-    normalized = str(value).strip()
+def require_safe_identifier(value: str, label: str) -> str:
+    """Normalize one globally usable file/model/semantic identifier."""
+
+    if type(value) is not str:
+        raise GeometryValidationError(
+            "invalid_identifier", f"{label} must be a JSON string"
+        )
+    normalized = value.strip()
     if not normalized:
         raise GeometryValidationError("missing_id", f"{label} must not be empty")
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", normalized):
+        raise GeometryValidationError(
+            "invalid_identifier",
+            f"{label} must use only letters, numbers, '.', '_', or '-' and must "
+            "start with a letter or number",
+            entity_id=normalized,
+        )
     return normalized
+
+
+_require_id = require_safe_identifier
+
+
+def validate_global_identifiers(identifiers: Iterable[tuple[str, str]]) -> None:
+    """Reject cross-category collisions in one authoritative scene namespace."""
+
+    uses: dict[str, list[str]] = {}
+    for identifier, category in identifiers:
+        normalized = require_safe_identifier(identifier, f"{category}_id")
+        uses.setdefault(normalized, []).append(category)
+    collisions = {
+        identifier: categories
+        for identifier, categories in uses.items()
+        if len(categories) > 1
+    }
+    if collisions:
+        details = ", ".join(
+            f"{identifier} ({'/'.join(categories)})"
+            for identifier, categories in sorted(collisions.items())
+        )
+        raise GeometryValidationError(
+            "duplicate_scene_id",
+            "scene IDs must be globally unique; duplicates: " + details,
+        )
 
 
 def _finite(value: Any, label: str, *, entity_id: str | None = None) -> float:

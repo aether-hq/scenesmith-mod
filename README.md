@@ -46,6 +46,12 @@ ceiling fixtures mounted from compiled overhead-surface queries:
   <img src="examples/prison_escape/generated/preview.svg" alt="Underground prison escape tunnel plan and section" width="100%">
 </p>
 
+To inspect the generalized results interactively, launch the
+[semantic scene gallery](examples/semantic_gallery/README.md). It automatically
+compiles every retained held-out scene and provides mouse-look fly controls for
+the branching passage network and dragon-scale cavern, including formations and
+hero geometry.
+
 See the [general-geometry overview](docs/geometry-extension/README.md),
 [ranked capability/test matrix](docs/geometry-extension/GEOMETRY-CAPABILITY-MATRIX.md),
 and [authoring guide](docs/geometry-extension/AUTHORING-GUIDE.md) for the full
@@ -108,6 +114,11 @@ Install the dependencies (including dev tools like pytest) into `.venv`:
 ```sh
 uv sync
 ```
+
+`requirements.txt` is also provided for pip-oriented tooling and delegates to
+the same project metadata. Structural polygon compilation requires
+`shapely>=2.1.2`; run project commands with `uv run ...` or activate `.venv` so
+they do not accidentally use a bare system Python.
 
 To install without dev dependencies:
 ```sh

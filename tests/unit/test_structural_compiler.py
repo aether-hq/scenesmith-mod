@@ -6,10 +6,14 @@ import tempfile
 import unittest
 import xml.etree.ElementTree as ET
 
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
 from pathlib import Path
+from unittest.mock import patch
 
 from scenesmith.agent_utils.structural_compiler import (
     TriangleMesh,
+    audit_triangle_mesh,
     compile_connector,
     compile_heightfield,
     compile_ladder,
@@ -584,6 +588,160 @@ class TestHeightfields(unittest.TestCase):
 
 
 class TestCompiledStructureExport(unittest.TestCase):
+    def test_mesh_audit_reports_closed_oriented_positive_volume(self) -> None:
+        mesh = TriangleMesh(
+            vertices=((0, 0, 0), (1, 0, 0), (0, 1, 0), (0, 0, 1)),
+            triangles=((0, 2, 1), (0, 1, 3), (1, 2, 3), (2, 0, 3)),
+        )
+
+        audit = audit_triangle_mesh(mesh)
+
+        self.assertTrue(audit.is_closed)
+        self.assertTrue(audit.is_winding_consistent)
+        self.assertGreater(audit.signed_volume, 0.0)
+
+    def test_default_export_is_an_atomic_content_addressed_bundle(self) -> None:
+        compiled = compile_polygon_space(
+            structure_id="default_bundle",
+            footprint=Footprint2D.rectangle(4, 3),
+        )
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            paths = write_compiled_structure(compiled, temporary_directory)
+
+            self.assertEqual(paths.sdf_path.parent.parent, Path(temporary_directory))
+            self.assertEqual(len(paths.sdf_path.parent.name), 64)
+            self.assertEqual(
+                {path.name for path in paths.sdf_path.parent.iterdir()},
+                {
+                    "default_bundle.obj",
+                    "default_bundle.sdf",
+                    "default_bundle.surfaces.json",
+                },
+            )
+
+    def test_interrupted_default_publish_exposes_no_partial_products(self) -> None:
+        compiled = compile_polygon_space(
+            structure_id="interrupted_bundle",
+            footprint=Footprint2D.rectangle(4, 3),
+        )
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            with patch(
+                "scenesmith.agent_utils.structural_compiler.os.replace",
+                side_effect=OSError("simulated publish interruption"),
+            ):
+                with self.assertRaisesRegex(OSError, "simulated"):
+                    write_compiled_structure(compiled, temporary_directory)
+
+            self.assertEqual(list(Path(temporary_directory).iterdir()), [])
+
+    def test_export_is_content_addressed_and_records_product_hashes(self) -> None:
+        compiled = compile_polygon_space(
+            structure_id="polygon_room",
+            footprint=Footprint2D.rectangle(4, 3),
+        )
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            paths = write_compiled_structure(
+                compiled,
+                temporary_directory,
+                source_content_hash="source-hash",
+                compiler_version="test-compiler-v1",
+            )
+            sidecar = json.loads(paths.surfaces_path.read_text(encoding="utf-8"))
+
+            self.assertEqual(paths.sdf_path.parent.parent, Path(temporary_directory))
+            self.assertEqual(len(paths.sdf_path.parent.name), 64)
+            self.assertEqual(sidecar["source_content_hash"], "source-hash")
+            self.assertEqual(sidecar["compiler_version"], "test-compiler-v1")
+            self.assertEqual(
+                set(sidecar["product_hashes"]),
+                {"mesh_sha256", "sdf_sha256", "surface_semantics_sha256"},
+            )
+            self.assertEqual(sidecar["compilation"]["compile_options"], {})
+
+    def test_compile_options_are_part_of_artifact_identity(self) -> None:
+        compiled = compile_polygon_space(
+            structure_id="option_identity",
+            footprint=Footprint2D.rectangle(4, 3),
+        )
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            coarse = write_compiled_structure(
+                compiled,
+                temporary_directory,
+                source_content_hash="same-source",
+                compile_options={"resolution": 1.0},
+            )
+            fine = write_compiled_structure(
+                compiled,
+                temporary_directory,
+                source_content_hash="same-source",
+                compile_options={"resolution": 0.5},
+            )
+
+            self.assertNotEqual(coarse.artifact_hash, fine.artifact_hash)
+            coarse.artifact_ref.verify()
+            fine.artifact_ref.verify()
+
+    def test_distinct_collision_mesh_is_exported_and_authenticated(self) -> None:
+        visual = TriangleMesh(
+            vertices=((0, 0, 0), (1, 0, 0), (0, 1, 0), (0, 0, 1)),
+            triangles=((0, 2, 1), (0, 1, 3), (1, 2, 3), (2, 0, 3)),
+        )
+        collision = TriangleMesh(
+            vertices=((0, 0, 0), (2, 0, 0), (0, 2, 0), (0, 0, 2)),
+            triangles=((0, 2, 1), (0, 1, 3), (1, 2, 3), (2, 0, 3)),
+        )
+        compiled = compile_polygon_space(
+            structure_id="collision_bundle", footprint=Footprint2D.rectangle(2, 2)
+        )
+        compiled = replace(
+            compiled, visual_mesh=visual, collision_mesh=collision, surfaces=()
+        )
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            paths = write_compiled_structure(compiled, temporary_directory)
+            sdf = ET.parse(paths.sdf_path)
+
+            self.assertIsNotNone(paths.collision_mesh_path)
+            self.assertTrue(paths.collision_mesh_path.is_file())
+            self.assertEqual(
+                sdf.findtext(".//collision/geometry/mesh/uri"),
+                paths.collision_mesh_path.name,
+            )
+            paths.artifact_ref.verify()
+
+    def test_failed_export_publishes_no_partial_artifact(self) -> None:
+        compiled = compile_straight_stairs(TestStraightStairs.connector())
+        invalid_primitive = replace(
+            compiled.collision_primitives[0], primitive_type="unsupported"
+        )
+        invalid = replace(compiled, collision_primitives=(invalid_primitive,))
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            with self.assertRaises(UnsupportedGeometryError):
+                write_compiled_structure(invalid, temporary_directory)
+            self.assertEqual(list(Path(temporary_directory).iterdir()), [])
+
+    def test_concurrent_equal_exports_publish_one_complete_artifact(self) -> None:
+        compiled = compile_polygon_space(
+            structure_id="shared_room",
+            footprint=Footprint2D.rectangle(4, 3),
+        )
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            with ThreadPoolExecutor(max_workers=8) as executor:
+                results = tuple(
+                    executor.map(
+                        lambda _: write_compiled_structure(
+                            compiled,
+                            temporary_directory,
+                            source_content_hash="shared-source",
+                        ),
+                        range(32),
+                    )
+                )
+
+            self.assertEqual(len({item.sdf_path for item in results}), 1)
+            artifact_dirs = tuple(Path(temporary_directory).iterdir())
+            self.assertEqual(len(artifact_dirs), 1)
+            self.assertEqual(len(tuple(artifact_dirs[0].iterdir())), 3)
+
     def test_stairs_write_obj_sdf_and_surface_sidecar(self) -> None:
         connector = TestStraightStairs.connector()
         compiled = compile_straight_stairs(connector)

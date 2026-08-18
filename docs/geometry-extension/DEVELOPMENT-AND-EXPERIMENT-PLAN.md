@@ -14,7 +14,7 @@ geological detail, layered substrate, and reproducible destruction continues in
 No phase may silently flatten unsupported input. Until a capability is
 implemented, validation must return a typed “unsupported geometry” diagnostic.
 
-## Execution status (2026-08-12)
+## Execution status (2026-08-13)
 
 | Phase | State | Current boundary |
 |---|---|---|
@@ -24,12 +24,12 @@ implemented, validation must return a typed “unsupported geometry” diagnosti
 | 3 — Parametric spaces | DELIVERED_CORE | concave/holed/circular-tessellated spaces and arbitrary wall panels; general source-mapped splines/arches remain |
 | 4 — Surface placement | DELIVERED_CORE | furniture, wall, and ceiling paths consume explicit support/attachment/overhead surfaces |
 | 5 — Caverns/terrain | DELIVERED_CORE | replacing freeform shells, heightfields, annotations, embedded passage centerlines; automatic tunnel extraction remains |
-| 6 — Agent tools | INTEGRATED | atomic structural authoring tool and prompt grammar exist; repeated P-series trials are not run |
-| 7 — Export/hardening | PARTIAL | deterministic OBJ/SDF/sidecars pass; Drake/Blender/MuJoCo/USD matrix remains |
+| 6 — Agent tools | INTEGRATED | atomic structural authoring, strict semantic JSON, and prompt grammar exist; two held-out trials are retained |
+| 7 — Export/hardening | PARTIAL | authenticated content-addressed OBJ/SDF/sidecars and Linux Drake/Blender gates exist; MuJoCo/USD breadth remains |
 | E0–E2 — Semantic cave core | DELIVERED | canonical regions/chambers/passage graphs, implicit unions, topology adaptation, tool/export integration, and migrated prison example |
 | E3 — Large cavern/detail slice | PARTIAL_DELIVERED | real sky apertures, 180×120×70 m compact fixture, seeded formations, full-envelope masks, hero primitives; stable chunks and advanced field policies remain |
 | E4–E6 — Exteriors/destruction | PLANNED | terrain seams, layered substrate, breach/collapse/fracture/burn/deform operation compilers remain |
-| E7 — Semantic LLM evaluation | PLANNED | public schema exists, but repeated canonical/held-out authoring trials and evidence manifests remain |
+| E7 — Semantic LLM evaluation | IN PROGRESS | two actual held-out trials, typed repair diagnostics, prompt hashes, normalized recipes, and deterministic CI oracles are retained; repeated statistical corpus remains |
 
 Exact evidence and remaining seams are kept in
 [`IMPLEMENTATION-STATUS.md`](IMPLEMENTATION-STATUS.md).

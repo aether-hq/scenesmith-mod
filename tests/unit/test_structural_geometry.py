@@ -251,6 +251,20 @@ class TestProfilesAndSurfaces(unittest.TestCase):
 
 
 class TestConnectorsAndReferences(unittest.TestCase):
+    def test_all_structural_identifiers_use_the_shared_safe_policy(self) -> None:
+        for factory in (
+            lambda: LevelSpec("../level"),
+            lambda: PlatformSpec(
+                "bad/platform", "room", Footprint2D.rectangle(2, 2), 1.0
+            ),
+            lambda: HeightfieldSpec("has space", "room", ((0.0, 0.0), (0.0, 0.0))),
+        ):
+            with self.subTest(factory=factory):
+                with self.assertRaisesRegex(
+                    GeometryValidationError, "invalid_identifier"
+                ):
+                    factory()
+
     @staticmethod
     def _stairs() -> ConnectorSpec:
         return ConnectorSpec(

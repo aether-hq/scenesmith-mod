@@ -14,13 +14,13 @@ directives:
         axis: [0, 0, 1]
 - add_model:
     name: room_geometry_prison_block
-    file: package://scene/structures/rooms/prison_block/room_geometry_prison_block.sdf
+    file: package://scene/structures/rooms/prison_block/0bdfebec8ea2a75949ee73c30ffd40309ac466bf011b09a4a2e392034338d06f/room_geometry_prison_block.sdf
 - add_weld:
     parent: room_prison_block_frame
     child: room_geometry_prison_block::room_geometry_body_link
 - add_model:
     name: structure_semantic_environment
-    file: package://scene/structures/meshes/escape_tunnel_shell/escape_tunnel_shell.sdf
+    file: package://scene/structures/meshes/escape_tunnel_shell/aa70fc98bfa42462eca3e751643b4bf48aa6307d0dc22b982e1a16368d7aa080/escape_tunnel_shell.sdf
 - add_weld:
     parent: house_frame
     child: structure_semantic_environment::structure_link

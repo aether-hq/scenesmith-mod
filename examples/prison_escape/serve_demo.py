@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import json
 import socket
 import webbrowser
 
@@ -39,15 +40,10 @@ def main() -> None:
     args = parser.parse_args()
 
     root = Path(__file__).resolve().parent
+    manifest_path = root / "generated" / "manifest.json"
     required = (
         root / "viewer.html",
-        root / "generated" / "manifest.json",
-        root
-        / "generated"
-        / "structures"
-        / "meshes"
-        / "escape_tunnel_shell"
-        / "escape_tunnel_shell.obj",
+        manifest_path,
     )
     missing = [path for path in required if not path.is_file()]
     if missing:
@@ -56,6 +52,24 @@ def main() -> None:
             "Generated scene assets are missing. Run generate_scene.py first:\n"
             ".venv/bin/python -m examples.prison_escape.generate_scene\n"
             f"Missing:\n{formatted}"
+        )
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        generated_root = manifest_path.parent.resolve()
+        artifact_paths = tuple(
+            (generated_root / manifest[product][key]).resolve()
+            for product in ("architecture", "tunnel")
+            for key in ("mesh_path", "sdf_path")
+        )
+    except (KeyError, TypeError, json.JSONDecodeError) as exc:
+        raise SystemExit(f"Generated manifest is invalid: {manifest_path}") from exc
+    if any(
+        generated_root not in path.parents or not path.is_file()
+        for path in artifact_paths
+    ):
+        raise SystemExit(
+            "Generated manifest references missing or unsafe architecture artifacts. "
+            "Run generate_scene.py again."
         )
     if not _port_available(args.host, args.port):
         raise SystemExit(f"Port {args.port} is already in use on {args.host}")

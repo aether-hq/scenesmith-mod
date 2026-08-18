@@ -36,6 +36,7 @@ dependencies = [
     "rtree>=1.4.1",
     "scipy>=1.15.3",
     "setuptools<71.0.0",
+    # Provides constrained_delaunay_triangles for structural polygon compilation.
     "shapely>=2.1.2",
     "torch>=2.5.0,<2.6.0",
     "torchvision>=0.20.0,<0.21.0",

@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "gallery_order": 0,
+  "id": "original_scenesmith_bar",
+  "title": "Original SceneSmith Bar — Full Render",
+  "prompt": "A bar with a long wooden bar counter and five bar stools. Shelves behind the counter display bottles. Two high tables with two stools each are near the window.",
+  "source": {
+    "kind": "pinned_gltf_visual_baseline",
+    "provider": "SceneSmith",
+    "provider_scene": 112,
+    "provider_url": "https://scenesmith.github.io/static/models/room/scene_112/scene_named.glb",
+    "artifact_path": "assets/original_scenesmith_bar.glb",
+    "artifact_sha256": "90dad0948e638aa07c400ae2ea6d34cceb3ba259d59ea1656043691435d02f1d",
+    "derivation": "Lossless Draco decode of the unaltered provider artifact for browser compatibility."
+  },
+  "expected": {
+    "semantic_objects": 278,
+    "mesh_instances": 280,
+    "triangles": 187086,
+    "materials": 58,
+    "textures": 62,
+    "images": 62
+  },
+  "bounds": {
+    "minimum": [-0.050011, -0.050269, -0.1],
+    "maximum": [9.050185, 6.05, 3.200147]
+  },
+  "camera": {
+    "position": [8.15, 5.35, 1.65],
+    "target": [1.35, 2.65, 1.25],
+    "label": "full-room-provider-review"
+  }
+}

@@ -247,8 +247,8 @@
       },
       "length": 14.0,
       "openings": [],
-      "sdf_path": "structures/rooms/prison_block/room_geometry_prison_block.sdf",
-      "structural_surface_path": "structures/rooms/prison_block/room_geometry_prison_block.surfaces.json",
+      "sdf_path": "structures/rooms/prison_block/0bdfebec8ea2a75949ee73c30ffd40309ac466bf011b09a4a2e392034338d06f/room_geometry_prison_block.sdf",
+      "structural_surface_path": "structures/rooms/prison_block/0bdfebec8ea2a75949ee73c30ffd40309ac466bf011b09a4a2e392034338d06f/room_geometry_prison_block.surfaces.json",
       "structural_surfaces": [
         {
           "geometry_ref": null,
@@ -606,8 +606,13 @@
     }
   ],
   "schema_version": 2,
+  "semantic_detail_geometry_paths": {},
+  "semantic_detail_source_hash": null,
   "semantic_environment": {
     "chambers": [],
+    "detail_fields": [],
+    "hero_features": [],
+    "openings": [],
     "passage_networks": [
       {
         "id": "escape_routes",
@@ -816,7 +821,8 @@
     ],
     "schema_version": 1
   },
-  "semantic_environment_geometry_path": "structures/meshes/escape_tunnel_shell/escape_tunnel_shell.sdf",
+  "semantic_environment_geometry_path": "structures/meshes/escape_tunnel_shell/aa70fc98bfa42462eca3e751643b4bf48aa6307d0dc22b982e1a16368d7aa080/escape_tunnel_shell.sdf",
+  "semantic_environment_source_hash": "bb015ff258a2db0063f4e46173408bd3462356a25d4d803632342a9b3deeb62a",
   "structural_mesh_geometry_paths": {},
   "structural_meshes": [],
   "wall_height": 3.6,

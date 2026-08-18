@@ -1,6 +1,6 @@
 # Geometry Extension Implementation Status
 
-Updated: 2026-08-12
+Updated: 2026-08-13
 
 Baseline: upstream SceneSmith `67cc408fd38334b4a926efef45e284302ed5055b`.
 
@@ -55,29 +55,37 @@ runtime/export path consumes it. `PARTIAL` names the remaining seam explicitly.
 | Natural sky/exterior apertures | INTEGRATED | typed chamber openings compile as real non-watertight apertures with exposure/provenance metadata |
 | Seeded geological detail fields | INTEGRATED | versioned deterministic sampler, inward-oriented formations, full-envelope route/opening/hero masks, typed exhaustion diagnostic, collision policy, and HouseLayout export |
 | Semantic hero geological features | INTEGRATED | stable authored anchors compile independently with collision policy and field exclusion |
-| Dragon-scale single cavern | IMPLEMENTED | 180×120×70 m held-out semantic recipe compiles chamber, approach, sky aperture, 60 formations, and hero spire within a compact JSON budget |
+| Unified derived semantic scene contract | INTEGRATED | one `HouseLayout.derive_scene_contract` call derives authenticated products, physical-gated topology/openings, collision queries, and blocked-route evidence |
+| Semantic hard invariants | INTEGRATED | safe globally unique authored/derived IDs, strict JSON scalar types, bounded work, declared-aperture manifold audits, outward closed formation meshes, and atomic content-addressed artifact bundles |
+| Generated genericity suite | IMPLEMENTED | deterministic families cover 1–50 chamber/graph sizes, compiled graph degree 1–5, primitive cross-products, translation, rotation, scale, resolution, and cross-process hash-seed determinism |
+| Dragon-scale single cavern | IMPLEMENTED | an actual held-out LLM recipe compiles a 160×100×60 m chamber, approach, real sky aperture, 24 protected coarse formations, and a full-collision hero spire |
+| Linux Drake/render gates | CI GATED | generated content-addressed SDF is parsed with collision in Drake and the tunnel shell must produce a nonblank Blender render on Ubuntu CI |
+| Held-out LLM authoring evidence | INITIAL EVIDENCE | two retained Claude Sonnet 5 trials pass deterministic requirement oracles; aggregate evidence passes after-repair but not before-repair threshold, and remains below the repeated-corpus sample requirement |
 | Stable large-scene chunking and advanced formation policies | NOT IMPLEMENTED | bounded chunk manifests/LOD, paired columns, clustering, spawn/sightline masks, cave-mouth terrain seams, and imported hero composition remain planned |
 | Exterior terrain/environment seams | NOT IMPLEMENTED | existing heightfields are a foundation, not a complete exterior system |
 | Layered substrate and destruction operations | NOT IMPLEMENTED | breach/collapse/fracture/burn/deform operation stack is specified only |
 
-The focused dependency-light regression command passes 206 tests, including
-the semantic model, compiler, genericity, authoring-tool, and migrated-example
-suites:
+The focused dependency-light semantic/structural suite passes locally. Full
+repository discovery still requires optional project runtimes and dependencies
+that are not installed in this macOS environment. The reproducible local gate
+is:
 
 ```bash
-.venv/bin/python -m unittest \
+.venv/bin/python -m unittest -q \
   tests.unit.test_structural_geometry \
   tests.unit.test_structural_compiler \
-  tests.unit.test_structural_topology \
-  tests.unit.test_structural_surfaces \
-  tests.unit.test_structural_scenarios \
   tests.unit.test_semantic_environments \
   tests.unit.test_semantic_environment_compiler \
   tests.unit.test_semantic_environment_details \
-  tests.unit.test_prison_escape_example \
+  tests.unit.test_semantic_environment_metamorphic \
+  tests.unit.test_scene_contract \
   tests.unit.test_house \
-  tests.unit.test_room_placement \
-  tests.unit.test_floor_plan_tools -q
+  tests.unit.test_floor_plan_tools \
+  tests.unit.test_structural_surfaces \
+  tests.unit.test_structural_topology \
+  tests.unit.test_structural_scenarios \
+  tests.unit.test_prison_escape_example
+.venv/bin/python scripts/validate_llm_trials.py
 ```
 
 ## Matrix coverage
@@ -115,17 +123,15 @@ repeated prompt trials) also pass.
 | Shaft connector | PARTIAL | an imported shell may embody a climb-gated shaft; no standalone shaft compiler exists |
 | Natural passage connector | INTEGRATED | passage graphs generate the physical shell and derive embedded connector topology/clearance data |
 | MuJoCo/USD | PARTIAL | generated OBJ/SDF assets are portable; explicit experimental exporter tests remain |
-| Prompt reliability | NOT RUN | requires configured model/API trials and the P-series experiment protocol |
+| Prompt reliability | INITIAL EVIDENCE | two actual held-out trials are retained and revalidated in CI; the statistically meaningful 10-run-per-case protocol remains open |
 
 ## Environment evidence and blocker
 
-The repository requires Drake and the current lock resolves `drake==1.49.0`,
-whose published wheel is not available for this macOS ARM environment.
-Consequently Drake parser/load and Blender/GPU
-integration tests are classified `BLOCKED_ENV`, not silently counted as passes.
-The dependency-light model, geometry, topology, agent-tool, placement, OBJ, SDF,
-and sidecar tests run locally. A Linux x86_64 or supported Drake environment is
-required for the Phase 7 simulation gate.
+The local macOS ARM environment has neither the Drake nor Blender Python
+runtime, so those two tests report explicit skips locally. Ubuntu CI now runs
+both as required integration gates: Drake parses the generated SDF and sees
+collision geometry, then Blender renders the generated semantic shell under
+`xvfb` and image-content predicates reject blank output.
 
 ## Next implementation order
 
@@ -133,6 +139,7 @@ required for the Phase 7 simulation gate.
 2. extend detail fields with paired columns, clustering, spawn/sightline masks,
    cave-mouth terrain seams, and imported hero composition;
 3. add exterior terrain, layered substrate, and reproducible damage operations;
-4. run repeated LLM authorability trials and publish evidence manifests;
-5. run Drake/Blender integration on supported infrastructure and the expanded
-   repeated prompt corpus.
+4. expand the retained LLM authorability evidence from the initial two trials
+   to the specification's repeated statistical corpus;
+5. monitor the supported-host Drake/Blender gates and add more canonical
+   semantic scenes as exterior and destruction primitives land.

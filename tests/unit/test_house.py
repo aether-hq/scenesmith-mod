@@ -22,6 +22,16 @@ from scenesmith.agent_utils.house import (
     Window,
     legacy_openings_to_boundary_portals,
 )
+from scenesmith.agent_utils.semantic_environments import (
+    Bounds3D,
+    CavernChamberSpec,
+    DetailFieldSpec,
+    DetailSurfaceRole,
+    EnvironmentKind,
+    EnvironmentRegionSpec,
+    FormationType,
+    SemanticEnvironmentSpec,
+)
 from scenesmith.agent_utils.structural_compiler import TriangleMesh
 from scenesmith.agent_utils.structural_geometry import (
     SCHEMA_VERSION,
@@ -35,6 +45,8 @@ from scenesmith.agent_utils.structural_geometry import (
     HeightfieldSpec,
     LevelSpec,
     PlatformSpec,
+    PortalSpec,
+    PortalType,
     StructuralMeshSpec,
     SurfaceRole,
     UnsupportedGeometryError,
@@ -123,6 +135,63 @@ class TestRoundTrip(unittest.TestCase):
             sidecar.write_text('{"surfaces": [{"id": "changed"}]}', encoding="utf-8")
 
             self.assertNotEqual(first_hash, geometry.content_hash())
+
+    def test_room_ids_are_path_and_model_safe(self) -> None:
+        with self.assertRaisesRegex(GeometryValidationError, "invalid_identifier"):
+            RoomSpec("../unsafe")
+        with self.assertRaisesRegex(GeometryValidationError, "invalid_identifier"):
+            RoomSpec(42)  # type: ignore[arg-type]
+
+    def test_layout_rejects_cross_category_identifier_collision(self) -> None:
+        layout = HouseLayout(
+            levels=[LevelSpec("ground")],
+            room_specs=[RoomSpec("shared")],
+            portals=[
+                PortalSpec(
+                    "shared",
+                    PortalType.DOOR,
+                    "shared",
+                )
+            ],
+        )
+
+        with self.assertRaisesRegex(GeometryValidationError, "duplicate_scene_id"):
+            layout.validate_structure()
+
+    def test_layout_rejects_room_collision_with_derived_detail_instance(self) -> None:
+        region = EnvironmentRegionSpec(
+            "detail_region",
+            EnvironmentKind.SUBTERRANEAN,
+            Bounds3D((-20, -20, -20), (20, 20, 20)),
+        )
+        chamber = CavernChamberSpec(
+            "detail_chamber", "detail_region", (0, 0, 0), (10, 10, 10)
+        )
+        environment = SemanticEnvironmentSpec(
+            regions=(region,),
+            chambers=(chamber,),
+            detail_fields=(
+                DetailFieldSpec(
+                    "ceiling_teeth",
+                    "detail_region",
+                    "detail_chamber",
+                    FormationType.STALACTITE,
+                    DetailSurfaceRole.OVERHEAD,
+                    1,
+                    (1, 1, 1),
+                    (1, 1, 2),
+                    7,
+                ),
+            ),
+        )
+        layout = HouseLayout(
+            levels=[LevelSpec("ground")],
+            room_specs=[RoomSpec("ceiling_teeth_0000")],
+            semantic_environment=environment,
+        )
+
+        with self.assertRaisesRegex(GeometryValidationError, "duplicate_scene_id"):
+            layout.validate_structure()
 
     def test_legacy_cardinal_opening_maps_to_boundary_portal(self) -> None:
         spec = RoomSpec("hall", length=6, width=4)
@@ -397,14 +466,14 @@ class TestV2StructuralLayout(unittest.TestCase):
             connector_id="stairs",
             connector_type=ConnectorType.STAIRS_STRAIGHT,
             start=ConnectorEndpoint("lower", "ground", (0, 0, 0)),
-            end=ConnectorEndpoint("upper", "upper", (4, 0, 3)),
+            end=ConnectorEndpoint("upper", "upper_level", (4, 0, 3)),
             parameters={"riser_count": 18},
         )
         layout = HouseLayout(
-            levels=[LevelSpec("ground", 0.0), LevelSpec("upper", 3.0)],
+            levels=[LevelSpec("ground", 0.0), LevelSpec("upper_level", 3.0)],
             room_specs=[
                 RoomSpec("lower"),
-                RoomSpec("upper", level_id="upper", footprint=footprint),
+                RoomSpec("upper", level_id="upper_level", footprint=footprint),
             ],
             placed_rooms=[
                 PlacedRoom("lower", (0, 0), 5, 4),
@@ -413,7 +482,7 @@ class TestV2StructuralLayout(unittest.TestCase):
                     (1, 2),
                     5,
                     4,
-                    level_id="upper",
+                    level_id="upper_level",
                     yaw=0.25,
                     footprint=footprint,
                 ),
@@ -475,15 +544,15 @@ class TestV2StructuralLayout(unittest.TestCase):
             connector_id="stairs",
             connector_type=ConnectorType.STAIRS_STRAIGHT,
             start=ConnectorEndpoint("lower", "ground", (0, 0, 0)),
-            end=ConnectorEndpoint("upper", "upper", (4, 0, 3)),
+            end=ConnectorEndpoint("upper", "upper_level", (4, 0, 3)),
             parameters={"riser_count": 18},
         )
         layout = HouseLayout(
-            levels=[LevelSpec("ground", 0), LevelSpec("upper", 3)],
-            room_specs=[RoomSpec("lower"), RoomSpec("upper", level_id="upper")],
+            levels=[LevelSpec("ground", 0), LevelSpec("upper_level", 3)],
+            room_specs=[RoomSpec("lower"), RoomSpec("upper", level_id="upper_level")],
             placed_rooms=[
                 PlacedRoom("lower", (0, 0), 4, 4),
-                PlacedRoom("upper", (0, 0), 4, 4, level_id="upper"),
+                PlacedRoom("upper", (0, 0), 4, 4, level_id="upper_level"),
             ],
             room_geometries={
                 "lower": RoomGeometry(
@@ -506,11 +575,13 @@ class TestV2StructuralLayout(unittest.TestCase):
             assert paths["stairs"].exists()
             assert "name: structure_stairs" in directive
             assert "child: structure_stairs::structure_link" in directive
-            assert "package://scene/connectors/stairs/stairs.sdf" in directive
+            self.assertIn(
+                f"package://scene/{paths['stairs'].relative_to(output_dir)}", directive
+            )
             state = layout.to_dict(scene_dir=output_dir)
-            assert (
-                state["connector_geometry_paths"]["stairs"]
-                == "connectors/stairs/stairs.sdf"
+            self.assertEqual(
+                state["connector_geometry_paths"]["stairs"],
+                str(paths["stairs"].relative_to(output_dir)),
             )
 
     def test_export_refuses_uncompiled_connector(self) -> None:
@@ -518,11 +589,11 @@ class TestV2StructuralLayout(unittest.TestCase):
             connector_id="ramp",
             connector_type=ConnectorType.RAMP,
             start=ConnectorEndpoint("lower", "ground", (0, 0, 0)),
-            end=ConnectorEndpoint("upper", "upper", (12, 0, 1)),
+            end=ConnectorEndpoint("upper", "upper_level", (12, 0, 1)),
         )
         layout = HouseLayout(
-            levels=[LevelSpec("ground", 0), LevelSpec("upper", 1)],
-            room_specs=[RoomSpec("lower"), RoomSpec("upper", level_id="upper")],
+            levels=[LevelSpec("ground", 0), LevelSpec("upper_level", 1)],
+            room_specs=[RoomSpec("lower"), RoomSpec("upper", level_id="upper_level")],
             placed_rooms=[PlacedRoom("lower", (0, 0), 4, 4)],
             room_geometries={
                 "lower": RoomGeometry(
@@ -542,15 +613,15 @@ class TestV2StructuralLayout(unittest.TestCase):
             connector_id="cave_tunnel",
             connector_type=ConnectorType.NATURAL_PASSAGE,
             start=ConnectorEndpoint("lower", "ground", (1, 1, 0)),
-            end=ConnectorEndpoint("upper", "upper", (3, 1, 3)),
+            end=ConnectorEndpoint("upper", "upper_level", (3, 1, 3)),
             parameters={"geometry_embedded": True, "waypoints": [(2, 1, 1.5)]},
         )
         layout = HouseLayout(
-            levels=[LevelSpec("ground", 0), LevelSpec("upper", 3)],
-            room_specs=[RoomSpec("lower"), RoomSpec("upper", level_id="upper")],
+            levels=[LevelSpec("ground", 0), LevelSpec("upper_level", 3)],
+            room_specs=[RoomSpec("lower"), RoomSpec("upper", level_id="upper_level")],
             placed_rooms=[
                 PlacedRoom("lower", (0, 0), 4, 4),
-                PlacedRoom("upper", (0, 0), 4, 4, level_id="upper"),
+                PlacedRoom("upper", (0, 0), 4, 4, level_id="upper_level"),
             ],
             room_geometries={
                 room_id: RoomGeometry(
@@ -578,11 +649,11 @@ class TestV2StructuralLayout(unittest.TestCase):
             connector_id="unmodeled_tunnel",
             connector_type=ConnectorType.NATURAL_PASSAGE,
             start=ConnectorEndpoint("lower", "ground", (1, 1, 0)),
-            end=ConnectorEndpoint("upper", "upper", (3, 1, 3)),
+            end=ConnectorEndpoint("upper", "upper_level", (3, 1, 3)),
         )
         layout = HouseLayout(
-            levels=[LevelSpec("ground", 0), LevelSpec("upper", 3)],
-            room_specs=[RoomSpec("lower"), RoomSpec("upper", level_id="upper")],
+            levels=[LevelSpec("ground", 0), LevelSpec("upper_level", 3)],
+            room_specs=[RoomSpec("lower"), RoomSpec("upper", level_id="upper_level")],
             connectors=[connector],
         )
 
@@ -606,8 +677,9 @@ class TestV2StructuralLayout(unittest.TestCase):
 
             assert sdf_root.find(".//link[@name='room_geometry_body_link']") is not None
             assert "translation: [12.5, 22.0, 0.0]" in directive
-            assert (
-                "package://scene/rooms/gallery/room_geometry_gallery.sdf" in directive
+            self.assertIn(
+                f"package://scene/{paths['gallery'].relative_to(output_dir)}",
+                directive,
             )
             assert geometry.footprint is not None
             assert geometry.footprint.bounds == (-2.5, -2.0, 2.5, 2.0)
@@ -701,7 +773,10 @@ class TestV2StructuralLayout(unittest.TestCase):
             assert "name: structure_cavern_shell" in directive
             assert "child: structure_cavern_shell::structure_link" in directive
             assert "parent: room_cavern_frame" in directive
-            assert "package://scene/compiled/cavern_shell/cavern_shell.sdf" in directive
+            self.assertIn(
+                f"package://scene/{paths['cavern_shell'].relative_to(output_dir)}",
+                directive,
+            )
             assert state["structural_meshes"][0]["mesh_path"] == ("source/cavern.obj")
             assert layout.room_geometries[
                 "cavern"

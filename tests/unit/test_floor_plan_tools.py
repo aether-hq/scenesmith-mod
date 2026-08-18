@@ -41,7 +41,7 @@ class TestStructuralLayoutAuthoring(unittest.TestCase):
         structural = {
             "levels": [
                 {"id": "ground", "elevation": 0, "nominal_height": 3},
-                {"id": "upper", "elevation": 3, "nominal_height": 3},
+                {"id": "upper_level", "elevation": 3, "nominal_height": 3},
             ],
             "rooms": [
                 {
@@ -54,7 +54,7 @@ class TestStructuralLayoutAuthoring(unittest.TestCase):
                 },
                 {
                     "id": "upper",
-                    "level_id": "upper",
+                    "level_id": "upper_level",
                     "position": [0, 0],
                     "yaw_degrees": 30,
                 },
@@ -70,7 +70,7 @@ class TestStructuralLayoutAuthoring(unittest.TestCase):
                     },
                     "end": {
                         "space_id": "upper",
-                        "level_id": "upper",
+                        "level_id": "upper_level",
                         "position": [4, 0, 3],
                     },
                     "parameters": {"riser_count": 18},
@@ -105,7 +105,7 @@ class TestStructuralLayoutAuthoring(unittest.TestCase):
         self.assertEqual(layout.get_room_elevation("upper"), 3.0)
         self.assertEqual(layout.room_specs[0].footprint.area, 14.0)
         self.assertAlmostEqual(layout.room_specs[1].yaw, math.pi / 6)
-        self.assertEqual(layout.placed_rooms[1].level_id, "upper")
+        self.assertEqual(layout.placed_rooms[1].level_id, "upper_level")
         self.assertEqual(layout.placed_rooms[0].position, (0.0, 0.0))
         self.assertEqual(layout.placed_rooms[1].position, (0.0, 0.0))
         self.assertTrue(
@@ -148,9 +148,9 @@ class TestStructuralLayoutAuthoring(unittest.TestCase):
                 {
                     "levels": [
                         {"id": "ground", "elevation": 0},
-                        {"id": "upper", "elevation": 3},
+                        {"id": "upper_level", "elevation": 3},
                     ],
-                    "rooms": [{"id": "upper", "level_id": "upper"}],
+                    "rooms": [{"id": "upper", "level_id": "upper_level"}],
                     "connectors": [
                         {
                             "id": "rising_tunnel",
@@ -162,7 +162,7 @@ class TestStructuralLayoutAuthoring(unittest.TestCase):
                             },
                             "end": {
                                 "space_id": "upper",
-                                "level_id": "upper",
+                                "level_id": "upper_level",
                                 "position": [5, 1, 3],
                             },
                             "parameters": {

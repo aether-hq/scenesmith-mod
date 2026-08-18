@@ -1,0 +1,242 @@
+{
+  "compiler_options": {
+    "max_cells": 500000,
+    "max_triangles": 500000,
+    "voxel_size": 4.4
+  },
+  "diagnostics": [
+    "[disjoint_chamber_junction] junction_approach_cavern_entry did not overlap its referenced chamber",
+    "[declared_opening_missing] opening_cavern_sky_skylight did not create a physical aperture"
+  ],
+  "metrics": {
+    "chambers": 1,
+    "detail_fields": 1,
+    "detail_instances": 25,
+    "hero_features": 1,
+    "junctions": 2,
+    "openings": 1,
+    "passage_networks": 1,
+    "segments": 1,
+    "semantic_json_bytes": 2446,
+    "visual_triangles": 15946
+  },
+  "model": "claude-sonnet-5",
+  "predicates": {
+    "artifact_authenticated": true,
+    "detail_instance_count": true,
+    "heldout_dragon_scale_chamber": true,
+    "heldout_full_collision_hero_spire": true,
+    "heldout_protected_coarse_stalactites": true,
+    "heldout_walkable_bound_approach": true,
+    "heldout_weather_exposed_sky_opening": true,
+    "mesh_winding_consistent": true,
+    "semantic_sources_present": true
+  },
+  "prompt": "Held-out SceneSmith semantic authoring trial. Return only the schema-conforming object. Author one dragon-scale subterranean cavern at least 160 by 100 by 60 meters, with a walkable approach passage bound into it, one real weather-exposed opening to the sky, 24 coarse-collision stalactites that protect the approach network with at least 5 meters clearance, and one full-collision rock-spire hero landmark. Use supported shapes only. The complete hero envelope must fit inside the cavern. Keep all authored geometry inside one conservative region bounds. IDs must be descriptive and globally unique. Every passage path endpoint must exactly match its referenced junction position.",
+  "prompt_sha256": "3922131219fd3f4720666043b1d6e7e1f9c2518017f600a10b1eb0869dffe99b",
+  "raw_response_sha256": "82894d0915589b3aec167c68fda1eb60c104612cecfb2125c6040c3fce165326",
+  "repair_attempts": 2,
+  "repairs": [
+    {
+      "diagnostic": "[disjoint_chamber_junction] junction_approach_cavern_entry did not overlap its referenced chamber",
+      "response_sha256": "98e3cab5c3a8916e5a8e9f01672b04db0087b7d79674b6de966b67d5f9a0577f"
+    },
+    {
+      "diagnostic": "[declared_opening_missing] opening_cavern_sky_skylight did not create a physical aperture",
+      "response_sha256": "d9c0c96884f0bb60fae9886198f71390764dde38bddb8f5e89bd1bb0c0de8513"
+    }
+  ],
+  "result": "PASS",
+  "run_timestamp_utc": "2026-08-13T07:26:14Z",
+  "semantic_environment": {
+    "chambers": [
+      {
+        "center": [
+          0,
+          0,
+          35
+        ],
+        "id": "chamber_dragon_scale_cavern",
+        "region_id": "region_dragon_scale_karst",
+        "semantic_tags": [
+          "dragon_scale",
+          "cavern",
+          "primary_chamber"
+        ],
+        "shape": "ellipsoid",
+        "size": [
+          160,
+          100,
+          60
+        ]
+      }
+    ],
+    "detail_fields": [
+      {
+        "collision_policy": "coarse",
+        "count": 24,
+        "formation_type": "stalactite",
+        "id": "detail_cavern_stalactites",
+        "max_size": [
+          3,
+          3,
+          5
+        ],
+        "min_size": [
+          1,
+          1,
+          2
+        ],
+        "protect_passage_network_ids": [
+          "network_cavern_approach"
+        ],
+        "region_id": "region_dragon_scale_karst",
+        "route_clearance": 5,
+        "seed": 42,
+        "surface_role": "overhead",
+        "target_chamber_id": "chamber_dragon_scale_cavern"
+      }
+    ],
+    "hero_features": [
+      {
+        "anchor": [
+          30,
+          20,
+          15
+        ],
+        "collision_policy": "full",
+        "feature_type": "rock_spire",
+        "id": "hero_dragon_scale_spire",
+        "region_id": "region_dragon_scale_karst",
+        "semantic_tags": [
+          "hero_landmark",
+          "dragon_scale"
+        ],
+        "size": [
+          10,
+          10,
+          40
+        ],
+        "target_chamber_id": "chamber_dragon_scale_cavern"
+      }
+    ],
+    "openings": [
+      {
+        "center": [
+          10,
+          5,
+          64
+        ],
+        "depth": 10,
+        "id": "opening_cavern_sky_skylight",
+        "normal": [
+          0,
+          0,
+          1
+        ],
+        "passable": true,
+        "region_id": "region_dragon_scale_karst",
+        "shape": "ellipse",
+        "size": [
+          8,
+          8
+        ],
+        "source_chamber_id": "chamber_dragon_scale_cavern",
+        "target": "sky",
+        "visible": true,
+        "weather_exposed": true
+      }
+    ],
+    "passage_networks": [
+      {
+        "id": "network_cavern_approach",
+        "junctions": [
+          {
+            "chamber_id": null,
+            "id": "junction_approach_exterior_start",
+            "open_boundary": true,
+            "position": [
+              -90,
+              0,
+              10
+            ],
+            "semantic_tags": [
+              "approach_start"
+            ]
+          },
+          {
+            "chamber_id": "chamber_dragon_scale_cavern",
+            "id": "junction_approach_cavern_entry",
+            "open_boundary": false,
+            "position": [
+              -65,
+              0,
+              25
+            ],
+            "semantic_tags": [
+              "cavern_entry"
+            ]
+          }
+        ],
+        "region_id": "region_dragon_scale_karst",
+        "segments": [
+          {
+            "capabilities": [
+              "walk",
+              "crawl"
+            ],
+            "cross_sections": [
+              {
+                "height": 4,
+                "station": 0,
+                "width": 4
+              },
+              {
+                "height": 5.5,
+                "station": 1,
+                "width": 5.5
+              }
+            ],
+            "end_junction_id": "junction_approach_cavern_entry",
+            "floor_mode": "natural",
+            "id": "segment_approach_passage",
+            "path": [
+              [
+                -90,
+                0,
+                10
+              ],
+              [
+                -65,
+                0,
+                25
+              ]
+            ],
+            "profile": "ellipse",
+            "start_junction_id": "junction_approach_exterior_start"
+          }
+        ]
+      }
+    ],
+    "regions": [
+      {
+        "bounds": {
+          "maximum": [
+            110,
+            80,
+            90
+          ],
+          "minimum": [
+            -110,
+            -80,
+            -5
+          ]
+        },
+        "id": "region_dragon_scale_karst",
+        "kind": "subterranean"
+      }
+    ],
+    "schema_version": 1
+  },
+  "trial_id": "heldout_dragon_scale_cavern_v1"
+}

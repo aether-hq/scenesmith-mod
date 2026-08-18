@@ -518,7 +518,7 @@ def generate_scene(output_dir: Path) -> dict:
         portals=[breach],
     )
     layout.validate_structure()
-    layout.compile_polygon_rooms(output_dir / "structures" / "rooms")
+    room_paths = layout.compile_polygon_rooms(output_dir / "structures" / "rooms")
     layout.compile_connectors(output_dir / "structures" / "connectors")
     environment_paths = layout.compile_semantic_environment(
         output_dir / "structures" / "meshes" / "escape_tunnel_shell",
@@ -590,6 +590,12 @@ def generate_scene(output_dir: Path) -> dict:
     manifest = {
         "name": "The Long Way Out",
         "description": "Underground prison room with a dug breach into a long lit escape tunnel",
+        "architecture": {
+            "mesh_path": str(
+                room_paths["prison_block"].with_suffix(".obj").relative_to(output_dir)
+            ),
+            "sdf_path": str(room_paths["prison_block"].relative_to(output_dir)),
+        },
         "wall_breach": {
             "width_m": breach.width,
             "height_m": breach.height,
@@ -607,6 +613,8 @@ def generate_scene(output_dir: Path) -> dict:
             "visual_triangles": surface_data["visual_triangles"],
             "semantic_source_id": "long_way_out",
             "environment_hash": TUNNEL_ENVIRONMENT.content_hash(),
+            "mesh_path": str(environment_paths.mesh_path.relative_to(output_dir)),
+            "sdf_path": str(environment_paths.sdf_path.relative_to(output_dir)),
         },
         "lighting": {
             "fixture_count": len(light_mounts),

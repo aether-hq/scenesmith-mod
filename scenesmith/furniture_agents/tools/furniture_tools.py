@@ -1,5 +1,6 @@
 import logging
 import math
+import os
 import time
 
 from typing import Any
@@ -163,13 +164,20 @@ class FurnitureTools:
             return None
         if self._structural_surface_index is not None:
             return self._structural_surface_index
+        room_geometry = self.scene.room_geometry
+        additional = getattr(room_geometry, "additional_structural_surface_paths", ())
+        if not isinstance(additional, (list, tuple, set, frozenset)):
+            additional = ()
+        candidates = (
+            getattr(room_geometry, "structural_surface_path", None),
+            *additional,
+        )
         sidecar_paths = [
             path
-            for path in (
-                self.scene.room_geometry.structural_surface_path,
-                *self.scene.room_geometry.additional_structural_surface_paths,
-            )
-            if path is not None and path.exists()
+            for candidate in candidates
+            if isinstance(candidate, (str, os.PathLike))
+            and (path := os.fspath(candidate))
+            and os.path.isfile(path)
         ]
         if not sidecar_paths:
             self._structural_surface_index = False
