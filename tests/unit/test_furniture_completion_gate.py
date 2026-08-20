@@ -99,6 +99,9 @@ def test_library_kit_recovers_required_minimums_from_cached_assets():
         def set_noise_profile(self, _mode):
             pass
 
+        def _major_support_elevations(self):
+            return (0.0, 4.0, 8.0)
+
         def _add_furniture_to_scene_impl(self, **kwargs):
             placements.append(kwargs)
             return json.dumps({"success": True})
@@ -119,4 +122,5 @@ def test_library_kit_recovers_required_minimums_from_cached_assets():
     assert placed_roles.count("reading_table") == 1
     assert placed_roles.count("reading_chair") == 4
     assert "task_lamp" not in placed_roles
-    assert len({(call["x"], call["y"]) for call in placements}) == 7
+    assert len({(call["x"], call["y"], call["z"]) for call in placements}) == 7
+    assert {call["z"] for call in placements} == {0.0, 4.0, 8.0}

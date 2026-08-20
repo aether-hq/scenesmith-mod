@@ -122,12 +122,18 @@ class FurnitureTools:
                 f"Unsupported noise mode {mode}, keeping current profile"
             )
 
-    def _check_floor_bounds(self, x: float, y: float) -> tuple[bool, str]:
+    def _check_floor_bounds(
+        self,
+        x: float,
+        y: float,
+        reference_z: float | None = None,
+    ) -> tuple[bool, str]:
         """Check if position (center point) is within floor plan bounds.
 
         Args:
             x: X coordinate in meters.
             y: Y coordinate in meters.
+            reference_z: Requested support elevation for stacked floor plans.
 
         Returns:
             (is_valid, error_message) - error_message is empty string if valid.
@@ -136,7 +142,7 @@ class FurnitureTools:
 
         surface_index = self._get_structural_surface_index()
         if surface_index is not None:
-            pose = surface_index.support_pose(x, y)
+            pose = surface_index.support_pose(x, y, reference_z=reference_z)
             if pose is None:
                 return (
                     False,
@@ -199,15 +205,66 @@ class FurnitureTools:
         )
         return self._structural_surface_index
 
+    def _major_support_elevations(self) -> tuple[float, ...]:
+        """Return story-floor elevations, excluding small landings and stair treads."""
+
+        surface_index = self._get_structural_surface_index()
+        if surface_index is None:
+            return (0.0,)
+
+        from scenesmith.agent_utils.structural_geometry import SurfaceRole
+
+        candidates: list[tuple[float, float]] = []
+        for query in surface_index.by_role(SurfaceRole.SUPPORT):
+            if float(query.normal[2]) < math.cos(math.radians(5.0)):
+                continue
+            boundary = query.patch.boundary
+            if len(boundary) < 3:
+                continue
+            area = (
+                abs(
+                    sum(
+                        float(start[0]) * float(end[1])
+                        - float(end[0]) * float(start[1])
+                        for start, end in zip(boundary, boundary[1:] + boundary[:1])
+                    )
+                )
+                / 2.0
+            )
+            if area <= 0.0:
+                continue
+            elevation = sum(float(point[2]) for point in boundary) / len(boundary)
+            candidates.append((area, elevation))
+
+        if not candidates:
+            return (0.0,)
+        minimum_story_area = max(area for area, _ in candidates) * 0.25
+        elevations: list[float] = []
+        for area, elevation in sorted(candidates, key=lambda item: item[1]):
+            if area < minimum_story_area:
+                continue
+            if not any(abs(elevation - existing) <= 0.05 for existing in elevations):
+                elevations.append(elevation)
+        return tuple(elevations) or (0.0,)
+
     def _surface_aligned_pose(
-        self, x: float, y: float, yaw_degrees: float
+        self,
+        x: float,
+        y: float,
+        yaw_degrees: float,
+        reference_z: float | None = None,
     ) -> tuple[float, float, float, float] | None:
         """Return z/roll/pitch/yaw aligned to the support surface, if present."""
 
         surface_index = self._get_structural_surface_index()
         if surface_index is None:
             return None
-        pose = surface_index.support_pose(x, y, yaw=math.radians(yaw_degrees))
+        pose = surface_index.support_pose(
+            x,
+            y,
+            reference_z=reference_z,
+            yaw=math.radians(yaw_degrees),
+        )
         if pose is None:
             return None
         rotation = RotationMatrix(
@@ -527,12 +584,13 @@ class FurnitureTools:
             x: float,
             y: float,
             yaw: float = 0.0,
+            elevation: float = 0.0,
         ) -> str:
             """Place furniture in the room at a specific floor position.
 
-            Furniture sits flat on the floor at z=0 with upright orientation.
-            You can only control the x, y position and yaw rotation (rotation
-            around the vertical axis).
+            Furniture sits flat on the structural floor nearest the requested
+            elevation, with upright orientation. Use elevation=0 for the ground
+            floor or the level's floor height for upper stories.
 
             Each placement gets a unique ID so you can move or remove it later.
             The same furniture model can be placed multiple times.
@@ -545,6 +603,7 @@ class FurnitureTools:
                 y: Y position in the room (meters).
                 yaw: Yaw rotation in degrees around vertical axis (default: 0.0).
                     Positive values rotate counterclockwise in top-down view.
+                elevation: Structural floor elevation in meters (default: 0.0).
 
             Returns:
                 The unique ID for this placement and confirmation of success.
@@ -553,7 +612,7 @@ class FurnitureTools:
                 asset_id=asset_id,
                 x=x,
                 y=y,
-                z=0.0,
+                z=elevation,
                 roll=0.0,
                 pitch=0.0,
                 yaw=yaw,
@@ -565,12 +624,13 @@ class FurnitureTools:
             x: float,
             y: float,
             yaw: float = 0.0,
+            elevation: float = 0.0,
         ) -> str:
             """Move existing furniture to a new floor position.
 
-            Furniture sits flat on the floor at z=0 with upright orientation.
-            You can only control the x, y position and yaw rotation (rotation
-            around the vertical axis).
+            Furniture sits flat on the structural floor nearest the requested
+            elevation, with upright orientation. Use elevation=0 for the ground
+            floor or the level's floor height for upper stories.
 
             Use this to relocate furniture that's already in the room. You need
             the object ID from when you placed it or from 'get_current_scene_state'.
@@ -581,6 +641,7 @@ class FurnitureTools:
                 y: New Y position in the room (meters).
                 yaw: New yaw rotation in degrees around vertical axis (default: 0.0).
                     Positive values rotate counterclockwise in top-down view.
+                elevation: Target structural floor elevation in meters (default: 0.0).
 
             Returns:
                 Confirmation that the furniture was moved successfully.
@@ -589,7 +650,7 @@ class FurnitureTools:
                 object_id=object_id,
                 x=x,
                 y=y,
-                z=0.0,
+                z=elevation,
                 roll=0.0,
                 pitch=0.0,
                 yaw=yaw,
@@ -704,7 +765,7 @@ class FurnitureTools:
             )
 
             # Validate position is within floor plan bounds.
-            is_valid, error_msg = self._check_floor_bounds(x=x, y=y)
+            is_valid, error_msg = self._check_floor_bounds(x=x, y=y, reference_z=z)
             if not is_valid:
                 return self._create_failure_result(
                     asset_id=asset_id,
@@ -712,7 +773,7 @@ class FurnitureTools:
                     error_type=FurnitureErrorType.POSITION_OUT_OF_BOUNDS,
                 )
 
-            surface_pose = self._surface_aligned_pose(x, y, yaw)
+            surface_pose = self._surface_aligned_pose(x, y, yaw, reference_z=z)
             if surface_pose is not None:
                 z, roll, pitch, yaw = surface_pose
 
@@ -889,7 +950,7 @@ class FurnitureTools:
                 ).to_json()
 
             # Validate position is within floor plan bounds.
-            is_valid, error_msg = self._check_floor_bounds(x=x, y=y)
+            is_valid, error_msg = self._check_floor_bounds(x=x, y=y, reference_z=z)
             if not is_valid:
                 return FurnitureOperationResult(
                     success=False,
@@ -898,7 +959,7 @@ class FurnitureTools:
                     error_type=FurnitureErrorType.POSITION_OUT_OF_BOUNDS,
                 ).to_json()
 
-            surface_pose = self._surface_aligned_pose(x, y, yaw)
+            surface_pose = self._surface_aligned_pose(x, y, yaw, reference_z=z)
             if surface_pose is not None:
                 z, roll, pitch, yaw = surface_pose
 

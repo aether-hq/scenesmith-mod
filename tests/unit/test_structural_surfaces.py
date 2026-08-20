@@ -10,6 +10,7 @@ from types import SimpleNamespace
 import numpy as np
 
 from scenesmith.ceiling_agents.tools.ceiling_tools import CeilingTools
+from scenesmith.furniture_agents.tools.furniture_tools import FurnitureTools
 from scenesmith.agent_utils.structural_compiler import (
     CompiledStructure,
     compile_polygon_space,
@@ -84,6 +85,28 @@ class TestStructuralSurfaceIndex(unittest.TestCase):
         self.assertEqual(lower_pose.position[2], 0.0)
         self.assertEqual(upper_pose.position[2], 3.0)
 
+    def test_furniture_tool_respects_requested_stacked_floor(self) -> None:
+        lower = compile_polygon_space(
+            structure_id="lower",
+            footprint=Footprint2D.rectangle(4, 4),
+        )
+        upper = compile_polygon_space(
+            structure_id="upper",
+            footprint=Footprint2D.rectangle(4, 4),
+            floor_profile=ElevationProfile(base_elevation=3.0),
+        )
+        index = StructuralSurfaceIndex((*lower.surfaces, *upper.surfaces))
+        tools = FurnitureTools.__new__(FurnitureTools)
+        tools._get_structural_surface_index = lambda: index
+
+        self.assertEqual(tools._major_support_elevations(), (0.0, 3.0))
+        lower_pose = tools._surface_aligned_pose(1.0, 1.0, 0.0, reference_z=0.0)
+        upper_pose = tools._surface_aligned_pose(1.0, 1.0, 0.0, reference_z=3.0)
+
+        assert lower_pose is not None and upper_pose is not None
+        self.assertEqual(lower_pose[0], 0.0)
+        self.assertEqual(upper_pose[0], 3.0)
+
     def test_sidecar_round_trip_preserves_queryable_patches(self) -> None:
         compiled = compile_polygon_space(
             structure_id="room",
@@ -119,7 +142,9 @@ class TestStructuralSurfaceIndex(unittest.TestCase):
             sum(a * b for a, b in zip(pose.tangent_x, pose.normal)), 0.0
         )
 
-    def test_ceiling_tool_excludes_the_floor_underside_from_mount_candidates(self) -> None:
+    def test_ceiling_tool_excludes_the_floor_underside_from_mount_candidates(
+        self,
+    ) -> None:
         compiled = compile_polygon_space(
             structure_id="fixture_room",
             footprint=Footprint2D.rectangle(4, 3).centered_on_bounds(),
@@ -133,9 +158,7 @@ class TestStructuralSurfaceIndex(unittest.TestCase):
             )
         )
         tools = CeilingTools.__new__(CeilingTools)
-        tools.scene = SimpleNamespace(
-            room_geometry=SimpleNamespace(floor=floor)
-        )
+        tools.scene = SimpleNamespace(room_geometry=SimpleNamespace(floor=floor))
         tools.ceiling_height = 3.2
         tools._get_structural_surface_index = lambda: index
 

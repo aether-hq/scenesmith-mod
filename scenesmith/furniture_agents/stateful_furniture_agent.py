@@ -377,7 +377,21 @@ class StatefulFurnitureAgent(BaseStatefulAgent, BaseFurnitureAgent):
             return 0
 
         self.furniture_tools.set_noise_profile(PlacementNoiseMode.PERFECT)
-        attempted_positions: set[tuple[float, float]] = set()
+        support_elevations = self.furniture_tools._major_support_elevations()
+        attempted_positions: set[tuple[float, float, float]] = set()
+        level_counts = {elevation: 0 for elevation in support_elevations}
+        for scene_object in self.scene.objects.values():
+            if scene_object.object_type != ObjectType.FURNITURE:
+                continue
+            try:
+                object_elevation = float(scene_object.transform.translation()[2])
+            except (AttributeError, IndexError, TypeError, ValueError):
+                continue
+            nearest = min(
+                support_elevations,
+                key=lambda elevation: abs(elevation - object_elevation),
+            )
+            level_counts[nearest] += 1
         placed = 0
 
         for slot in room_kit.slots:
@@ -410,27 +424,39 @@ class StatefulFurnitureAgent(BaseStatefulAgent, BaseFurnitureAgent):
 
             for _ in range(missing):
                 success = False
-                for x, y, yaw in positions:
-                    position_key = (round(x, 4), round(y, 4))
-                    if position_key in attempted_positions:
-                        continue
-                    attempted_positions.add(position_key)
-                    raw_result = self.furniture_tools._add_furniture_to_scene_impl(
-                        asset_id=str(asset.object_id),
-                        x=x,
-                        y=y,
-                        z=0.0,
-                        roll=0.0,
-                        pitch=0.0,
-                        yaw=yaw,
-                    )
-                    try:
-                        success = bool(json.loads(raw_result).get("success"))
-                    except (json.JSONDecodeError, AttributeError, TypeError):
-                        success = False
+                for elevation in sorted(
+                    support_elevations,
+                    key=lambda value: (level_counts[value], value),
+                ):
+                    for x, y, yaw in positions:
+                        position_key = (
+                            round(x, 4),
+                            round(y, 4),
+                            round(elevation, 4),
+                        )
+                        if position_key in attempted_positions:
+                            continue
+                        attempted_positions.add(position_key)
+                        raw_result = self.furniture_tools._add_furniture_to_scene_impl(
+                            asset_id=str(asset.object_id),
+                            x=x,
+                            y=y,
+                            z=elevation,
+                            roll=0.0,
+                            pitch=0.0,
+                            yaw=yaw,
+                        )
+                        try:
+                            success = bool(json.loads(raw_result).get("success"))
+                        except (json.JSONDecodeError, AttributeError, TypeError):
+                            success = False
+                        if success:
+                            level_counts[elevation] += 1
+                            break
                     if success:
-                        placed += 1
                         break
+                if success:
+                    placed += 1
                 if not success:
                     console_logger.warning(
                         "Deterministic recovery exhausted valid poses for room-kit "
