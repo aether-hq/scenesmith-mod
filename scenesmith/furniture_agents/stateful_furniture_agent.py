@@ -5,7 +5,9 @@ This module implements a furniture placement workflow using persistent
 SQLiteSession agents that maintain conversation memory across interactions.
 """
 
+import json
 import logging
+import re
 
 from pathlib import Path
 from typing import Any
@@ -292,6 +294,155 @@ class StatefulFurnitureAgent(BaseStatefulAgent, BaseFurnitureAgent):
         console_logger.info(f"Context image saved to: {image_path}")
         return image_path
 
+    @staticmethod
+    def _semantic_tokens(value: str) -> set[str]:
+        """Normalize a short role or asset label for deterministic matching."""
+
+        stop_words = {"a", "an", "and", "for", "of", "the", "with"}
+        return {
+            token
+            for token in re.findall(r"[a-z0-9]+", value.lower().replace("_", " "))
+            if token not in stop_words
+        }
+
+    @classmethod
+    def _slot_relevance(cls, asset: Any, slot: Any) -> tuple[int, float, str]:
+        """Rank one cached asset against a semantic room-kit slot."""
+
+        role_names = (slot.role, *getattr(slot, "aliases", ()))
+        normalized_roles = {
+            " ".join(sorted(cls._semantic_tokens(role))) for role in role_names
+        }
+        asset_name = " ".join(sorted(cls._semantic_tokens(str(asset.name))))
+        asset_tokens = cls._semantic_tokens(
+            f"{asset.name} {getattr(asset, 'description', '')}"
+        )
+        role_tokens = set().union(*(cls._semantic_tokens(role) for role in role_names))
+        exact = int(asset_name in normalized_roles)
+        overlap = len(asset_tokens & role_tokens)
+        quality = float(
+            (getattr(asset, "metadata", None) or {}).get("asset_quality_score", 0.0)
+        )
+        return (exact * 100 + overlap, quality, str(asset.object_id))
+
+    def _deterministic_room_positions(
+        self, *, wall: bool
+    ) -> list[tuple[float, float, float]]:
+        """Return conservative unique SE(2) poses inside the room envelope."""
+
+        half_x = max(0.5, float(self.scene.room_geometry.length) / 2.0 - 0.65)
+        half_y = max(0.5, float(self.scene.room_geometry.width) / 2.0 - 0.65)
+        if wall:
+            return [
+                (-0.55 * half_x, 0.88 * half_y, 180.0),
+                (0.55 * half_x, 0.88 * half_y, 180.0),
+                (-0.55 * half_x, -0.88 * half_y, 0.0),
+                (0.55 * half_x, -0.88 * half_y, 0.0),
+                (-0.88 * half_x, 0.45 * half_y, -90.0),
+                (-0.88 * half_x, -0.45 * half_y, -90.0),
+                (0.88 * half_x, 0.45 * half_y, 90.0),
+                (0.88 * half_x, -0.45 * half_y, 90.0),
+            ]
+        return [
+            (0.0, -0.18 * half_y, 0.0),
+            (-0.42 * half_x, -0.18 * half_y, -90.0),
+            (0.42 * half_x, -0.18 * half_y, 90.0),
+            (-0.42 * half_x, 0.38 * half_y, -135.0),
+            (0.42 * half_x, 0.38 * half_y, 135.0),
+            (0.0, 0.58 * half_y, 180.0),
+            (-0.68 * half_x, -0.58 * half_y, -45.0),
+            (0.68 * half_x, -0.58 * half_y, 45.0),
+            (-0.68 * half_x, 0.68 * half_y, -135.0),
+            (0.68 * half_x, 0.68 * half_y, 135.0),
+            (0.0, -0.72 * half_y, 0.0),
+            (-0.72 * half_x, 0.0, -90.0),
+            (0.72 * half_x, 0.0, 90.0),
+        ]
+
+    def _place_room_kit_minimums_deterministically(
+        self, room_kit: RoomKitSelection
+    ) -> int:
+        """Recover required kit roles from acquired assets without another model call.
+
+        Every attempt goes through ``FurnitureTools`` so structural support,
+        enclosure, contextual, and collision validation remain authoritative.
+        """
+
+        assets = [
+            asset
+            for asset in self.asset_manager.list_available_assets()
+            if asset.object_type == ObjectType.FURNITURE
+        ]
+        if not assets:
+            return 0
+
+        self.furniture_tools.set_noise_profile(PlacementNoiseMode.PERFECT)
+        attempted_positions: set[tuple[float, float]] = set()
+        placed = 0
+
+        for slot in room_kit.slots:
+            if not slot.required:
+                continue
+            existing = sum(
+                obj.object_type == ObjectType.FURNITURE
+                and self._slot_relevance(obj, slot)[0] >= 100
+                for obj in self.scene.objects.values()
+            )
+            missing = max(0, int(slot.minimum_count) - existing)
+            if missing == 0:
+                continue
+
+            ranked = sorted(
+                assets,
+                key=lambda asset: self._slot_relevance(asset, slot),
+                reverse=True,
+            )
+            if not ranked or self._slot_relevance(ranked[0], slot)[0] <= 0:
+                console_logger.warning(
+                    "No cached furniture asset matched required room-kit role %s",
+                    slot.role,
+                )
+                continue
+            asset = ranked[0]
+            positions = self._deterministic_room_positions(
+                wall=getattr(slot, "placement_class", "floor") == "wall"
+            )
+
+            for _ in range(missing):
+                success = False
+                for x, y, yaw in positions:
+                    position_key = (round(x, 4), round(y, 4))
+                    if position_key in attempted_positions:
+                        continue
+                    attempted_positions.add(position_key)
+                    raw_result = self.furniture_tools._add_furniture_to_scene_impl(
+                        asset_id=str(asset.object_id),
+                        x=x,
+                        y=y,
+                        z=0.0,
+                        roll=0.0,
+                        pitch=0.0,
+                        yaw=yaw,
+                    )
+                    try:
+                        success = bool(json.loads(raw_result).get("success"))
+                    except (json.JSONDecodeError, AttributeError, TypeError):
+                        success = False
+                    if success:
+                        placed += 1
+                        break
+                if not success:
+                    console_logger.warning(
+                        "Deterministic recovery exhausted valid poses for room-kit "
+                        "role %s after placing %d of %d missing instances",
+                        slot.role,
+                        placed,
+                        missing,
+                    )
+                    break
+
+        return placed
+
     async def add_furniture(self, scene: RoomScene) -> None:
         """Add furniture to a scene.
 
@@ -350,6 +501,15 @@ class StatefulFurnitureAgent(BaseStatefulAgent, BaseFurnitureAgent):
             agent_name="PLANNER (FURNITURE)",
             state_hash=self.scene.content_hash,
         )
+
+        if room_kit is not None:
+            recovered = self._place_room_kit_minimums_deterministically(room_kit)
+            if recovered:
+                console_logger.warning(
+                    "Deterministic room-kit recovery placed %d required furniture "
+                    "objects from cached assets",
+                    recovered,
+                )
 
         # Compute final critique and scores for completed scene.
         # Check if scene changed since last checkpoint to avoid redundant critique.
