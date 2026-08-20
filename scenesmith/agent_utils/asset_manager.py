@@ -2195,13 +2195,12 @@ class AssetManager:
         final_gltf_path = canonical_path
         initial_scale = 1.0
         if desired_dimensions is not None:
-            # Agent dimensions are scene/Drake [width, depth, height]. The mesh
-            # is standard Y-up glTF [width, height, depth] at this stage.
-            mesh_target_dimensions = [
-                desired_dimensions[0],
-                desired_dimensions[2],
-                desired_dimensions[1],
-            ]
+            # HSSD canonicalization emits scene/Z-up coordinates, while the
+            # other catalog paths retain the historical Y-up glTF convention.
+            mesh_target_dimensions = self._canonical_mesh_target_dimensions(
+                desired_dimensions,
+                is_hssd=is_hssd,
+            )
             console_logger.info(
                 "Scaling mesh to scene dimensions %s (glTF containing box %s)",
                 desired_dimensions,
@@ -2242,22 +2241,10 @@ class AssetManager:
         )
 
         # Extract bounding box from scaled mesh.
-        bounds = mesh.bounds  # In Y-up coordinates (GLTF native format).
-
-        # Transform from Y-up (GLTF) to Z-up (Drake) coordinate system.
-        # Y-up → Z-up transformation: (x, y, z) → (x, -z, y)
-        # Maps: X→X (right), Y→Z (up), Z→-Y (forward with sign flip).
-        bbox_min_yup = bounds[0]
-        bbox_max_yup = bounds[1]
-
-        # Apply coordinate transformation.
-        bbox_min = np.array([bbox_min_yup[0], -bbox_min_yup[2], bbox_min_yup[1]])
-        bbox_max = np.array([bbox_max_yup[0], -bbox_max_yup[2], bbox_max_yup[1]])
-
-        # Ensure min < max after transformation (negation can swap order).
-        bbox_min, bbox_max = (
-            np.minimum(bbox_min, bbox_max),
-            np.maximum(bbox_min, bbox_max),
+        bounds = mesh.bounds
+        bbox_min, bbox_max = self._canonical_bounds_to_drake(
+            bounds,
+            is_hssd=is_hssd,
         )
 
         console_logger.info(
@@ -2278,6 +2265,44 @@ class AssetManager:
             "-Z": "+Y",
         }
         return mapping.get(axis.upper(), axis.upper())
+
+    @staticmethod
+    def _canonical_mesh_target_dimensions(
+        desired_dimensions: list[float],
+        *,
+        is_hssd: bool,
+    ) -> list[float]:
+        """Express scene dimensions in the canonical mesh's coordinate frame."""
+        if is_hssd:
+            return list(desired_dimensions)
+        return [
+            desired_dimensions[0],
+            desired_dimensions[2],
+            desired_dimensions[1],
+        ]
+
+    @staticmethod
+    def _canonical_bounds_to_drake(
+        bounds: np.ndarray,
+        *,
+        is_hssd: bool,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Express canonical mesh bounds in the scene/Drake Z-up frame."""
+        if is_hssd:
+            return np.asarray(bounds[0], dtype=float), np.asarray(
+                bounds[1], dtype=float
+            )
+
+        # Y-up → Z-up transformation: (x, y, z) → (x, -z, y).
+        bbox_min_yup = bounds[0]
+        bbox_max_yup = bounds[1]
+        bbox_min = np.array(
+            [bbox_min_yup[0], -bbox_min_yup[2], bbox_min_yup[1]]
+        )
+        bbox_max = np.array(
+            [bbox_max_yup[0], -bbox_max_yup[2], bbox_max_yup[1]]
+        )
+        return np.minimum(bbox_min, bbox_max), np.maximum(bbox_min, bbox_max)
 
     @staticmethod
     def _canonical_axis(value: str | None, default: str) -> str:

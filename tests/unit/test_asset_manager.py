@@ -36,6 +36,28 @@ def test_hssd_gltf_axes_are_converted_to_blender_import_frame():
     assert AssetManager._gltf_axis_to_blender("-Z") == "+Y"
 
 
+def test_hssd_canonical_dimensions_and_bounds_stay_in_scene_axes():
+    desired = [1.0, 0.35, 2.0]
+    bounds = np.array([[0.0, 0.0, 0.0], [0.9779, 0.3568, 2.0574]])
+
+    assert AssetManager._canonical_mesh_target_dimensions(
+        desired, is_hssd=True
+    ) == desired
+    bbox_min, bbox_max = AssetManager._canonical_bounds_to_drake(
+        bounds, is_hssd=True
+    )
+    np.testing.assert_allclose(bbox_min, bounds[0])
+    np.testing.assert_allclose(bbox_max, bounds[1])
+
+
+def test_non_hssd_canonical_dimensions_keep_y_up_conversion():
+    desired = [1.0, 0.35, 2.0]
+
+    assert AssetManager._canonical_mesh_target_dimensions(
+        desired, is_hssd=False
+    ) == [1.0, 2.0, 0.35]
+
+
 def create_mock_cfg():
     """Create mock configuration for AssetManager tests.
 
