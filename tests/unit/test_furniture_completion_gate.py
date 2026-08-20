@@ -1,11 +1,9 @@
 """Regression tests for semantic furniture-stage completion gates."""
 
 import json
-
 from types import SimpleNamespace
 
 import pytest
-
 from agents.exceptions import ModelBehaviorError
 
 from scenesmith.agent_utils.room import ObjectType
@@ -161,3 +159,63 @@ def test_library_kit_recovers_required_minimums_from_cached_assets():
     assert "task_lamp" not in placed_roles
     assert len({(call["x"], call["y"], call["z"]) for call in placements}) == 7
     assert {call["z"] for call in placements} == {0.0, 4.0, 8.0}
+
+
+def test_library_recovery_prefers_stable_armchair_over_role_exact_rocker():
+    assets = [
+        SimpleNamespace(
+            object_id="reading_chair_0",
+            object_type=ObjectType.FURNITURE,
+            name="reading_chair",
+            description="burgundy leather rocking chair",
+            metadata={
+                "asset_quality_score": 0.76,
+                "catalog_semantics": "Chesterfield rocking chair rocking_chair.n.01",
+            },
+        ),
+        SimpleNamespace(
+            object_id="library_reading_chair_0",
+            object_type=ObjectType.FURNITURE,
+            name="library_reading_chair",
+            description="stationary upholstered armchair",
+            metadata={
+                "asset_quality_score": 1.0,
+                "catalog_semantics": "Wooden armchair Furniture/Seating/Chairs",
+            },
+        ),
+    ]
+    placements = []
+
+    class FakeTools:
+        def set_noise_profile(self, _mode):
+            pass
+
+        def _major_support_elevations(self):
+            return (0.0, 4.0, 8.0)
+
+        def _add_furniture_to_scene_impl(self, **kwargs):
+            placements.append(kwargs)
+            return json.dumps({"success": True})
+
+    room_kit = SimpleNamespace(
+        slots=(
+            SimpleNamespace(
+                role="reading_chair",
+                aliases=("chair", "seat"),
+                query="stationary upholstered library reading chair",
+                required=True,
+                minimum_count=1,
+                placement_class="floor",
+            ),
+        )
+    )
+    agent = object.__new__(StatefulFurnitureAgent)
+    agent.scene = SimpleNamespace(
+        objects={"wall": SimpleNamespace(object_type=ObjectType.WALL)},
+        room_geometry=SimpleNamespace(length=7.0, width=7.0),
+    )
+    agent.asset_manager = SimpleNamespace(list_available_assets=lambda: assets)
+    agent.furniture_tools = FakeTools()
+
+    assert agent._place_room_kit_minimums_deterministically(room_kit) == 1
+    assert placements[0]["asset_id"] == "library_reading_chair_0"

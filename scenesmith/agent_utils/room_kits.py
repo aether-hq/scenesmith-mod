@@ -489,9 +489,16 @@ def select_room_kit(
                 elif collection_scale and slot.role == "reading_chair":
                     slot = replace(
                         slot,
+                        query=(
+                            "stationary four-legged upholstered Renaissance library "
+                            "reading chair"
+                            if renaissance
+                            else "stationary four-legged upholstered library reading chair"
+                        ),
                         minimum_count=12,
                         target_count=12,
                         maximum_count=20,
+                        notes="Use fixed seating, not rocking, swivel, or wheeled chairs.",
                     )
                 elif statues_requested and slot.role == "classical_statue":
                     slot = replace(

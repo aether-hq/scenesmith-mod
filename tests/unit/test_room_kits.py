@@ -53,6 +53,8 @@ def test_collection_scale_library_requires_dense_shelves_and_statues():
     statue = next(slot for slot in selection.slots if slot.role == "classical_statue")
     assert statue.required
     assert selection.slot_counts["classical_statue"] >= 2
+    chair = next(slot for slot in selection.slots if slot.role == "reading_chair")
+    assert "stationary" in chair.query.casefold()
 
 
 def test_medical_kit_keeps_equipment_beside_bed():

@@ -68,6 +68,23 @@ def test_accepts_chair_and_bookshelf_ontology_matches() -> None:
     assert shelf
 
 
+def test_stationary_chair_request_rejects_rocking_mechanism() -> None:
+    rocking, reason = catalog_candidate_is_compatible(
+        request_text="stationary upholstered library reading chair",
+        candidate_text="Leather Chesterfield rocking chair rocking_chair.n.01",
+        quality_score=0.76,
+    )
+    armchair, _ = catalog_candidate_is_compatible(
+        request_text="stationary upholstered library reading chair",
+        candidate_text="Wooden upholstered armchair Furniture/Seating/Chairs",
+        quality_score=1.0,
+    )
+
+    assert not rocking
+    assert "stationary" in reason
+    assert armchair
+
+
 def test_quality_floor_rejects_weak_catalog_mesh() -> None:
     compatible, reason = catalog_candidate_is_compatible(
         request_text="Ergonomic study chair",

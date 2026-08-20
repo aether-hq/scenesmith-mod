@@ -8,7 +8,6 @@ SQLiteSession agents that maintain conversation memory across interactions.
 import json
 import logging
 import re
-
 from pathlib import Path
 from typing import Any
 
@@ -16,6 +15,7 @@ from agents import Agent, FunctionTool
 from agents.exceptions import ModelBehaviorError
 from omegaconf import DictConfig
 
+from scenesmith.agent_utils.asset_semantics import catalog_candidate_is_compatible
 from scenesmith.agent_utils.base_stateful_agent import BaseStatefulAgent
 from scenesmith.agent_utils.blender.process_provider import RenderAllocation
 from scenesmith.agent_utils.placement_noise import PlacementNoiseMode
@@ -372,9 +372,20 @@ class StatefulFurnitureAgent(BaseStatefulAgent, BaseFurnitureAgent):
         role_tokens = set().union(*(cls._semantic_tokens(role) for role in role_names))
         exact = int(asset_name in normalized_roles)
         overlap = len(asset_tokens & role_tokens)
-        quality = float(
-            (getattr(asset, "metadata", None) or {}).get("asset_quality_score", 0.0)
+        metadata = getattr(asset, "metadata", None) or {}
+        quality = float(metadata.get("asset_quality_score", 0.0))
+        candidate_text = str(
+            metadata.get("catalog_semantics")
+            or metadata.get("ontology_path")
+            or f"{asset.name} {getattr(asset, 'description', '')}"
         )
+        compatible, _ = catalog_candidate_is_compatible(
+            request_text=str(getattr(slot, "query", slot.role)),
+            candidate_text=candidate_text,
+            quality_score=quality,
+        )
+        if not compatible:
+            return (-1, quality, str(asset.object_id))
         return (exact * 100 + overlap, quality, str(asset.object_id))
 
     def _deterministic_room_positions(

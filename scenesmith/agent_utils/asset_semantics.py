@@ -9,9 +9,7 @@ before an asset is allowed into a scene.
 from __future__ import annotations
 
 import re
-
 from collections.abc import Iterable
-
 
 _FAMILY_TERMS: dict[str, frozenset[str]] = {
     "chair": frozenset(
@@ -176,6 +174,24 @@ def catalog_candidate_is_compatible(
             False,
             f"quality {quality_score:.2f} is below {minimum_quality:.2f}",
         )
+
+    request_tokens = semantic_tokens(request_text)
+    candidate_tokens = semantic_tokens(candidate_text)
+    if "stationary" in request_tokens:
+        moving_mechanisms = candidate_tokens & {
+            "rocker",
+            "rocking",
+            "swivel",
+            "wheeled",
+            "wheel",
+            "wheels",
+        }
+        if moving_mechanisms:
+            return (
+                False,
+                "stationary request is incompatible with moving mechanism: "
+                + ", ".join(sorted(moving_mechanisms)),
+            )
 
     requested = semantic_families(request_text)
     candidate = semantic_families(candidate_text)
