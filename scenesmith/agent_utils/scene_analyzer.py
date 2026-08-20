@@ -43,6 +43,15 @@ class FurnitureSelection:
     """IDs of nearby furniture for context (e.g., chairs around a table)."""
 
 
+@dataclass(frozen=True)
+class _ManipulandDesignContext:
+    """Canonical scene intent used by deterministic detail selection."""
+
+    rich_collection: bool
+    prompt_constraints: str
+    style_notes: str
+
+
 _MANIPULAND_SURFACE_RULES: tuple[tuple[tuple[str, ...], str, int], ...] = (
     (
         ("medical bed", "med bed", "hospital bed", "treatment bed"),
@@ -96,6 +105,111 @@ def deterministic_manipuland_assignment(obj: Any) -> tuple[str, int] | None:
         if any(keyword in searchable for keyword in keywords):
             return suggested_items, priority
     return None
+
+
+def _load_manipuland_design_context(
+    scene: RoomScene,
+) -> _ManipulandDesignContext | None:
+    """Load the persisted scene blueprint adjacent to a room checkpoint."""
+
+    room_dir = Path(scene.scene_dir)
+    blueprint_paths = (
+        room_dir / "scene_blueprint.json",
+        room_dir.parent / "scene_blueprint.json",
+    )
+    blueprint: dict[str, Any] | None = None
+    for blueprint_path in blueprint_paths:
+        try:
+            blueprint = json.loads(blueprint_path.read_text(encoding="utf-8"))
+            break
+        except (FileNotFoundError, json.JSONDecodeError, OSError, TypeError):
+            continue
+    if blueprint is None:
+        return None
+
+    source_prompt = str(blueprint.get("source_prompt") or scene.text_description)
+    furniture_groups = blueprint.get("furniture_groups") or []
+    rich_collection = "thousands of books" in source_prompt.casefold()
+    for group in furniture_groups:
+        roles = group.get("roles") or {}
+        if (
+            int(roles.get("bookshelf", 0)) >= 12
+            and str(group.get("density", "")).casefold() == "layered"
+        ):
+            rich_collection = True
+
+    tokens = blueprint.get("design_tokens") or {}
+    style_keywords = [str(value) for value in tokens.get("style_keywords") or []]
+    palette = [str(value) for value in tokens.get("palette") or []]
+    material_roles = {
+        str(role): str(value)
+        for role, value in (tokens.get("material_roles") or {}).items()
+    }
+    focal_hierarchy = [
+        str(value) for value in tokens.get("focal_hierarchy") or []
+    ]
+    lighting_mood = str(tokens.get("lighting_mood") or "")
+    ornate = any(
+        keyword in " ".join(style_keywords).casefold()
+        for keyword in ("renaissance", "ornate", "grand")
+    )
+
+    sections = []
+    if style_keywords:
+        sections.append(f"style: {', '.join(style_keywords)}")
+    if palette:
+        sections.append(f"palette: {', '.join(palette)}")
+    if material_roles:
+        sections.append(
+            "materials: "
+            + ", ".join(
+                f"{role}={value}" for role, value in material_roles.items()
+            )
+        )
+    if lighting_mood:
+        sections.append(f"lighting: {lighting_mood}")
+    if focal_hierarchy:
+        sections.append(f"focal hierarchy: {', '.join(focal_hierarchy)}")
+    if not sections:
+        sections.append(f"room prompt: {source_prompt[:240]}")
+    style_notes = "Canonical scene design: " + "; ".join(sections)
+    if ornate:
+        style_notes = (
+            "Richly layered canonical scene design. Avoid sparse functional "
+            "treatment; reinforce ornate authored details. "
+            + "; ".join(sections)
+        )
+    return _ManipulandDesignContext(
+        rich_collection=rich_collection,
+        prompt_constraints=f"Explicit scene requirements: {source_prompt}",
+        style_notes=style_notes,
+    )
+
+
+def _select_surfaces_across_levels(
+    candidates: list[tuple[int, str, Any, str]],
+    *,
+    limit: int,
+) -> list[tuple[int, str, Any, str]]:
+    """Round-robin deterministic support surfaces across authored stories."""
+
+    by_level: dict[float, list[tuple[int, str, Any, str]]] = {}
+    for candidate in candidates:
+        obj = candidate[2]
+        try:
+            elevation = round(float(obj.transform.translation()[2]), 3)
+        except (AttributeError, IndexError, TypeError, ValueError):
+            elevation = 0.0
+        by_level.setdefault(elevation, []).append(candidate)
+
+    selected: list[tuple[int, str, Any, str]] = []
+    while len(selected) < limit and any(by_level.values()):
+        for elevation in sorted(by_level):
+            if by_level[elevation]:
+                selected.append(by_level[elevation].pop(0))
+                if len(selected) >= limit:
+                    break
+    return selected
 
 
 def _compute_aabb_edge_distance(
@@ -381,17 +495,51 @@ class SceneAnalyzer:
             candidates.sort(key=lambda item: (-item[0], item[1]))
             max_furniture = int(getattr(selection_cfg, "max_furniture", 3))
             scene_style = scene.text_description or "context-appropriate room"
+            design_context = _load_manipuland_design_context(scene)
+            if design_context is not None and design_context.rich_collection:
+                max_furniture = max(max_furniture, min(9, len(candidates)))
+                selected_candidates = _select_surfaces_across_levels(
+                    candidates,
+                    limit=max_furniture,
+                )
+            else:
+                selected_candidates = candidates[:max_furniture]
+
+            def selection_items(obj: Any, suggested_items: str) -> str:
+                searchable = (
+                    f"{getattr(obj, 'name', '')} "
+                    f"{getattr(obj, 'description', '')}"
+                ).casefold()
+                if (
+                    design_context is not None
+                    and design_context.rich_collection
+                    and any(word in searchable for word in ("shelf", "bookcase"))
+                ):
+                    return (
+                        "dense rows of visible leather-bound books with a few "
+                        "curated Renaissance library accents"
+                    )
+                return suggested_items
+
             result = [
                 FurnitureSelection(
                     furniture_id=obj.object_id,
-                    suggested_items=suggested_items,
-                    prompt_constraints="No additional object was explicitly required",
+                    suggested_items=selection_items(obj, suggested_items),
+                    prompt_constraints=(
+                        design_context.prompt_constraints
+                        if design_context is not None
+                        else "No additional object was explicitly required"
+                    ),
                     style_notes=(
-                        "Sparse, functional placement derived from the room prompt: "
-                        f"{scene_style[:240]}"
+                        design_context.style_notes
+                        if design_context is not None
+                        else (
+                            "Sparse, functional placement derived from the room "
+                            f"prompt: {scene_style[:240]}"
+                        )
                     ),
                 )
-                for _, _, obj, suggested_items in candidates[:max_furniture]
+                for _, _, obj, suggested_items in selected_candidates
             ]
             console_logger.info(
                 "Deterministically selected %d support surfaces: %s",
