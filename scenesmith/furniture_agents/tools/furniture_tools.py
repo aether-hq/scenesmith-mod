@@ -1,8 +1,9 @@
+import copy
+import json
 import logging
 import math
 import os
 import time
-import copy
 
 from typing import Any
 
@@ -18,12 +19,13 @@ from scenesmith.agent_utils.asset_manager import (
     AssetGenerationResult as DomainAssetGenerationResult,
     AssetManager,
 )
+from scenesmith.agent_utils.contextual_solver import validate_scene_object_placement
 from scenesmith.agent_utils.loop_detector import LoopDetector
+from scenesmith.agent_utils.physics_validation import compute_scene_collisions
 from scenesmith.agent_utils.placement_noise import (
     PlacementNoiseMode,
     apply_placement_noise,
 )
-from scenesmith.agent_utils.physics_validation import compute_scene_collisions
 from scenesmith.agent_utils.rescale_helpers import rescale_object_common
 from scenesmith.agent_utils.rescale_result import RescaleErrorType, RescaleResult
 from scenesmith.agent_utils.response_datatypes import (
@@ -357,6 +359,38 @@ class FurnitureTools:
                 continue
             descriptions.append(collision.to_description())
         return descriptions
+
+    def _validate_contextual_zones(self, scene_object: SceneObject) -> tuple[bool, str]:
+        """Run the fast semantic solver before invoking heavyweight physics."""
+
+        furniture = self.scene.get_objects_by_type(ObjectType.FURNITURE)
+        if not isinstance(furniture, (list, tuple)):
+            # Compatibility for legacy tests and partially restored scenes. The
+            # production RoomScene API always returns a concrete list.
+            furniture = []
+        existing = [
+            item for item in furniture if item.object_id != scene_object.object_id
+        ]
+        result = validate_scene_object_placement(scene_object, existing)
+        hard = [
+            violation for violation in result.violations if violation.severity == "hard"
+        ]
+        soft = [
+            violation for violation in result.violations if violation.severity == "soft"
+        ]
+        for violation in soft:
+            console_logger.info(
+                "Contextual placement advisory %s: %s",
+                violation.code,
+                violation.message,
+            )
+        if not hard:
+            return True, ""
+        payload = {
+            "message": "Contextual placement constraints rejected this pose",
+            "violations": [violation.to_dict() for violation in hard],
+        }
+        return False, json.dumps(payload, separators=(",", ":"), sort_keys=True)
 
     def _create_loop_error_response(
         self, method_name: str, attempt_count: int, args: tuple, kwargs: dict
@@ -713,6 +747,19 @@ class FurnitureTools:
                     error_type=FurnitureErrorType.INVALID_POSITION,
                 )
 
+            contextual_valid, contextual_message = self._validate_contextual_zones(
+                scene_object
+            )
+            if not contextual_valid:
+                console_logger.warning(
+                    "Contextual placement rejected: %s", contextual_message
+                )
+                return self._create_failure_result(
+                    asset_id=asset_id,
+                    message=contextual_message,
+                    error_type=FurnitureErrorType.INVALID_POSITION,
+                )
+
             # Add to scene.
             self.scene.add_object(scene_object)
 
@@ -915,11 +962,11 @@ class FurnitureTools:
                 rotation_yaw_std_degrees=self.active_noise_profile.rotation_yaw_std_degrees,
             )
 
-            scene_obj.transform = new_transform
+            prospective = copy.copy(scene_obj)
+            prospective.transform = new_transform
             envelope_valid, envelope_message = self._validate_spatial_envelope(
-                scene_obj
+                prospective
             )
-            scene_obj.transform = current_transform
             if not envelope_valid:
                 console_logger.warning("Move rejected: %s", envelope_message)
                 return FurnitureOperationResult(
@@ -928,6 +975,21 @@ class FurnitureTools:
                     object_id=object_id,
                     error_type=FurnitureErrorType.INVALID_POSITION,
                     suggested_action="Choose a pose that fits the support and enclosure",
+                ).to_json()
+
+            contextual_valid, contextual_message = self._validate_contextual_zones(
+                prospective
+            )
+            if not contextual_valid:
+                console_logger.warning(
+                    "Contextual move rejected: %s", contextual_message
+                )
+                return FurnitureOperationResult(
+                    success=False,
+                    message=contextual_message,
+                    object_id=object_id,
+                    error_type=FurnitureErrorType.INVALID_POSITION,
+                    suggested_action="Apply the machine-readable repair and retry",
                 ).to_json()
 
             # Update object to new absolute pose.
