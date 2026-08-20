@@ -705,6 +705,7 @@ def synthesize_structural_layout(
     ]
     hole = [platform_xy(point_xy) for point_xy in hole_house]
     platform_holes = [hole]
+    guarded_hole_indices: list[int] = []
     folded_prompt = prompt.casefold()
     gallery_library = "library" in folded_prompt and any(
         token in folded_prompt
@@ -742,6 +743,7 @@ def synthesize_structural_layout(
             platform_holes.append(
                 [platform_xy(point_xy) for point_xy in gallery_hole_house]
             )
+            guarded_hole_indices.append(len(platform_holes) - 1)
             diagnostics.append(
                 "Added a large gallery atrium void to each upper library level."
             )
@@ -752,6 +754,7 @@ def synthesize_structural_layout(
             "footprint": {"outer": outer, "holes": platform_holes},
             "elevation": index * height,
             "thickness": 0.2,
+            "guarded_hole_indices": guarded_hole_indices,
             "traversable": True,
         }
         for index in range(1, level_count)

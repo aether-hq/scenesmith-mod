@@ -573,6 +573,48 @@ class TestPlatforms(unittest.TestCase):
             compiled.surfaces[0].surface.roles, frozenset({SurfaceRole.SUPPORT})
         )
 
+    def test_guarded_atrium_hole_compiles_balustrade_and_mixed_collision(
+        self,
+    ) -> None:
+        compiled = compile_platform(
+            PlatformSpec(
+                platform_id="gallery",
+                space_id="library",
+                footprint=Footprint2D(
+                    outer=((0, 0), (8, 0), (8, 8), (0, 8)),
+                    holes=(((2, 2), (2, 6), (6, 6), (6, 2)),),
+                ),
+                elevation=3.0,
+                guarded_hole_indices=(0,),
+            )
+        )
+
+        self.assertAlmostEqual(compiled.visual_mesh.bounds[1][2], 4.1)
+        self.assertAlmostEqual(compiled.collision_mesh.bounds[1][2], 3.0)
+        guard_surfaces = [
+            patch
+            for patch in compiled.surfaces
+            if patch.surface.metadata.get("structure_type") == "platform_guard"
+        ]
+        self.assertEqual(len(guard_surfaces), 4)
+        self.assertTrue(
+            all(
+                patch.surface.metadata["guard_style"]
+                == "Renaissance posts and rails"
+                for patch in guard_surfaces
+            )
+        )
+        self.assertGreaterEqual(len(compiled.collision_primitives), 12)
+
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            paths = write_compiled_structure(compiled, temporary_directory)
+            sdf = ET.parse(paths.sdf_path)
+        self.assertEqual(len(sdf.findall(".//collision/geometry/mesh")), 1)
+        self.assertEqual(
+            len(sdf.findall(".//collision/geometry/box")),
+            len(compiled.collision_primitives),
+        )
+
 
 class TestHeightfields(unittest.TestCase):
     def test_grid_compiles_to_queryable_sloped_triangles(self) -> None:

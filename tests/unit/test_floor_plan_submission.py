@@ -297,6 +297,7 @@ def test_large_multilevel_library_synthesizes_gallery_atrium():
     for slab in slabs:
         holes = slab["footprint"]["holes"]
         assert len(holes) >= 2
+        assert slab["guarded_hole_indices"] == [1]
         gallery_hole = max(
             holes,
             key=lambda hole: (
@@ -310,7 +311,9 @@ def test_large_multilevel_library_synthesizes_gallery_atrium():
         assert max(point[1] for point in gallery_hole) - min(
             point[1] for point in gallery_hole
         ) >= 5.0
-        assert compile_platform(PlatformSpec.from_dict(slab)).visual_mesh.vertices
+        compiled = compile_platform(PlatformSpec.from_dict(slab))
+        assert compiled.visual_mesh.vertices
+        assert compiled.visual_mesh.bounds[1][2] > slab["elevation"] + 1.0
 
 
 def test_multilevel_synthesis_supports_each_structural_stair_family():

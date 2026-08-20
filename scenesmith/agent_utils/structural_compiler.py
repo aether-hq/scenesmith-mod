@@ -1416,6 +1416,8 @@ def compile_platform(platform: PlatformSpec) -> CompiledStructure:
         group_prefix="platform",
         groups=mutable_groups,
     )
+    slab_mesh = builder.build()
+    guard_primitives: list[CollisionPrimitive] = []
     top_roles = {SurfaceRole.SUPPORT}
     if platform.traversable:
         top_roles.add(SurfaceRole.TRAVERSABLE)
@@ -1494,12 +1496,129 @@ def compile_platform(platform: PlatformSpec) -> CompiledStructure:
                     normal=_normalize((dy, -dx, 0.0)),
                 )
             )
+
+    guard_height = 1.1
+    rail_width = 0.1
+
+    def add_guard_member(
+        *,
+        member_id: str,
+        origin: Point3,
+        along: Point3,
+        across: Point3,
+        length: float,
+        bottom_z: float,
+        top_z: float,
+        width: float,
+    ) -> None:
+        builder.add_prism(
+            _box_vertices(
+                origin=origin,
+                along=along,
+                across=across,
+                length=length,
+                width=width,
+                bottom_z=bottom_z,
+                top_start_z=top_z,
+                top_end_z=top_z,
+            )
+        )
+        center = _offset(origin, (along, length / 2.0))
+        guard_primitives.append(
+            CollisionPrimitive(
+                primitive_id=member_id,
+                primitive_type="box",
+                transform=Transform3D(
+                    translation=(
+                        center[0],
+                        center[1],
+                        (bottom_z + top_z) / 2.0,
+                    ),
+                    rotation_rpy=(0.0, 0.0, math.atan2(along[1], along[0])),
+                ),
+                dimensions=(length, width, top_z - bottom_z),
+            )
+        )
+
+    for hole_index in platform.guarded_hole_indices:
+        loop = platform.footprint.holes[hole_index]
+        for edge_index, (start, end) in enumerate(
+            zip(loop, loop[1:] + loop[:1])
+        ):
+            dx, dy = end[0] - start[0], end[1] - start[1]
+            edge_length = math.hypot(dx, dy)
+            along = (dx / edge_length, dy / edge_length, 0.0)
+            across = (-along[1], along[0], 0.0)
+            origin = (start[0], start[1], 0.0)
+            edge_prefix = (
+                f"{platform.platform_id}_guard_{hole_index:02d}_{edge_index:03d}"
+            )
+            add_guard_member(
+                member_id=f"{edge_prefix}_base_rail",
+                origin=origin,
+                along=along,
+                across=across,
+                length=edge_length,
+                bottom_z=platform.elevation + 0.12,
+                top_z=platform.elevation + 0.22,
+                width=rail_width,
+            )
+            add_guard_member(
+                member_id=f"{edge_prefix}_top_rail",
+                origin=origin,
+                along=along,
+                across=across,
+                length=edge_length,
+                bottom_z=platform.elevation + 0.98,
+                top_z=platform.elevation + guard_height,
+                width=rail_width,
+            )
+            interval_count = max(1, math.ceil(edge_length / 0.75))
+            for post_index in range(interval_count + 1):
+                distance = edge_length * post_index / interval_count
+                post_center = _offset(origin, (along, distance))
+                post_origin = _offset(post_center, (along, -0.035))
+                add_guard_member(
+                    member_id=f"{edge_prefix}_baluster_{post_index:03d}",
+                    origin=post_origin,
+                    along=along,
+                    across=across,
+                    length=0.07,
+                    bottom_z=platform.elevation + 0.18,
+                    top_z=platform.elevation + 1.02,
+                    width=0.07,
+                )
+            surfaces.append(
+                CompiledSurfacePatch(
+                    surface=StructuralSurface(
+                        surface_id=f"{edge_prefix}_surface",
+                        roles=frozenset({SurfaceRole.BOUNDARY}),
+                        source_id=platform.platform_id,
+                        metadata={
+                            "space_id": platform.space_id,
+                            "hole_index": hole_index,
+                            "edge_index": edge_index,
+                            "structure_type": "platform_guard",
+                            "guard_style": "Renaissance posts and rails",
+                            "guard_height_m": guard_height,
+                        },
+                    ),
+                    boundary=(
+                        (start[0], start[1], platform.elevation),
+                        (end[0], end[1], platform.elevation),
+                        (end[0], end[1], platform.elevation + guard_height),
+                        (start[0], start[1], platform.elevation + guard_height),
+                    ),
+                    normal=_normalize((dy, -dx, 0.0)),
+                )
+            )
     mesh = builder.build()
     return CompiledStructure(
         structure_id=platform.platform_id,
         visual_mesh=mesh,
-        collision_mesh=mesh,
+        collision_mesh=slab_mesh,
         surfaces=tuple(surfaces),
+        collision_primitives=tuple(guard_primitives),
         triangle_groups={
             name: tuple(indices) for name, indices in mutable_groups.items()
         },
@@ -2295,7 +2414,6 @@ def write_compiled_structure(
     collision_mesh_bytes: bytes | None = None
     if (
         compiled.collision_enabled
-        and not compiled.collision_primitives
         and compiled.collision_mesh != compiled.visual_mesh
     ):
         collision_mesh_name = f"{compiled.structure_id}.collision.obj"
@@ -2317,6 +2435,11 @@ def write_compiled_structure(
     if not compiled.collision_enabled:
         pass
     elif compiled.collision_primitives:
+        if collision_mesh_name is not None:
+            collision = ET.SubElement(
+                link, "collision", {"name": "structure_collision"}
+            )
+            _add_mesh_geometry(collision, collision_mesh_name)
         for primitive in compiled.collision_primitives:
             collision = ET.SubElement(
                 link, "collision", {"name": primitive.primitive_id}

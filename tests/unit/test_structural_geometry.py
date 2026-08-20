@@ -209,6 +209,31 @@ class TestProfilesAndSurfaces(unittest.TestCase):
                 open_edge_indices=(4,),
             )
 
+    def test_platform_guarded_hole_round_trip_and_validation(self) -> None:
+        footprint = Footprint2D(
+            outer=((0, 0), (8, 0), (8, 8), (0, 8)),
+            holes=(((2, 2), (2, 6), (6, 6), (6, 2)),),
+        )
+        platform = PlatformSpec(
+            platform_id="gallery",
+            space_id="atrium",
+            footprint=footprint,
+            elevation=3.0,
+            guarded_hole_indices=(0,),
+        )
+
+        self.assertEqual(PlatformSpec.from_dict(platform.to_dict()), platform)
+        with self.assertRaisesRegex(
+            GeometryValidationError, "guarded_hole_indices"
+        ):
+            PlatformSpec(
+                platform_id="bad_gallery",
+                space_id="atrium",
+                footprint=footprint,
+                elevation=3.0,
+                guarded_hole_indices=(1,),
+            )
+
     def test_heightfield_round_trip_and_rectangular_validation(self) -> None:
         heightfield = HeightfieldSpec(
             heightfield_id="cave_floor",

@@ -659,6 +659,7 @@ class PlatformSpec:
     elevation: float
     thickness: float = 0.15
     open_edge_indices: tuple[int, ...] = ()
+    guarded_hole_indices: tuple[int, ...] = ()
     traversable: bool = True
 
     def __post_init__(self) -> None:
@@ -684,9 +685,21 @@ class PlatformSpec:
                 f"open_edge_indices must be unique and inside [0, {edge_count})",
                 entity_id=self.platform_id,
             )
+        guarded_holes = tuple(int(index) for index in self.guarded_hole_indices)
+        hole_count = len(self.footprint.holes)
+        if len(guarded_holes) != len(set(guarded_holes)) or any(
+            index < 0 or index >= hole_count for index in guarded_holes
+        ):
+            raise GeometryValidationError(
+                "invalid_guarded_hole",
+                "guarded_hole_indices must be unique and inside "
+                f"[0, {hole_count})",
+                entity_id=self.platform_id,
+            )
         object.__setattr__(self, "elevation", elevation)
         object.__setattr__(self, "thickness", thickness)
         object.__setattr__(self, "open_edge_indices", open_edges)
+        object.__setattr__(self, "guarded_hole_indices", guarded_holes)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -696,6 +709,7 @@ class PlatformSpec:
             "elevation": self.elevation,
             "thickness": self.thickness,
             "open_edge_indices": list(self.open_edge_indices),
+            "guarded_hole_indices": list(self.guarded_hole_indices),
             "traversable": self.traversable,
         }
 
@@ -708,6 +722,7 @@ class PlatformSpec:
             elevation=data["elevation"],
             thickness=data.get("thickness", 0.15),
             open_edge_indices=tuple(data.get("open_edge_indices", [])),
+            guarded_hole_indices=tuple(data.get("guarded_hole_indices", [])),
             traversable=bool(data.get("traversable", True)),
         )
 
