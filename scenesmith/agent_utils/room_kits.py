@@ -12,8 +12,7 @@ import json
 import os
 import re
 import tempfile
-
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 
 _NUMBER_WORDS = {
@@ -180,6 +179,15 @@ BUILTIN_ROOM_KITS: tuple[RoomKitDefinition, ...] = (
                 dimensions=(1.0, 0.35, 2.0),
                 placement="wall",
                 facing="room_center",
+            ),
+            _slot(
+                "classical_statue",
+                "classical marble statue on pedestal",
+                aliases=("statue", "sculpture"),
+                counts=(0, 0, 4),
+                dimensions=(0.7, 0.7, 2.0),
+                facing="room_center",
+                required=False,
             ),
             _slot(
                 "reading_table",
@@ -449,10 +457,62 @@ def select_room_kit(
     if score <= 0:
         return None
 
+    selected_slots = kit.slots
+    if kit.kit_id == "library-reading-hall-v1":
+        collection_scale = bool(
+            re.search(r"\b(?:hundreds|thousands) of books\b", folded)
+        )
+        renaissance = bool(re.search(r"\brena+i+s+ance\b", folded))
+        statues_requested = bool(re.search(r"\b(?:statues?|sculptures?)\b", folded))
+        if collection_scale or statues_requested:
+            rewritten_slots: list[RoomKitSlot] = []
+            for slot in selected_slots:
+                if collection_scale and slot.role == "bookshelf":
+                    query = "full-height library bookcase densely filled with visible books"
+                    if renaissance:
+                        query = "full-height Renaissance library bookcase densely filled with visible books"
+                    slot = replace(
+                        slot,
+                        query=query,
+                        minimum_count=12,
+                        target_count=14,
+                        maximum_count=20,
+                        notes="Fill gallery walls across every level with visible books.",
+                    )
+                elif collection_scale and slot.role == "reading_table":
+                    slot = replace(
+                        slot,
+                        minimum_count=4,
+                        target_count=4,
+                        maximum_count=6,
+                    )
+                elif collection_scale and slot.role == "reading_chair":
+                    slot = replace(
+                        slot,
+                        minimum_count=12,
+                        target_count=12,
+                        maximum_count=20,
+                    )
+                elif statues_requested and slot.role == "classical_statue":
+                    slot = replace(
+                        slot,
+                        query=(
+                            "classical Renaissance marble statue on pedestal"
+                            if renaissance
+                            else slot.query
+                        ),
+                        minimum_count=2,
+                        target_count=2,
+                        required=True,
+                        notes="Use as repeated gallery focal points on separate levels.",
+                    )
+                rewritten_slots.append(slot)
+            selected_slots = tuple(rewritten_slots)
+
     # Scale target density at two coarse thresholds; explicit prompt counts win.
     density_delta = -1 if room_area_m2 < 12.0 else 1 if room_area_m2 >= 32.0 else 0
     counts: dict[str, int] = {}
-    for slot in kit.slots:
+    for slot in selected_slots:
         explicit = _explicit_count(prompt, slot)
         requested = (
             explicit if explicit is not None else slot.target_count + density_delta
@@ -464,7 +524,7 @@ def select_room_kit(
         source_policy=kit.source_policy,
         circulation_width_m=kit.circulation_width_m,
         slot_counts=counts,
-        slots=kit.slots,
+        slots=selected_slots,
         relationships=kit.relationships,
         match_score=score,
         matched_triggers=matches,

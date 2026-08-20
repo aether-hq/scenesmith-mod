@@ -35,6 +35,26 @@ def test_library_kit_expands_counts_and_preserves_chair_facing():
     assert "exactly 16 required" in selection.to_prompt_brief()
 
 
+def test_collection_scale_library_requires_dense_shelves_and_statues():
+    prompt = (
+        "a large, multi-level library with thousands of books and a bunch of tables "
+        "and chairs for patrons. A spiral staircase connects the floors, and there "
+        "are huge archted windows, statues, and so on, as it has a renaiissance , "
+        "gorgeous decor."
+    )
+
+    selection = select_room_kit(prompt, room_area_m2=190.44)
+
+    assert selection is not None
+    assert selection.slot_counts["bookshelf"] >= 12
+    bookshelf = next(slot for slot in selection.slots if slot.role == "bookshelf")
+    assert "renaissance" in bookshelf.query.casefold()
+    assert "filled" in bookshelf.query.casefold()
+    statue = next(slot for slot in selection.slots if slot.role == "classical_statue")
+    assert statue.required
+    assert selection.slot_counts["classical_statue"] >= 2
+
+
 def test_medical_kit_keeps_equipment_beside_bed():
     selection = select_room_kit(
         "A compact medical exam room with a hospital bed and patient monitor",

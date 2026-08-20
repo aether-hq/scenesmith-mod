@@ -357,6 +357,30 @@ def _prompt_window_openings(
     )
 
 
+def _prompt_design_tokens(prompt: str) -> BlueprintDesignTokens:
+    """Preserve strongly authored historical style at the canonical boundary."""
+
+    folded = prompt.casefold()
+    if not re.search(r"\brena+i+s+ance\b", folded):
+        return BlueprintDesignTokens()
+    return BlueprintDesignTokens(
+        style_keywords=("Renaissance", "ornate classical", "grand library"),
+        palette=("dark walnut", "burgundy", "antique gold", "warm ivory marble"),
+        material_roles={
+            "floor": "dark walnut parquet",
+            "walls": "warm ivory plaster with carved stone trim",
+            "exterior": "aged limestone",
+        },
+        lighting_mood="warm dramatic gallery light",
+        focal_hierarchy=(
+            "book-lined galleries",
+            "classical marble statues",
+            "huge arched windows",
+            "ornate chandeliers",
+        ),
+    )
+
+
 def blueprint_from_prompt(
     prompt: str,
     *,
@@ -459,6 +483,7 @@ def blueprint_from_prompt(
         spaces=spaces,
         openings=openings,
         connectors=tuple(connectors),
+        design_tokens=_prompt_design_tokens(prompt),
         constraints=constraints,
     )
 
@@ -607,6 +632,7 @@ def normalize_scene_blueprint(
             )
         )
 
+    token_payload = _as_mapping(source.get("design_tokens"))
     blueprint = SceneBlueprint(
         blueprint_id=str(
             source.get("blueprint_id") or source.get("id") or fallback.blueprint_id
@@ -618,8 +644,10 @@ def normalize_scene_blueprint(
         levels=tuple(levels),
         spaces=tuple(spaces),
         connectors=tuple(connectors),
-        design_tokens=BlueprintDesignTokens.model_validate(
-            _as_mapping(source.get("design_tokens"))
+        design_tokens=(
+            BlueprintDesignTokens.model_validate(token_payload)
+            if token_payload
+            else fallback.design_tokens
         ),
         repair_log=tuple(repairs),
     )

@@ -4,10 +4,9 @@ from __future__ import annotations
 
 import hashlib
 import json
-import math
 import os
+import re
 import tempfile
-
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -324,6 +323,18 @@ def create_candidate_tournament(
     viable_candidates = [candidate for candidate in candidates if candidate.viable]
     if not viable_candidates:
         raise ValueError("all proxy scene candidates failed hard structural validation")
+    if re.search(r"\b(?:hundreds|thousands) of books\b", prompt.casefold()):
+        layered_candidates = [
+            candidate
+            for candidate in viable_candidates
+            if candidate.strategy.name == "layered"
+        ]
+        dense_candidates = [
+            candidate
+            for candidate in viable_candidates
+            if candidate.strategy.target_density >= 0.24
+        ]
+        viable_candidates = layered_candidates or dense_candidates or viable_candidates
     winner = max(
         viable_candidates,
         key=lambda candidate: (candidate.scores.total, -candidate.ordinal),

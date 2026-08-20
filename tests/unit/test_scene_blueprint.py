@@ -51,6 +51,23 @@ def test_large_library_prompt_expands_canonical_footprint():
     assert submission["window_width_m"] >= 3.5
 
 
+def test_renaissance_library_prompt_preserves_authored_design_tokens():
+    prompt = (
+        "a large, multi-level library with thousands of books and a bunch of tables "
+        "and chairs for patrons. A spiral staircase connects the floors, and there "
+        "are huge archted windows, statues, and so on, as it has a renaiissance , "
+        "gorgeous decor."
+    )
+
+    tokens = blueprint_from_prompt(prompt).design_tokens
+
+    assert "renaissance" in {keyword.casefold() for keyword in tokens.style_keywords}
+    assert "walnut" in tokens.material_roles["floor"].casefold()
+    assert "stone" in tokens.material_roles["walls"].casefold()
+    assert any("statue" in focal.casefold() for focal in tokens.focal_hierarchy)
+    assert any("book" in focal.casefold() for focal in tokens.focal_hierarchy)
+
+
 def test_ordinary_prompt_keeps_default_footprint_and_large_prompt_respects_cap():
     ordinary = blueprint_from_prompt("a quiet library")
     capped = blueprint_from_prompt(

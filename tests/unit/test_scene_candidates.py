@@ -65,6 +65,25 @@ def test_room_kit_counts_are_preserved_in_every_candidate():
         assert roles["medical_device"] == 1
 
 
+def test_collection_scale_library_selects_a_layered_dense_candidate():
+    prompt = (
+        "a large, multi-level library with thousands of books and a bunch of tables "
+        "and chairs for patrons. A spiral staircase connects the floors, and there "
+        "are huge archted windows, statues, and so on, as it has a renaiissance , "
+        "gorgeous decor."
+    )
+
+    tournament = create_candidate_tournament(
+        blueprint_from_prompt(prompt), prompt=prompt
+    )
+
+    assert tournament.winner.strategy.name == "layered"
+    group = tournament.winner.blueprint.furniture_groups[0]
+    assert group.density == "layered"
+    assert group.roles["bookshelf"] >= 12
+    assert group.roles["classical_statue"] >= 2
+
+
 def test_candidate_count_is_clamped_to_four_through_eight():
     prompt = "A calm studio"
     blueprint = blueprint_from_prompt(prompt)
