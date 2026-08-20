@@ -1,4 +1,5 @@
 import math
+import tempfile
 import unittest
 
 from pathlib import Path
@@ -41,6 +42,11 @@ from scenesmith.agent_utils.room import (
     UniqueID,
     serialize_rigid_transform,
 )
+from scenesmith.agent_utils.structural_compiler import (
+    compile_polygon_space,
+    write_compiled_structure,
+)
+from scenesmith.agent_utils.structural_geometry import Footprint2D
 from scenesmith.manipuland_agents.tools.physics_utils import (
     load_collision_bounds_for_scene_object,
 )
@@ -141,6 +147,46 @@ class TestComputeSceneCollisions(unittest.TestCase):
             len(furniture_collisions),
             0,
             "Should not detect collisions between separated furniture objects",
+        )
+
+    def test_furniture_inside_compiled_polygon_room_is_not_in_shell_collision(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            paths = write_compiled_structure(
+                compile_polygon_space(
+                    structure_id="compiled_room",
+                    footprint=Footprint2D.rectangle(4, 3),
+                    wall_height=3.0,
+                ),
+                temporary_directory,
+                model_name="room_geometry",
+                link_name="room_geometry_body_link",
+            )
+            room_geometry = RoomGeometry(
+                sdf_tree=ET.parse(paths.sdf_path),
+                sdf_path=paths.sdf_path,
+                width=3.0,
+                length=4.0,
+                wall_height=3.0,
+            )
+            scene = RoomScene(
+                room_geometry=room_geometry,
+                scene_dir=Path(temporary_directory),
+            )
+            scene.add_object(
+                SceneObject(
+                    object_id=UniqueID("center_box"),
+                    object_type=ObjectType.FURNITURE,
+                    name="Center box",
+                    description="Box standing on the compiled room floor",
+                    transform=RigidTransform(np.array([2.0, 1.5, 0.5])),
+                    sdf_path=self.box_sdf_path,
+                )
+            )
+
+            collisions = compute_scene_collisions(scene)
+
+        self.assertFalse(
+            any("center_box" in {c.object_a_id, c.object_b_id} for c in collisions)
         )
 
     def test_furniture_to_furniture_multiple_collisions(self):

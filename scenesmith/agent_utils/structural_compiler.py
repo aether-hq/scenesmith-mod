@@ -1278,6 +1278,32 @@ def _signed_area_2d(points: Sequence[tuple[float, float]]) -> float:
     )
 
 
+def _axis_aligned_rectangle_bounds(
+    footprint: Footprint2D,
+) -> tuple[float, float, float, float] | None:
+    """Return bounds when ``footprint`` is one unholed axis-aligned rectangle."""
+
+    if footprint.holes or len(footprint.outer) != 4:
+        return None
+    min_x, min_y, max_x, max_y = footprint.bounds
+    expected_corners = (
+        (min_x, min_y),
+        (max_x, min_y),
+        (max_x, max_y),
+        (min_x, max_y),
+    )
+    if all(
+        any(
+            math.isclose(point[0], corner[0], abs_tol=GEOMETRY_TOLERANCE)
+            and math.isclose(point[1], corner[1], abs_tol=GEOMETRY_TOLERANCE)
+            for corner in expected_corners
+        )
+        for point in footprint.outer
+    ):
+        return (min_x, min_y, max_x, max_y)
+    return None
+
+
 def _profile_height(profile: ElevationProfile, point: tuple[float, float]) -> float:
     if profile.profile_type not in {
         ElevationProfileType.PLANAR,
@@ -1679,6 +1705,61 @@ def compile_polygon_space(
                 f"ceiling must be above floor at {point}; clearance={clearance}"
             )
 
+    rectangle_bounds = _axis_aligned_rectangle_bounds(footprint)
+    floor_rectangle_bounds = _axis_aligned_rectangle_bounds(floor_footprint)
+    ceiling_rectangle_bounds = _axis_aligned_rectangle_bounds(ceiling_footprint)
+    floor_heights = tuple(floor_height(point) for point in footprint.outer)
+    ceiling_heights = tuple(ceiling_height(point) for point in footprint.outer)
+    use_analytic_shell_collision = (
+        rectangle_bounds is not None
+        and (not include_floor or floor_rectangle_bounds == rectangle_bounds)
+        and (not include_ceiling or ceiling_rectangle_bounds == rectangle_bounds)
+        and max(floor_heights) - min(floor_heights) <= GEOMETRY_TOLERANCE
+        and max(ceiling_heights) - min(ceiling_heights) <= GEOMETRY_TOLERANCE
+    )
+    collision_primitives: list[CollisionPrimitive] = []
+    if use_analytic_shell_collision:
+        assert rectangle_bounds is not None
+        min_x, min_y, max_x, max_y = rectangle_bounds
+        center_x = (min_x + max_x) / 2.0
+        center_y = (min_y + max_y) / 2.0
+        if include_floor:
+            floor_z = floor_heights[0]
+            collision_primitives.append(
+                CollisionPrimitive(
+                    primitive_id=f"{structure_id}_floor_collision",
+                    primitive_type="box",
+                    transform=Transform3D(
+                        translation=(
+                            center_x,
+                            center_y,
+                            floor_z - floor_thickness / 2.0,
+                        )
+                    ),
+                    dimensions=(max_x - min_x, max_y - min_y, floor_thickness),
+                )
+            )
+        if include_ceiling:
+            ceiling_z = ceiling_heights[0]
+            collision_primitives.append(
+                CollisionPrimitive(
+                    primitive_id=f"{structure_id}_ceiling_collision",
+                    primitive_type="box",
+                    transform=Transform3D(
+                        translation=(
+                            center_x,
+                            center_y,
+                            ceiling_z + ceiling_thickness / 2.0,
+                        )
+                    ),
+                    dimensions=(
+                        max_x - min_x,
+                        max_y - min_y,
+                        ceiling_thickness,
+                    ),
+                )
+            )
+
     builder = _MeshBuilder()
     mutable_groups: dict[str, list[int]] = {}
     if include_floor:
@@ -1897,6 +1978,32 @@ def compile_polygon_space(
                             normal=inward,
                         )
                     )
+                    if use_analytic_shell_collision:
+                        panel_length = distance_end - distance_start
+                        panel_height = (
+                            upper_start + upper_end - lower_start - lower_end
+                        ) / 2.0
+                        panel_center_z = (
+                            lower_start + lower_end + upper_start + upper_end
+                        ) / 4.0
+                        collision_primitives.append(
+                            CollisionPrimitive(
+                                primitive_id=(
+                                    f"{structure_id}_{loop_kind}_wall_"
+                                    f"{edge_index:03d}_panel_{panel_index:03d}_collision"
+                                ),
+                                primitive_type="box",
+                                transform=Transform3D(
+                                    translation=(
+                                        (segment_start[0] + segment_end[0]) / 2.0,
+                                        (segment_start[1] + segment_end[1]) / 2.0,
+                                        panel_center_z,
+                                    ),
+                                    rotation_rpy=(0.0, 0.0, math.atan2(dy, dx)),
+                                ),
+                                dimensions=(panel_length, 0.05, panel_height),
+                            )
+                        )
                     panel_index += 1
 
     mesh = builder.build()
@@ -1905,6 +2012,7 @@ def compile_polygon_space(
         visual_mesh=mesh,
         collision_mesh=mesh,
         surfaces=tuple(surfaces),
+        collision_primitives=tuple(collision_primitives),
         triangle_groups={
             group_name: tuple(indices) for group_name, indices in mutable_groups.items()
         },
@@ -2166,8 +2274,9 @@ def write_compiled_structure(
 ) -> CompiledStructurePaths:
     """Write OBJ, weldable SDF, and semantic-surface sidecar files.
 
-    Collision boxes are kept analytic for stairs.  Structures without analytic
-    primitives (currently ramps) use the closed collision triangle mesh.
+    Collision boxes are kept analytic for stairs and flat rectangular room
+    shells. Structures without analytic primitives use the collision triangle
+    mesh.
     """
 
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", compiled.structure_id):

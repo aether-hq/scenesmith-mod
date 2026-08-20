@@ -495,6 +495,26 @@ class TestPolygonSpace(unittest.TestCase):
             if patch.surface.metadata.get("adjacent_portal_id") == "door"
         ]
         self.assertEqual(len(door_panels), 1)
+        self.assertEqual(len(compiled.collision_primitives), 8)
+
+    def test_flat_rectangular_shell_uses_local_collision_primitives(self) -> None:
+        compiled = compile_polygon_space(
+            structure_id="room",
+            footprint=Footprint2D.rectangle(4, 3),
+            wall_height=3.0,
+        )
+
+        self.assertEqual(len(compiled.collision_primitives), 6)
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            paths = write_compiled_structure(compiled, temporary_directory)
+            sdf = ET.parse(paths.sdf_path)
+
+        collisions = sdf.findall(".//collision")
+        self.assertEqual(len(collisions), 6)
+        self.assertTrue(
+            all(collision.find("geometry/box") is not None for collision in collisions)
+        )
+        self.assertFalse(sdf.findall(".//collision/geometry/mesh"))
 
     def test_portal_outside_boundary_is_rejected(self) -> None:
         portal = PortalSpec(
@@ -695,7 +715,11 @@ class TestCompiledStructureExport(unittest.TestCase):
             structure_id="collision_bundle", footprint=Footprint2D.rectangle(2, 2)
         )
         compiled = replace(
-            compiled, visual_mesh=visual, collision_mesh=collision, surfaces=()
+            compiled,
+            visual_mesh=visual,
+            collision_mesh=collision,
+            collision_primitives=(),
+            surfaces=(),
         )
         with tempfile.TemporaryDirectory() as temporary_directory:
             paths = write_compiled_structure(compiled, temporary_directory)
