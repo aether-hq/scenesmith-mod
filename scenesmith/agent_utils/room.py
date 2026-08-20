@@ -1646,6 +1646,69 @@ class RoomScene:
         return objects_dict
 
 
+def _catalog_aabb_support_surfaces(
+    furniture_object: SceneObject,
+    config: SupportSurfaceExtractionConfig,
+) -> list[SupportSurface] | None:
+    """Create one bounded support plane from canonical catalog metadata.
+
+    Dense catalog display meshes can contain hundreds of thousands of faces;
+    applying HSM face clustering to them is both unnecessary and unbounded. The
+    catalog importer already canonicalizes the frame and records object bounds,
+    which are sufficient for a conservative top support plane.
+    """
+    catalog_sources = {
+        "articulated",
+        "catalog",
+        "generated",
+        "hssd",
+        "objathor",
+        "objaverse",
+        "polyhaven",
+    }
+    if (
+        not config.use_catalog_aabb_fast_path
+        or furniture_object.metadata.get("asset_source") not in catalog_sources
+        or furniture_object.bbox_min is None
+        or furniture_object.bbox_max is None
+    ):
+        return None
+
+    # SceneObject bounds have already absorbed scale_factor. Convert back to the
+    # unscaled object-local frame because propagation below applies scale once.
+    scale = max(float(furniture_object.scale_factor), 1e-9)
+    bounds_min = furniture_object.bbox_min.astype(float) / scale
+    bounds_max = furniture_object.bbox_max.astype(float) / scale
+    dimensions = bounds_max - bounds_min
+    if dimensions[0] <= 0.05 or dimensions[1] <= 0.05 or dimensions[2] <= 0.05:
+        return None
+
+    searchable = f"{furniture_object.name} {furniture_object.description}".lower()
+    if "bed" in searchable:
+        surface_z = bounds_min[2] + dimensions[2] * config.bed_surface_height_ratio
+    else:
+        surface_z = bounds_max[2]
+
+    inset = min(max(float(config.aabb_inset_ratio), 0.0), 0.4)
+    half_width = dimensions[0] * (0.5 - inset)
+    half_depth = dimensions[1] * (0.5 - inset)
+    center_x = (bounds_min[0] + bounds_max[0]) / 2.0
+    center_y = (bounds_min[1] + bounds_max[1]) / 2.0
+    clearance = max(config.min_clearance_m, config.top_surface_clearance_m)
+
+    return [
+        SupportSurface(
+            surface_id=UniqueID("surface_catalog_aabb"),
+            bounding_box_min=np.array([-half_width, -half_depth, 0.0]),
+            bounding_box_max=np.array([half_width, half_depth, clearance]),
+            transform=RigidTransform(
+                p=[center_x, center_y, surface_z + config.surface_offset_m]
+            ),
+            mesh=None,
+        )
+    ]
+
+
 def extract_and_propagate_support_surfaces(
     scene: "RoomScene",
     furniture_object: SceneObject,
@@ -1670,6 +1733,8 @@ def extract_and_propagate_support_surfaces(
     Raises:
         ValueError: If furniture object has no geometry path.
     """
+    config = config or SupportSurfaceExtractionConfig()
+
     # Return existing support surfaces if already computed.
     if furniture_object.support_surfaces:
         console_logger.info(
@@ -1684,9 +1749,12 @@ def extract_and_propagate_support_surfaces(
             f"Furniture object {furniture_object.object_id} has no geometry path"
         )
 
+    surfaces = _catalog_aabb_support_surfaces(furniture_object, config)
+    if surfaces is not None:
+        source = "canonical catalog AABB"
     # Check if HSSD asset with pre-validated surfaces.
     # Determine surface loading strategy and source.
-    if (
+    elif (
         furniture_object.metadata.get("asset_source") == "hssd"
         and "hssd_mesh_id" in furniture_object.metadata
         and not config.recompute_hssd_surfaces

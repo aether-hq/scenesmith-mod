@@ -2,6 +2,7 @@
 
 import os
 import signal
+import time
 import unittest
 
 from scenesmith.utils.parallel import run_parallel_isolated
@@ -25,6 +26,10 @@ def _void_task(value: int) -> None:
 def _crashing_task() -> None:
     """Task that crashes the process (simulates OOM/SIGKILL)."""
     os.kill(os.getpid(), signal.SIGKILL)
+
+
+def _hanging_task() -> None:
+    time.sleep(10)
 
 
 class TestRunParallelIsolated(unittest.TestCase):
@@ -155,6 +160,16 @@ class TestRunParallelIsolated(unittest.TestCase):
         results = run_parallel_isolated(tasks=[], max_workers=2)
 
         self.assertEqual(len(results), 0)
+
+    def test_task_timeout_terminates_stuck_child(self):
+        results = run_parallel_isolated(
+            tasks=[("stuck", _hanging_task, {})],
+            max_workers=1,
+            task_timeout_s=0.1,
+        )
+
+        self.assertFalse(results["stuck"][0])
+        self.assertIn("exceeded 0.1s", results["stuck"][1])
 
 
 if __name__ == "__main__":

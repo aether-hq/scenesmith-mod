@@ -1,12 +1,11 @@
-"""GPU worker process for geometry generation with CUDA isolation.
+"""Provider-backed worker process for geometry generation.
 
-This module implements the worker process that runs on each GPU. The key design
-principle is that CUDA_VISIBLE_DEVICES must be set BEFORE any CUDA-dependent
+The execution provider configures process isolation before any model-specific
 imports occur.
 
-CRITICAL: This module must NOT import any CUDA/torch/warp code at module level.
-All CUDA imports must be deferred to inside gpu_worker_main() after
-CUDA_VISIBLE_DEVICES is set.
+CRITICAL: This module must not import accelerator runtimes at module level.
+Backend imports are deferred until the execution provider has configured the
+worker process.
 """
 
 from __future__ import annotations
@@ -24,6 +23,10 @@ from typing import Any
 from scenesmith.agent_utils.geometry_generation_server.dataclasses import (
     GeometryGenerationServerRequest,
     GeometryGenerationServerResponse,
+)
+from scenesmith.agent_utils.geometry_generation_server.execution_provider import (
+    GeometryWorkerTarget,
+    configure_geometry_worker_environment,
 )
 
 console_logger = logging.getLogger(__name__)
@@ -50,7 +53,7 @@ class WorkResult:
     request_id: str
     """Unique identifier matching the original request."""
 
-    worker_id: int
+    worker_id: str
     """ID of the worker that processed this request (for availability tracking)."""
 
     status: str
@@ -63,7 +66,7 @@ class WorkResult:
     """Error message for failed requests."""
 
     processing_time_seconds: float | None = None
-    """Time taken to process the request (GPU time only), in seconds."""
+    """Time taken to process the request on its provider, in seconds."""
 
     end_to_end_latency_seconds: float | None = None
     """Total time from request received by server to result ready, in seconds."""
@@ -77,12 +80,21 @@ class ShutdownRequest:
 class WorkerReady:
     """Signal that a worker has finished initialization and is ready for requests."""
 
-    worker_id: int
+    worker_id: str
     """ID of the worker that is now ready."""
 
 
-def gpu_worker_main(
-    gpu_id: int,
+@dataclass
+class WorkerStartupFailed:
+    """Structured worker initialization failure reported to the coordinator."""
+
+    worker_id: str
+    error: str
+
+
+def geometry_worker_main(
+    worker_id: str,
+    execution_target: GeometryWorkerTarget,
     work_queue: Queue,
     result_queue: Queue,
     use_mini: bool,
@@ -92,13 +104,14 @@ def gpu_worker_main(
     init_lock: Any = None,
     log_file: str | None = None,
 ) -> None:
-    """Main function for GPU worker subprocess.
+    """Main function for a provider-backed worker subprocess.
 
-    CRITICAL: This function sets CUDA_VISIBLE_DEVICES before ANY CUDA imports.
-    This ensures each worker process only sees its assigned GPU.
+    CRITICAL: the provider environment is applied before any model runtime is
+    imported.
 
     Args:
-        gpu_id: The GPU index this worker is assigned to.
+        worker_id: Provider-neutral worker identifier.
+        execution_target: Provider-owned device and environment description.
         work_queue: Queue to receive work requests from.
         result_queue: Queue to send results back to coordinator.
         use_mini: Whether to use mini model variant (Hunyuan3D only).
@@ -111,13 +124,12 @@ def gpu_worker_main(
     """
     import sys
 
-    # FIRST LINE - Set CUDA_VISIBLE_DEVICES before ANY imports.
-    os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
-
+    target = execution_target
+    configure_geometry_worker_environment(target)
     # Configure logging for this worker process.
     logging.basicConfig(
         level=logging.DEBUG,
-        format=f"[GPU-{gpu_id}] %(levelname)s: %(message)s",
+        format=f"[Worker-{worker_id}] %(levelname)s: %(message)s",
         force=True,
     )
     logger = logging.getLogger(__name__)
@@ -126,7 +138,7 @@ def gpu_worker_main(
     stderr_handler = logging.StreamHandler(sys.stderr)
     stderr_handler.setLevel(logging.DEBUG)
     stderr_handler.setFormatter(
-        logging.Formatter(f"[GPU-{gpu_id}] %(levelname)s: %(message)s")
+        logging.Formatter(f"[Worker-{worker_id}] %(levelname)s: %(message)s")
     )
     logger.addHandler(stderr_handler)
 
@@ -136,16 +148,15 @@ def gpu_worker_main(
         file_handler.setLevel(logging.DEBUG)
         file_handler.setFormatter(
             logging.Formatter(
-                f"%(asctime)s - [GPU-{gpu_id}] %(levelname)s: %(message)s"
+                f"%(asctime)s - [Worker-{worker_id}] %(levelname)s: %(message)s"
             )
         )
         logger.addHandler(file_handler)
 
-    logger.info(f"Worker starting on GPU {gpu_id}, PID={os.getpid()}")
-    logger.debug(f"CUDA_VISIBLE_DEVICES={os.environ.get('CUDA_VISIBLE_DEVICES')}")
+    logger.info("Worker starting on %s, PID=%s", target.label, os.getpid())
+    logger.debug("Provider environment applied for '%s'", target.provider)
 
-    # Now safe to import CUDA-dependent code.
-    # This import triggers ensure_cuda_env() which initializes CUDA.
+    # The provider environment is established; backend-specific imports are safe.
     logger.info("Importing geometry_generation module...")
     import_start = time.time()
     try:
@@ -158,7 +169,10 @@ def gpu_worker_main(
         )
     except Exception as e:
         logger.error(f"Failed to import geometry_generation: {e}")
-        raise
+        result_queue.put(
+            WorkerStartupFailed(worker_id=worker_id, error=f"import failed: {e}")
+        )
+        return
 
     # Preload pipeline if requested.
     # Use init_lock to serialize checkpoint loading across workers.
@@ -180,7 +194,13 @@ def gpu_worker_main(
             )
         except Exception as e:
             logger.error(f"Pipeline preload failed: {e}")
-            raise
+            result_queue.put(
+                WorkerStartupFailed(
+                    worker_id=worker_id,
+                    error=f"pipeline preload failed: {e}",
+                )
+            )
+            return
         finally:
             if init_lock is not None:
                 init_lock.release()
@@ -194,7 +214,7 @@ def gpu_worker_main(
 
     # Signal that this worker is ready for requests.
     # The pool waits for this signal before adding the worker to the available pool.
-    result_queue.put(WorkerReady(worker_id=gpu_id))
+    result_queue.put(WorkerReady(worker_id=worker_id))
 
     # Main processing loop.
     logger.info("Worker ready, waiting for requests...")
@@ -220,6 +240,8 @@ def gpu_worker_main(
                     request=message.request,
                     generate_fn=generate_geometry_from_image,
                     use_mini=use_mini,
+                    backend=backend,
+                    sam3d_config=sam3d_config,
                 )
 
                 processing_time = time.time() - start_time
@@ -237,7 +259,7 @@ def gpu_worker_main(
                 result_queue.put(
                     WorkResult(
                         request_id=message.request_id,
-                        worker_id=gpu_id,
+                        worker_id=worker_id,
                         status="success",
                         data={"geometry_path": result_data.geometry_path},
                         error=None,
@@ -255,7 +277,7 @@ def gpu_worker_main(
                 result_queue.put(
                     WorkResult(
                         request_id=message.request_id,
-                        worker_id=gpu_id,
+                        worker_id=worker_id,
                         status="error",
                         data=None,
                         error=str(e),
@@ -272,6 +294,10 @@ def gpu_worker_main(
         f"Worker shutting down. Stats: {total_requests} total, "
         f"{completed_requests} completed, {failed_requests} failed"
     )
+
+
+# Public compatibility alias for integrations that imported the old name.
+gpu_worker_main = geometry_worker_main
 
 
 def _preload_pipeline(backend: str, use_mini: bool, sam3d_config: dict | None) -> None:
@@ -293,19 +319,19 @@ def _preload_pipeline(backend: str, use_mini: bool, sam3d_config: dict | None) -
         if sam3d_config is None:
             raise ValueError("sam3d_config required for SAM3D backend")
 
-        from scenesmith.agent_utils.geometry_generation_server.sam3d_pipeline_manager import (
-            SAM3DPipelineManager,
+        from scenesmith.agent_utils.geometry_generation_server.sam_provider import (
+            preload_sam_provider,
         )
 
-        sam3_checkpoint = Path(sam3d_config["sam3_checkpoint"])
-        sam3d_checkpoint = Path(sam3d_config["sam3d_checkpoint"])
-        SAM3DPipelineManager.get_pipelines(
-            sam3_checkpoint=sam3_checkpoint, sam3d_checkpoint=sam3d_checkpoint
-        )
+        preload_sam_provider(sam3d_config)
 
 
 def _process_request(
-    request: GeometryGenerationServerRequest, generate_fn: Any, use_mini: bool
+    request: GeometryGenerationServerRequest,
+    generate_fn: Any,
+    use_mini: bool,
+    backend: str,
+    sam3d_config: dict | None,
 ) -> GeometryGenerationServerResponse:
     """Process a single geometry generation request.
 
@@ -333,9 +359,12 @@ def _process_request(
     output_path = output_dir / output_filename
 
     # Convert sam3d_config paths from strings to Path objects if present.
-    processed_sam3d_config = None
-    if request.sam3d_config:
-        processed_sam3d_config = request.sam3d_config.copy()
+    processed_sam3d_config = sam3d_config.copy() if sam3d_config else None
+    if processed_sam3d_config is not None and request.sam3d_config:
+        for key in ("mode", "object_description", "threshold"):
+            if key in request.sam3d_config:
+                processed_sam3d_config[key] = request.sam3d_config[key]
+    if processed_sam3d_config:
         if "sam3_checkpoint" in processed_sam3d_config:
             processed_sam3d_config["sam3_checkpoint"] = Path(
                 processed_sam3d_config["sam3_checkpoint"]
@@ -352,7 +381,7 @@ def _process_request(
         debug_folder=debug_folder,
         use_mini=use_mini,
         use_pipeline_caching=True,
-        backend=request.backend,
+        backend=backend,
         sam3d_config=processed_sam3d_config,
     )
 

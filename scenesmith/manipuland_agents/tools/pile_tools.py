@@ -288,7 +288,7 @@ def simulate_pile_physics(
 
         try:
             # Load directives.
-            directives = LoadModelDirectives(directive_path)
+            directives = LoadModelDirectives(str(directive_path))
             ProcessModelDirectives(directives, plant, parser=None)
             plant.Finalize()
 

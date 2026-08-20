@@ -28,6 +28,9 @@ from scenesmith.agent_utils.blender.renderer import MATERIAL_VALIDATION_LIGHT_EN
 from scenesmith.agent_utils.geometry_generation_server.dataclasses import (
     GeometryGenerationError,
 )
+from scenesmith.agent_utils.geometry_generation_server.sam_provider import (
+    sam_provider_config_from_mapping,
+)
 from scenesmith.agent_utils.hssd_retrieval_server.dataclasses import (
     HssdRetrievalServerRequest,
 )
@@ -40,6 +43,9 @@ from scenesmith.agent_utils.materials_retrieval_server import (
 )
 from scenesmith.agent_utils.objaverse_retrieval_server.dataclasses import (
     ObjaverseRetrievalServerRequest,
+)
+from scenesmith.agent_utils.objaverse_retrieval.data_loader import (
+    convert_objathor_asset_to_glb,
 )
 from scenesmith.agent_utils.room import AgentType, ObjectType
 from scenesmith.agent_utils.thin_covering_generator import (
@@ -256,6 +262,7 @@ class AssetRouter:
         description: str,
         output_dir: Path | None = None,
         use_lenient: bool = False,
+        ignore_appearance: bool = False,
     ) -> ValidationResult:
         """Validate a generated asset using VLM.
 
@@ -272,6 +279,8 @@ class AssetRouter:
             output_dir: Optional directory to save rendered images.
             use_lenient: If True, use lenient validation prompt. Lenient validation
                 accepts minor imperfections common in library assets.
+            ignore_appearance: Judge geometry only. This is required for providers
+                such as SAM3D MLX that intentionally omit color baking.
 
         Returns:
             ValidationResult with acceptance decision and reasoning.
@@ -326,6 +335,15 @@ class AssetRouter:
             description=description,
             num_images=len(image_paths),
         )
+        if ignore_appearance:
+            prompt += (
+                "\n\nPROVIDER LIMITATION: This geometry backend intentionally does "
+                "not bake colors, materials, or textures, so the mesh may render "
+                "uniform white or gray. Ignore requested color, finish, material, "
+                "texture, and appearance-only style cues. Do not reject for those "
+                "reasons. Validate only object identity, required physical parts, "
+                "single-object composition, completeness, and proportions."
+            )
 
         # Build message with images.
         user_content = [{"type": "text", "text": prompt}]
@@ -418,6 +436,7 @@ class AssetRouter:
         style_context: str | None = None,
         hssd_client: "HssdRetrievalClient | None" = None,
         objaverse_client: "ObjaverseRetrievalClient | None" = None,
+        polyhaven_client: "ObjaverseRetrievalClient | None" = None,
         articulated_client: "ArticulatedRetrievalClient | None" = None,
         materials_client: "MaterialsRetrievalClient | None" = None,
         scene_id: str | None = None,
@@ -440,6 +459,7 @@ class AssetRouter:
             style_context: Optional style context for image generation.
             hssd_client: Client for HSSD retrieval server (for HSSD).
             objaverse_client: Client for Objaverse retrieval server (for Objaverse).
+            polyhaven_client: Generic catalog client backed by the Poly Haven index.
             articulated_client: Client for articulated retrieval server.
             materials_client: Client for materials retrieval server (for thin coverings).
             scene_id: Optional scene identifier for fair round-robin scheduling.
@@ -473,6 +493,7 @@ class AssetRouter:
                     geometry_client=geometry_client,
                     hssd_client=hssd_client,
                     objaverse_client=objaverse_client,
+                    polyhaven_client=polyhaven_client,
                     image_generator=image_generator,
                     images_dir=images_dir,
                     geometry_dir=geometry_dir,
@@ -1353,12 +1374,15 @@ class AssetRouter:
         geometry_client: "GeometryGenerationClient | None",
         hssd_client: "HssdRetrievalClient | None",
         objaverse_client: "ObjaverseRetrievalClient | None",
+        polyhaven_client: "ObjaverseRetrievalClient | None",
         image_generator: "BaseImageGenerator | None",
         images_dir: Path | None,
         geometry_dir: Path,
         debug_dir: Path,
         style_context: str | None = None,
         scene_id: str | None = None,
+        asset_source_override: str | None = None,
+        candidate_pool_size: int | None = None,
     ) -> GeneratedGeometry | None:
         """Try the generated strategy with text-to-3D or library retrieval.
 
@@ -1372,6 +1396,7 @@ class AssetRouter:
             geometry_client: Client for geometry generation server (for text-to-3D).
             hssd_client: Client for HSSD retrieval server (for HSSD retrieval).
             objaverse_client: Client for Objaverse retrieval server (for Objaverse).
+            polyhaven_client: Generic catalog client backed by the Poly Haven index.
             image_generator: Image generator for creating reference images (for text-to-3D).
             images_dir: Directory to save generated images (for text-to-3D).
             geometry_dir: Directory to save generated geometry.
@@ -1382,12 +1407,60 @@ class AssetRouter:
         Returns:
             GeneratedGeometry if successful, None if all retries exhausted.
         """
+        # "all" is a deterministic quality hierarchy. Articulated assets remain
+        # a separate router strategy and are attempted before this strategy when
+        # the analysis requests them.
+        configured_source = self.cfg.asset_manager.general_asset_source
+        if configured_source == "all" and asset_source_override is None:
+            federated_cfg = self.cfg.asset_manager.get("federated", {})
+            source_order = list(
+                federated_cfg.get(
+                    "source_order", ["polyhaven", "hssd", "objaverse", "generated"]
+                )
+            )
+            catalog_retries = int(federated_cfg.get("catalog_max_retries", 2))
+            global_pool_size = int(federated_cfg.get("candidate_pool_size", 12))
+            for source in source_order:
+                if source not in {"polyhaven", "hssd", "objaverse", "generated"}:
+                    console_logger.warning(
+                        "Ignoring unknown federated asset source '%s'", source
+                    )
+                    continue
+                source_retries = (
+                    max_retries if source == "generated" else max(0, catalog_retries)
+                )
+                console_logger.info(
+                    "Federated search trying %s for '%s'", source, item.description
+                )
+                result = self._try_generated_strategy(
+                    item=item,
+                    max_retries=source_retries,
+                    geometry_client=geometry_client,
+                    hssd_client=hssd_client,
+                    objaverse_client=objaverse_client,
+                    polyhaven_client=polyhaven_client,
+                    image_generator=image_generator,
+                    images_dir=images_dir,
+                    geometry_dir=geometry_dir,
+                    debug_dir=debug_dir,
+                    style_context=style_context,
+                    scene_id=scene_id,
+                    asset_source_override=source,
+                    candidate_pool_size=(
+                        global_pool_size if source == "polyhaven" else None
+                    ),
+                )
+                if result is not None:
+                    return result
+            return None
+
         # Determine asset source (text-to-3D vs library retrieval).
-        asset_source = self.cfg.asset_manager.general_asset_source
+        asset_source = asset_source_override or configured_source
 
         # For library retrieval, pre-fetch candidates (single server call).
         hssd_candidates: list | None = None
         objaverse_candidates: list | None = None
+        polyhaven_candidates: list | None = None
         if asset_source == "hssd":
             hssd_candidates = self._fetch_hssd_candidates(
                 item=item,
@@ -1412,6 +1485,26 @@ class AssetRouter:
                     f"No Objaverse candidates for '{item.description}'"
                 )
                 return None
+        elif asset_source == "polyhaven":
+            source_label = (
+                "Global asset catalog"
+                if configured_source == "all"
+                else "Poly Haven"
+            )
+            polyhaven_candidates = self._fetch_objaverse_candidates(
+                item=item,
+                objaverse_client=polyhaven_client,
+                geometry_dir=geometry_dir,
+                max_retries=max_retries,
+                num_candidates=candidate_pool_size,
+                scene_id=scene_id,
+                source_label=source_label,
+            )
+            if not polyhaven_candidates:
+                console_logger.warning(
+                    f"No {source_label} candidates for '{item.description}'"
+                )
+                return None
 
         if max_retries == 0:
             # Single attempt, no validation.
@@ -1431,6 +1524,7 @@ class AssetRouter:
                 scene_id=scene_id,
                 hssd_candidates=hssd_candidates,
                 objaverse_candidates=objaverse_candidates,
+                polyhaven_candidates=polyhaven_candidates,
             )
 
         # Validation + retry loop.
@@ -1452,6 +1546,7 @@ class AssetRouter:
                 scene_id=scene_id,
                 hssd_candidates=hssd_candidates,
                 objaverse_candidates=objaverse_candidates,
+                polyhaven_candidates=polyhaven_candidates,
             )
 
             if result is None:
@@ -1468,6 +1563,8 @@ class AssetRouter:
                 use_lenient = self.cfg.asset_manager.hssd.use_lenient_validation
             elif asset_source == "objaverse":
                 use_lenient = self.cfg.asset_manager.objaverse.use_lenient_validation
+            elif asset_source == "polyhaven":
+                use_lenient = self.cfg.asset_manager.polyhaven.use_lenient_validation
 
             validation_dir = debug_dir / f"{item.short_name}_validation"
             validation = self.validate_asset(
@@ -1475,6 +1572,11 @@ class AssetRouter:
                 description=item.description,
                 output_dir=validation_dir,
                 use_lenient=use_lenient,
+                ignore_appearance=(
+                    asset_source == "generated"
+                    and self.cfg.asset_manager.backend == "sam3d"
+                    and str(self.cfg.asset_manager.sam3d.provider).lower() == "mlx"
+                ),
             )
 
             if validation.is_acceptable:
@@ -1569,13 +1671,15 @@ class AssetRouter:
         objaverse_client: "ObjaverseRetrievalClient | None",
         geometry_dir: Path,
         max_retries: int,
+        num_candidates: int | None = None,
         scene_id: str | None = None,
+        source_label: str = "Objaverse",
     ) -> list["ObjaverseRetrievalResult"] | None:
         """Fetch Objaverse candidates in a single server call.
 
         Args:
             item: The asset item to retrieve candidates for.
-            objaverse_client: Client for Objaverse retrieval server.
+            objaverse_client: Client for a generic catalog retrieval server.
             geometry_dir: Directory to save retrieved geometry.
             max_retries: Number of validation retries (determines num_candidates).
             scene_id: Optional scene identifier for fair round-robin scheduling.
@@ -1585,16 +1689,17 @@ class AssetRouter:
         """
         if objaverse_client is None:
             console_logger.error(
-                f"Objaverse client not provided for '{item.description}', "
-                "but asset_source is 'objaverse'"
+                f"{source_label} client not provided for '{item.description}'"
             )
             return None
 
-        console_logger.info(f"Fetching Objaverse candidates for '{item.description}'")
+        console_logger.info(
+            f"Fetching {source_label} candidates for '{item.description}'"
+        )
 
         # Request enough candidates for all retry attempts.
         # max_retries=0 means single attempt, so we need at least 1.
-        num_candidates = max(1, max_retries)
+        num_candidates = max(1, num_candidates or max_retries)
 
         # Map EITHER to concrete type based on which agent is calling.
         object_type = item.object_type.value
@@ -1618,24 +1723,28 @@ class AssetRouter:
         try:
             responses = list(objaverse_client.retrieve_objects([request]))
             if not responses:
-                console_logger.error(f"No Objaverse response for '{item.description}'")
+                console_logger.error(
+                    f"No {source_label} response for '{item.description}'"
+                )
                 return None
 
             _, response = responses[0]
 
             if not response.results:
-                console_logger.error(f"No Objaverse results for '{item.description}'")
+                console_logger.error(
+                    f"No {source_label} results for '{item.description}'"
+                )
                 return None
 
             console_logger.info(
-                f"Got {len(response.results)} Objaverse candidates for "
+                f"Got {len(response.results)} {source_label} candidates for "
                 f"'{item.description}'"
             )
             return response.results
 
         except Exception as e:
             console_logger.error(
-                f"Objaverse fetch failed for '{item.description}': {e}"
+                f"{source_label} fetch failed for '{item.description}': {e}"
             )
             return None
 
@@ -1653,6 +1762,7 @@ class AssetRouter:
         scene_id: str | None = None,
         hssd_candidates: list["HssdRetrievalResult"] | None = None,
         objaverse_candidates: list["ObjaverseRetrievalResult"] | None = None,
+        polyhaven_candidates: list["ObjaverseRetrievalResult"] | None = None,
     ) -> GeneratedGeometry | None:
         """Acquire a single candidate based on asset source.
 
@@ -1697,25 +1807,58 @@ class AssetRouter:
                 hssd_id=candidate.hssd_id,
             )
 
-        if asset_source == "objaverse":
-            if objaverse_candidates is None or attempt >= len(objaverse_candidates):
+        if asset_source in {"objaverse", "polyhaven"}:
+            candidates = (
+                polyhaven_candidates
+                if asset_source == "polyhaven"
+                else objaverse_candidates
+            )
+            source_label = (
+                "Global asset catalog"
+                if asset_source == "polyhaven"
+                and self.cfg.asset_manager.general_asset_source == "all"
+                else "Poly Haven"
+                if asset_source == "polyhaven"
+                else "Objaverse"
+            )
+            if candidates is None or attempt >= len(candidates):
                 console_logger.warning(
-                    f"No more Objaverse candidates for '{item.description}' "
-                    f"(attempt {attempt}, available {len(objaverse_candidates or [])})"
+                    f"No more {source_label} candidates for '{item.description}' "
+                    f"(attempt {attempt}, available {len(candidates or [])})"
                 )
                 return None
 
-            candidate = objaverse_candidates[attempt]
+            candidate = candidates[attempt]
             console_logger.info(
-                f"Using Objaverse candidate {attempt + 1}/{len(objaverse_candidates)} "
+                f"Using {source_label} candidate {attempt + 1}/{len(candidates)} "
                 f"for '{item.description}': {candidate.objaverse_uid}"
             )
 
+            geometry_path = Path(candidate.mesh_path)
+            if not geometry_path.exists() and candidate.asset_source == "objaverse":
+                geometry_path = convert_objathor_asset_to_glb(
+                    asset_dir=geometry_path.parent,
+                    uid=candidate.source_id or candidate.objaverse_uid,
+                )
+
             return GeneratedGeometry(
-                geometry_path=Path(candidate.mesh_path),
+                geometry_path=geometry_path,
                 item=item,
-                asset_source="objaverse",
-                objaverse_uid=candidate.objaverse_uid,
+                asset_source=candidate.asset_source,
+                objaverse_uid=(
+                    candidate.objaverse_uid if asset_source == "objaverse" else None
+                ),
+                catalog_id=candidate.objaverse_uid,
+                license=candidate.license,
+                ontology_path=candidate.ontology_path,
+                placement_classes=candidate.placement_classes,
+                canonical_up=candidate.canonical_up,
+                canonical_front=candidate.canonical_front,
+                support_zones=candidate.support_zones,
+                clearance_zones=candidate.clearance_zones,
+                quality_score=candidate.quality_score,
+                thumbnail=candidate.thumbnail,
+                catalog_semantics=candidate.semantic_metadata,
             )
 
         # Text-to-3D generation.
@@ -1790,16 +1933,12 @@ class AssetRouter:
             if backend == "sam3d":
                 sam3d_cfg = self.cfg.asset_manager.sam3d
                 mode = sam3d_cfg.get("mode", "foreground")
-                sam3d_config = {
-                    "sam3_checkpoint": str(sam3d_cfg.sam3_checkpoint),
-                    "sam3d_checkpoint": str(sam3d_cfg.sam3d_checkpoint),
-                    "mode": mode,
-                    "text_prompt": sam3d_cfg.get("text_prompt"),
-                    "threshold": sam3d_cfg.get("threshold", 0.5),
-                }
-                # Pass object description for "object_description" mode.
-                if mode == "object_description":
-                    sam3d_config["object_description"] = item.description
+                sam3d_config = sam_provider_config_from_mapping(
+                    sam3d_cfg,
+                    object_description=(
+                        item.description if mode == "object_description" else None
+                    ),
+                )
 
             request = GeometryGenerationServerRequest(
                 image_path=str(image_path),

@@ -12,7 +12,14 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    name: ${{ matrix.os }} provider and unit tests
+    strategy:
+      fail-fast: false
+      matrix:
+        # macos-15 is an arm64 Apple Silicon hosted runner; Ubuntu protects the
+        # CPU/no-accelerator path without incurring CUDA runner cost.
+        os: [ubuntu-latest, macos-15]
+    runs-on: ${{ matrix.os }}
 
     # Get environment variables.
     env:
@@ -35,7 +42,29 @@ jobs:
           python-version-file: ".python-version"
 
       - name: Install dependencies
-        run: uv sync
+        run: uv sync --extra portable
+
+      - name: Enforce hardware architecture boundary
+        run: uv run --extra portable pytest -q tests/unit/test_hardware_provider_boundaries.py
+
+      - name: Validate host provider selection
+        run: |
+          uv run python - <<'PY'
+          import platform
+          import torch
+          from scenesmith.agent_utils.execution_providers import (
+              HardwareInventory,
+              resolve_torch_device,
+          )
+
+          inventory = HardwareInventory.detect(torch_module=torch)
+          selected = resolve_torch_device(inventory=inventory, torch_module=torch)
+          print(inventory)
+          print(f"selected={selected}")
+          if platform.system() == "Darwin":
+              assert platform.machine() == "arm64"
+              assert selected == "mps"
+          PY
 
       - name: Restore testmon cache
         id: cache-testmon-restore
@@ -50,10 +79,10 @@ jobs:
             testmon-unit-${{ runner.os }}-
 
       - name: Run unit tests
-        run: uv run pytest tests/unit/ --testmon
+        run: uv run --extra portable pytest tests/unit/ --testmon
 
       - name: Revalidate held-out LLM authoring evidence
-        run: uv run python scripts/validate_llm_trials.py
+        run: uv run --extra portable python scripts/validate_llm_trials.py
 
       - name: Save testmon cache
         uses: actions/cache/save@v4
@@ -66,3 +95,43 @@ jobs:
             .testmondata-shm
             .testmondata-wal
           key: ${{ steps.cache-testmon-restore.outputs.cache-primary-key }}
+
+  cuda-provider:
+    # Optional real-hardware gate. Enable it only in repositories with a labelled
+    # self-hosted runner; ordinary PRs keep using the inexpensive CPU matrix.
+    if: vars.SCENESMITH_CUDA_RUNNER == 'enabled'
+    runs-on: [self-hosted, linux, x64, cuda]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.7.8"
+          enable-cache: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version-file: ".python-version"
+
+      - name: Install dependencies
+        run: uv sync --extra cuda
+
+      - name: Validate CUDA provider on real hardware
+        env:
+          SCENESMITH_COMPUTE_PROVIDER: cuda
+        run: |
+          uv run python - <<'PY'
+          import torch
+          from scenesmith.agent_utils.execution_providers import resolve_torch_device
+
+          assert torch.cuda.is_available()
+          assert resolve_torch_device(torch_module=torch).startswith("cuda:")
+          print(torch.cuda.get_device_name())
+          PY
+          uv run python -m unittest -q \
+            tests.unit.test_execution_providers \
+            tests.unit.test_geometry_execution_provider \
+            tests.unit.test_hardware_provider_boundaries

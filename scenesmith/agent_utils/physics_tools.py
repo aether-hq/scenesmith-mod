@@ -199,6 +199,8 @@ def check_physics_violations(
     open_violations = []
     height_violations = []
     window_violations = []
+    if room_geom:
+        height_violations = compute_wall_height_violations(scene=scene)
     if room_geom and room_geom.openings:
         door_violations = compute_door_clearance_violations(scene=scene)
         open_violations = compute_open_connection_blocked_violations(
@@ -206,7 +208,6 @@ def check_physics_violations(
             passage_size=cfg.clearance_zones.passage_size,
             open_connection_clearance=cfg.clearance_zones.open_connection_clearance,
         )
-        height_violations = compute_wall_height_violations(scene=scene)
         window_violations = compute_window_clearance_violations(scene=scene)
 
     # Apply agent-type filtering if specified.

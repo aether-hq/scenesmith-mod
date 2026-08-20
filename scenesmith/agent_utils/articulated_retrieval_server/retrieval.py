@@ -16,6 +16,7 @@ from scenesmith.agent_utils.articulated_retrieval_server.data_loader import (
 from scenesmith.agent_utils.clip_embeddings import (
     compute_clip_similarities,
     get_text_embedding,
+    warm_clip_text_encoder,
 )
 
 console_logger = logging.getLogger(__name__)
@@ -94,6 +95,10 @@ class ArticulatedRetriever:
             f"{len(self.preprocessed_data.metadata_by_id)} objects"
         )
         return True
+
+    def warmup(self) -> None:
+        """Initialize the text encoder before serving bounded requests."""
+        warm_clip_text_encoder(device=self.clip_device)
 
     def retrieve(
         self,

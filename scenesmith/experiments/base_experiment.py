@@ -1,8 +1,11 @@
 from abc import ABC, abstractmethod
+from copy import deepcopy
 from pathlib import Path
 
 from omegaconf import DictConfig, OmegaConf
 
+from scenesmith.agent_utils.blender.process_provider import RenderAllocation
+from scenesmith.agent_utils.execution_providers import ProviderSelectionContext
 from scenesmith.ceiling_agents.base_ceiling_agent import BaseCeilingAgent
 from scenesmith.floor_plan_agents.base_floor_plan_agent import BaseFloorPlanAgent
 from scenesmith.furniture_agents.base_furniture_agent import BaseFurnitureAgent
@@ -49,13 +52,27 @@ class BaseExperiment(ABC):
     def __init__(self, cfg: DictConfig):
         self.cfg = cfg
         self.output_dir = Path(cfg.experiment.output_dir)
+        self.provider_selection = ProviderSelectionContext.from_mapping(cfg.experiment)
+
+    @staticmethod
+    def _agent_config(config_dict: dict, agent_key: str) -> dict:
+        """Copy agent config and inject experiment-wide execution choices."""
+
+        agent_config = deepcopy(config_dict[agent_key])
+        provider_config = config_dict.get("experiment", {}).get(
+            "execution_providers", {}
+        )
+        render_provider = provider_config.get("render")
+        if render_provider is not None:
+            agent_config.setdefault("rendering", {})["provider"] = render_provider
+        return agent_config
 
     @staticmethod
     def build_floor_plan_agent(
         cfg_dict: dict | DictConfig,
         compatible_agents: dict[str, type],
         logger: BaseLogger,
-        render_gpu_id: int | None = None,
+        render_allocation: RenderAllocation | None = None,
     ) -> BaseFloorPlanAgent:
         """Build floor plan agent from config dictionary.
 
@@ -63,8 +80,7 @@ class BaseExperiment(ABC):
             cfg_dict: Configuration as dictionary or DictConfig.
             compatible_agents: Dictionary mapping agent names to classes.
             logger: Logger instance to use.
-            render_gpu_id: GPU device ID for Blender rendering. When set, uses
-                bubblewrap to isolate the BlenderServer to this GPU.
+            render_allocation: Provider-owned Blender render slot.
 
         Returns:
             Floor plan agent instance.
@@ -76,7 +92,7 @@ class BaseExperiment(ABC):
             else cfg_dict
         )
 
-        agent_config = config_dict["floor_plan_agent"]
+        agent_config = BaseExperiment._agent_config(config_dict, "floor_plan_agent")
         agent_name = agent_config["_name"]
 
         if agent_name not in compatible_agents:
@@ -92,7 +108,7 @@ class BaseExperiment(ABC):
         return compatible_agents[agent_name](
             cfg=OmegaConf.create(agent_config),
             logger=logger,
-            render_gpu_id=render_gpu_id,
+            render_allocation=render_allocation,
         )
 
     @staticmethod
@@ -100,7 +116,7 @@ class BaseExperiment(ABC):
         cfg_dict: dict | DictConfig,
         compatible_agents: dict[str, type],
         logger: BaseLogger,
-        render_gpu_id: int | None = None,
+        render_allocation: RenderAllocation | None = None,
     ) -> BaseFurnitureAgent:
         """Build furniture agent from config dictionary.
 
@@ -108,8 +124,7 @@ class BaseExperiment(ABC):
             cfg_dict: Configuration as dictionary or DictConfig
             compatible_agents: Dictionary mapping agent names to classes
             logger: Logger instance to use
-            render_gpu_id: GPU device ID for Blender rendering. When set, uses
-                bubblewrap to isolate the BlenderServer to this GPU.
+            render_allocation: Provider-owned Blender render slot.
 
         Returns:
             Furniture agent instance
@@ -121,7 +136,7 @@ class BaseExperiment(ABC):
             else cfg_dict
         )
 
-        agent_config = config_dict["furniture_agent"]
+        agent_config = BaseExperiment._agent_config(config_dict, "furniture_agent")
         agent_name = agent_config["_name"]
 
         if agent_name not in compatible_agents:
@@ -159,7 +174,7 @@ class BaseExperiment(ABC):
             materials_server_host=materials_server_config.host,
             materials_server_port=materials_server_config.port,
             num_workers=experiment_config.num_workers,
-            render_gpu_id=render_gpu_id,
+            render_allocation=render_allocation,
         )
 
     @staticmethod
@@ -167,7 +182,7 @@ class BaseExperiment(ABC):
         cfg_dict: dict | DictConfig,
         compatible_agents: dict[str, type],
         logger: BaseLogger,
-        render_gpu_id: int | None = None,
+        render_allocation: RenderAllocation | None = None,
     ) -> BaseManipulandAgent:
         """Build manipuland agent from config dictionary.
 
@@ -175,8 +190,7 @@ class BaseExperiment(ABC):
             cfg_dict: Configuration as dictionary or DictConfig
             compatible_agents: Dictionary mapping agent names to classes
             logger: Logger instance to use
-            render_gpu_id: GPU device ID for Blender rendering. When set, uses
-                bubblewrap to isolate the BlenderServer to this GPU.
+            render_allocation: Provider-owned Blender render slot.
 
         Returns:
             Manipuland agent instance
@@ -187,7 +201,7 @@ class BaseExperiment(ABC):
             else cfg_dict
         )
 
-        agent_config = config_dict["manipuland_agent"]
+        agent_config = BaseExperiment._agent_config(config_dict, "manipuland_agent")
         agent_name = agent_config["_name"]
 
         if agent_name not in compatible_agents:
@@ -225,7 +239,7 @@ class BaseExperiment(ABC):
             materials_server_host=materials_server_config.host,
             materials_server_port=materials_server_config.port,
             num_workers=experiment_config.num_workers,
-            render_gpu_id=render_gpu_id,
+            render_allocation=render_allocation,
         )
 
     @staticmethod
@@ -236,7 +250,7 @@ class BaseExperiment(ABC):
         house_layout: "HouseLayout",
         ceiling_height: float,
         wall_thickness: float = 0.05,
-        render_gpu_id: int | None = None,
+        render_allocation: RenderAllocation | None = None,
     ) -> BaseWallAgent:
         """Build wall agent from config dictionary.
 
@@ -247,8 +261,7 @@ class BaseExperiment(ABC):
             house_layout: HouseLayout containing wall geometry.
             ceiling_height: Height of ceiling in meters.
             wall_thickness: Wall thickness in meters for surface offset.
-            render_gpu_id: GPU device ID for Blender rendering. When set, uses
-                bubblewrap to isolate the BlenderServer to this GPU.
+            render_allocation: Provider-owned Blender render slot.
 
         Returns:
             Wall agent instance.
@@ -259,7 +272,7 @@ class BaseExperiment(ABC):
             else cfg_dict
         )
 
-        agent_config = config_dict["wall_agent"]
+        agent_config = BaseExperiment._agent_config(config_dict, "wall_agent")
         agent_name = agent_config["_name"]
 
         if agent_name not in compatible_agents:
@@ -300,7 +313,7 @@ class BaseExperiment(ABC):
             materials_server_host=materials_server_config.host,
             materials_server_port=materials_server_config.port,
             num_workers=experiment_config.num_workers,
-            render_gpu_id=render_gpu_id,
+            render_allocation=render_allocation,
         )
 
     @staticmethod
@@ -309,7 +322,7 @@ class BaseExperiment(ABC):
         compatible_agents: dict[str, type],
         logger: BaseLogger,
         ceiling_height: float,
-        render_gpu_id: int | None = None,
+        render_allocation: RenderAllocation | None = None,
     ) -> BaseCeilingAgent:
         """Build ceiling agent from config dictionary.
 
@@ -318,8 +331,7 @@ class BaseExperiment(ABC):
             compatible_agents: Dictionary mapping agent names to classes.
             logger: Logger instance to use.
             ceiling_height: Height of ceiling in meters.
-            render_gpu_id: GPU device ID for Blender rendering. When set, uses
-                bubblewrap to isolate the BlenderServer to this GPU.
+            render_allocation: Provider-owned Blender render slot.
 
         Returns:
             Ceiling agent instance.
@@ -330,7 +342,7 @@ class BaseExperiment(ABC):
             else cfg_dict
         )
 
-        agent_config = config_dict["ceiling_agent"]
+        agent_config = BaseExperiment._agent_config(config_dict, "ceiling_agent")
         agent_name = agent_config["_name"]
 
         if agent_name not in compatible_agents:
@@ -369,7 +381,7 @@ class BaseExperiment(ABC):
             materials_server_host=materials_server_config.host,
             materials_server_port=materials_server_config.port,
             num_workers=experiment_config.num_workers,
-            render_gpu_id=render_gpu_id,
+            render_allocation=render_allocation,
         )
 
     def exec_task(self, task_name: str) -> None:

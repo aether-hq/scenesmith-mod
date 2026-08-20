@@ -1,8 +1,14 @@
 # Structural Geometry Authoring Guide
 
-SceneSmith keeps the original room-generation workflow, then adds structural
-data with `set_structural_layout`. Call it immediately after
-`generate_room_specs`, before doors, windows, materials, or furnishing.
+SceneSmith uses one five-agent workflow for conventional rooms, multilevel
+buildings, caves, and mixed scenes. During the floor-plan stage,
+`set_structural_layout` adds the structural data required by the prompt. Call it
+immediately after `generate_room_specs`, before doors, windows, materials, or
+the furniture, wall-mounted, ceiling-mounted, and manipuland stages.
+
+Semantic structure is not a separate cave-generation mode. Simple rectangular
+rooms and complex natural environments must proceed through the same downstream
+agents and final export path.
 
 ## Coordinate conventions
 
@@ -115,6 +121,13 @@ Programmatic users call `HouseLayout.compile_semantic_environment(...)` for
 the joined shell and `compile_semantic_environment_details(...)` for detail
 and hero SDFs before Drake export. The structural authoring tool accepts the
 same object atomically and clears stale compiled products when it changes.
+
+Those direct calls describe the current compiler API, not the intended product
+workflow. The normal stateful pipeline must compile the environment
+automatically after the floor-plan agent and before furnishing. Until that
+integration is complete, a successful gallery or direct compiler result proves
+the structural subsystem only; it does not prove that all five agents produced
+a complete scene.
 
 ## Two stacked levels with a stair
 

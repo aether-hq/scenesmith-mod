@@ -394,6 +394,23 @@ class TestConnectorsAndReferences(unittest.TestCase):
                 connectors=(self._stairs(),),
             )
 
+    def test_internal_stairs_may_connect_multiple_levels_of_one_tall_space(
+        self,
+    ) -> None:
+        stairs = ConnectorSpec(
+            "atrium_stairs",
+            ConnectorType.STAIRS_STRAIGHT,
+            ConnectorEndpoint("atrium", "ground", (1.0, 1.0, 0.0)),
+            ConnectorEndpoint("atrium", "upper", (6.0, 1.0, 3.0)),
+            parameters={"riser_count": 18},
+        )
+
+        validate_structural_references(
+            levels=(LevelSpec("ground"), LevelSpec("upper", 3.0)),
+            space_level_ids={"atrium": "ground"},
+            connectors=(stairs,),
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

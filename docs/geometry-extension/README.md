@@ -14,7 +14,7 @@ the remaining chunking, exterior, and destruction work.
 
 Status: core upgrade implemented; advanced hardening/experiments remain
 
-Date: 2026-08-12
+Date: 2026-08-14
 Upstream baseline: `nepfaff/scenesmith` `main`
 
 ## Objective
@@ -58,35 +58,39 @@ new structural intermediate representation and adapters for existing agents.
 
 ## Design principles
 
-1. **Preserve existing scenes.** A v1 rectangular room must deserialize into
+1. **Keep one SceneSmith pipeline.** The floor-plan, furniture, wall-mounted,
+   ceiling-mounted, and manipuland agents remain the production architecture.
+   Semantic geometry extends the structural representation compiled after the
+   floor-plan stage; it is not a separate cave-generation product path.
+2. **Preserve existing scenes.** A v1 rectangular room must deserialize into
    the new representation and produce the same frame placement and geometry.
-2. **Separate topology from mesh.** “Room A connects to Room B by stairs” is
+3. **Separate topology from mesh.** “Room A connects to Room B by stairs” is
    stable semantic data; a particular triangulation is derived output.
-3. **Make surfaces first-class.** Furniture rests on support surfaces, wall
+4. **Make surfaces first-class.** Furniture rests on support surfaces, wall
    objects attach to boundary surfaces, and lights attach to overhead surfaces.
    These operations must no longer infer surfaces from a room AABB.
-4. **Use three representation tiers.** Parametric primitives cover common,
+5. **Use three representation tiers.** Parametric primitives cover common,
    editable structures; height fields cover terrain; triangle meshes are the
    escape hatch for caverns and arbitrary shells.
-5. **Validate before expensive generation.** Reject self-intersecting
+6. **Validate before expensive generation.** Reject self-intersecting
    footprints, invalid connector endpoints, unsafe stairs, non-finite meshes,
    and impossible topology before calling VLM or asset-generation stages.
-6. **Keep physics explicit.** Visual mesh, collision mesh, support surfaces,
+7. **Keep physics explicit.** Visual mesh, collision mesh, support surfaces,
    traversable surfaces, and attachment surfaces may differ and are tracked
    separately.
-7. **Prefer approximations with declared error.** Curves may initially be
+8. **Prefer approximations with declared error.** Curves may initially be
    tessellated, but chord tolerance and resulting error must be recorded.
-8. **Every new capability needs three proofs.** A deterministic geometry test,
+9. **Every new capability needs three proofs.** A deterministic geometry test,
    a downstream simulation/export test, and a prompt-to-structure experiment.
 
 ## Target architecture
 
 ```text
-natural-language prompt
+natural-language prompt (the same `main.py`/SetComposer entry point)
         |
         v
-StructuralSceneSpec (semantic, editable, versioned)
-  levels + spaces + boundaries + portals + connectors
+Floor-plan agent
+  authors a versioned structural scene: simple rooms and/or semantic environment
         |
         v
 Structural compiler and validators
@@ -97,12 +101,18 @@ Structural compiler and validators
         +--> TopologyGraph / NavigationGraph
         |
         v
-Existing SceneSmith stages through compatibility adapters
+The remaining agents in the same SceneSmith run
   furniture -> wall-mounted -> ceiling-mounted -> manipulands
         |
         v
 Drake directives + Blender + MuJoCo/USD export
 ```
+
+Rectangular rooms are the simplest structural input to this pipeline, not a
+separate mode. A cavern, a conventional bar, and a prison joined to an
+escape tunnel must all continue through the same downstream agents and final
+scene assembly. Direct compiler examples and the semantic gallery are useful
+geometry tests, but do not constitute proof of full pipeline integration.
 
 ### Versioned semantic model
 

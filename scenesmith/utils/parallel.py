@@ -7,8 +7,10 @@ where ProcessPoolExecutor's "broken pool" behavior is problematic.
 
 import logging
 import multiprocessing
+import os
 import queue
 import signal
+import time
 import traceback
 
 from multiprocessing.connection import wait
@@ -79,6 +81,7 @@ def run_parallel_isolated(
     tasks: list[tuple[str, Callable, dict]],
     max_workers: int,
     return_values: bool = False,
+    task_timeout_s: float | None = None,
 ) -> dict[str, tuple[bool, Any]]:
     """Run tasks in isolated processes with fault tolerance.
 
@@ -103,9 +106,16 @@ def run_parallel_isolated(
         return_values=True) or None (if return_values=False).
         For failed tasks: result_or_error is the error message string.
     """
+    if task_timeout_s is None:
+        task_timeout_s = float(
+            os.environ.get("SCENESMITH_PARALLEL_TASK_TIMEOUT_SECONDS", "120")
+        )
+    if task_timeout_s <= 0:
+        raise ValueError("task_timeout_s must be positive")
+
     result_queue: multiprocessing.Queue = multiprocessing.Queue()
     pending = list(tasks)
-    active: dict[int, tuple[multiprocessing.Process, str]] = {}
+    active: dict[int, tuple[multiprocessing.Process, str, float]] = {}
     results: dict[str, tuple[bool, Any]] = {}
 
     while pending or active:
@@ -117,12 +127,12 @@ def run_parallel_isolated(
                 args=(target, kwargs, task_id, result_queue, return_values),
             )
             p.start()
-            active[p.pid] = (p, task_id)
+            active[p.pid] = (p, task_id, time.monotonic())
             console_logger.info(f"Started {task_id} (pid={p.pid})")
 
         # Wait for any process to finish (efficient, no busy polling).
         if active:
-            sentinels = [proc.sentinel for proc, _ in active.values()]
+            sentinels = [proc.sentinel for proc, _, _ in active.values()]
             wait(sentinels, timeout=1.0)
 
         # Drain all available results from queue first. This avoids race
@@ -136,8 +146,28 @@ def run_parallel_isolated(
             except queue.Empty:
                 break
 
+        # Kill tasks that have exceeded their wall-clock budget. A child that
+        # wedges in a native library must never strand the parent forever.
+        current_time = time.monotonic()
+        for pid, (proc, task_id, started_at) in list(active.items()):
+            if task_id in results or current_time - started_at < task_timeout_s:
+                continue
+            proc.terminate()
+            proc.join(timeout=2.0)
+            if proc.is_alive():
+                proc.kill()
+                proc.join(timeout=1.0)
+            del active[pid]
+            results[task_id] = (
+                False,
+                f"Task exceeded {task_timeout_s:g}s and was terminated",
+            )
+            console_logger.error(
+                "%s exceeded %.1fs and was terminated", task_id, task_timeout_s
+            )
+
         # Collect finished processes. Any that didn't report results crashed.
-        for pid, (proc, task_id) in list(active.items()):
+        for pid, (proc, task_id, _) in list(active.items()):
             if not proc.is_alive():
                 proc.join()
                 del active[pid]

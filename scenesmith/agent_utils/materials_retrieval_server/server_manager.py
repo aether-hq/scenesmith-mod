@@ -9,6 +9,7 @@ from threading import Thread
 import requests
 
 from omegaconf import DictConfig
+from werkzeug.serving import BaseWSGIServer, make_server
 
 from scenesmith.agent_utils.materials_retrieval_server.config import MaterialsConfig
 from scenesmith.utils.network_utils import is_port_available
@@ -72,6 +73,7 @@ class MaterialsRetrievalServer:
         self._materials_config = materials_config
         self._clip_device = clip_device
         self._app: MaterialsRetrievalApp | None = None
+        self._http_server: BaseWSGIServer | None = None
         self._server_thread: Thread | None = None
         self._running = False
         self._shutdown_event = threading.Event()
@@ -105,10 +107,18 @@ class MaterialsRetrievalServer:
             # Start the processing queue.
             self._app.start_processing()
 
-            # Start Flask server in a separate thread.
+            # Own the WSGI server explicitly. Werkzeug 3 no longer exposes the
+            # request-scoped ``werkzeug.server.shutdown`` callback used by the
+            # legacy /shutdown endpoint, so Flask.run() cannot be stopped
+            # reliably from another thread.
+            self._http_server = make_server(
+                self._host, self._port, self._app, threaded=True
+            )
+
+            # Start the HTTP server in a separate thread.
             self._server_thread = Thread(
                 target=self._run_server,
-                daemon=False,  # Not daemon so we can shut down cleanly.
+                daemon=True,  # A failed shutdown must not strand SceneSmith.
             )
             self._server_thread.start()
 
@@ -143,19 +153,10 @@ class MaterialsRetrievalServer:
         if self._app:
             self._app.stop_processing()
 
-        # Trigger Flask server shutdown via shutdown endpoint.
-        try:
-            response = requests.post(
-                f"http://{self._host}:{self._port}/shutdown", timeout=2
-            )
-            if response.status_code == 200:
-                console_logger.debug("Shutdown endpoint called successfully")
-            else:
-                console_logger.warning(
-                    f"Shutdown endpoint returned status {response.status_code}"
-                )
-        except requests.exceptions.RequestException as e:
-            console_logger.warning(f"Failed to call shutdown endpoint: {e}")
+        # Stop the owned Werkzeug server directly. This is safe to call from
+        # the experiment thread while serve_forever() runs in _server_thread.
+        if self._http_server:
+            self._http_server.shutdown()
 
         # Wait for server thread to complete.
         if self._server_thread and self._server_thread.is_alive():
@@ -201,13 +202,9 @@ class MaterialsRetrievalServer:
     def _run_server(self) -> None:
         """Run the Flask server in a separate thread."""
         try:
-            self._app.run(
-                host=self._host,
-                port=self._port,
-                debug=False,
-                threaded=True,
-                use_reloader=False,  # Important: avoid reloader in thread.
-            )
+            if self._http_server is None:
+                raise RuntimeError("HTTP server was not initialized")
+            self._http_server.serve_forever()
         except Exception as e:
             console_logger.error(f"Server thread failed: {e}")
             self._shutdown_event.set()
@@ -238,8 +235,11 @@ class MaterialsRetrievalServer:
 
     def _cleanup(self) -> None:
         """Clean up server resources."""
+        if self._http_server is not None:
+            self._http_server.server_close()
         self._running = False
         self._app = None
+        self._http_server = None
         self._server_thread = None
         self._shutdown_event.clear()
 

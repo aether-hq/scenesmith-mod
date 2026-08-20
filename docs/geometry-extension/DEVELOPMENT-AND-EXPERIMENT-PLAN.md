@@ -223,7 +223,7 @@ Deliverables:
 Exit criteria:
 
 - all P0/P1 deterministic rows pass;
-- all legacy unit tests pass;
+- all pre-extension unit tests pass;
 - representative scenes from all three geometry tiers run in Drake;
 - export differences are quantified and no unsupported feature is silently lost.
 

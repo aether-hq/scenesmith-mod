@@ -5,6 +5,7 @@ import logging
 import bpy
 
 from scenesmith.agent_utils.blender.params import RenderParams
+from scenesmith.agent_utils.blender.render_provider import configure_cycles_provider
 
 logger = logging.getLogger(__name__)
 
@@ -217,46 +218,19 @@ def setup_regular_world() -> None:
     _setup_world(world_name="World")
 
 
-def setup_cycles_gpu_rendering() -> None:
-    """Configure Cycles to use GPU rendering with persistent memory.
-
-    Enables CUDA/OPTIX GPU compute and persistent data to keep BVH/textures
-    in GPU memory between renders for faster subsequent renders.
-    Falls back gracefully if no GPU is available.
-    """
+def setup_cycles_gpu_rendering(provider: str = "auto") -> str:
+    """Configure Cycles through the injectable render-provider facade."""
     # Get Cycles preferences.
     try:
         prefs = bpy.context.preferences.addons["cycles"].preferences
     except KeyError:
-        logger.warning("Cycles addon not available, skipping GPU setup")
-        return
-
-    # Try OPTIX first (fastest on NVIDIA), fall back to CUDA.
-    gpu_enabled = False
-    for compute_type in ["OPTIX", "CUDA"]:
-        try:
-            prefs.compute_device_type = compute_type
-            prefs.get_devices()
-
-            # Enable all available GPU devices.
-            for device in prefs.devices:
-                device.use = device.type != "CPU"
-
-            # Check if any GPU device was enabled.
-            if any(d.use and d.type != "CPU" for d in prefs.devices):
-                gpu_enabled = True
-                logger.info(f"Enabled {compute_type} GPU rendering")
-                break
-        except Exception:
-            continue
-
-    if not gpu_enabled:
-        logger.info("No GPU available for Cycles, using CPU")
-        return
-
-    # Configure scene to use GPU.
-    scene = bpy.context.scene
-    scene.cycles.device = "GPU"
-
-    # Enable persistent data (keeps BVH/textures in GPU memory).
-    scene.render.use_persistent_data = True
+        logger.warning("Cycles addon not available; using CPU rendering")
+        bpy.context.scene.cycles.device = "CPU"
+        return "cpu"
+    selected = configure_cycles_provider(
+        preferences=prefs,
+        scene=bpy.context.scene,
+        requested=provider,
+    )
+    logger.info("Enabled Blender Cycles provider '%s'", selected)
+    return selected

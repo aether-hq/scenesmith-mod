@@ -167,6 +167,49 @@ class ManipulandTools:
                 f"Unsupported noise mode {mode}, keeping current profile"
             )
 
+    @staticmethod
+    def _support_semantics_allow(
+        furniture: SceneObject, asset: SceneObject
+    ) -> tuple[bool, str | None]:
+        """Enforce deterministic contextual support-zone compatibility."""
+        furniture_text = f"{furniture.name} {furniture.description}".lower()
+        asset_text = " ".join(
+            [
+                asset.name,
+                asset.description,
+                str(asset.metadata.get("catalog_id", "")),
+                str(asset.metadata.get("source_id", "")),
+            ]
+        ).lower().replace("_", " ")
+        is_patient_surface = any(
+            term in furniture_text
+            for term in ("medical bed", "med bed", "hospital bed", "treatment bed")
+        )
+        if not is_patient_surface:
+            return True, None
+
+        forbidden = (
+            "accessory",
+            "computer",
+            "device",
+            "equipment",
+            "machine",
+            "monitor",
+            "stand",
+            "tape",
+            "terminal",
+            "tool",
+        )
+        matched = next((term for term in forbidden if term in asset_text), None)
+        if matched is None:
+            return True, None
+        return (
+            False,
+            f"'{asset.name}' is classified as hard equipment ({matched}) and cannot "
+            "be placed in a medical bed's patient-support zone. Place it on a "
+            "bedside cabinet/equipment stand, or choose soft bedding instead.",
+        )
+
     def _create_loop_error_response(
         self, method_name: str, attempt_count: int, _args: tuple, kwargs: dict
     ) -> str:
@@ -1042,6 +1085,19 @@ class ManipulandTools:
                     ),
                     error_type=ManipulandErrorType.ASSET_NOT_FOUND,
                 )
+
+            furniture = self.scene.get_object(self.current_furniture_id)
+            if furniture is not None:
+                allowed, semantic_error = self._support_semantics_allow(
+                    furniture, original_asset
+                )
+                if not allowed:
+                    console_logger.warning("Support-zone rejection: %s", semantic_error)
+                    return self._create_placement_failure_result(
+                        asset_id=asset_id,
+                        message=semantic_error or "Asset is incompatible with surface",
+                        error_type=ManipulandErrorType.INVALID_OPERATION,
+                    )
 
             # Validate position is within surface bounds (convex hull).
             position_2d = np.array([position_x, position_z])

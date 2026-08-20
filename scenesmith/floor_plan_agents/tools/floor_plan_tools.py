@@ -7,11 +7,12 @@ including rooms, doors, windows, and materials.
 import json
 import logging
 import math
+from copy import deepcopy
 
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import Any, Callable, Literal
 
-from agents import function_tool
+from agents import FunctionTool, function_tool
 
 from scenesmith.agent_utils.house import (
     ConnectionType,
@@ -20,7 +21,9 @@ from scenesmith.agent_utils.house import (
     RoomSpec,
     Wall,
     WallDirection,
+    default_ground_level,
 )
+from scenesmith.agent_utils.llm_harness import extract_json_object
 from scenesmith.agent_utils.semantic_environments import SemanticEnvironmentSpec
 from scenesmith.agent_utils.structural_geometry import (
     ConnectorSpec,
@@ -40,6 +43,11 @@ from scenesmith.floor_plan_agents.tools.materials_resolver import (
     MaterialsResolver,
 )
 from scenesmith.floor_plan_agents.tools.open_plan_mixin import OpenPlanMixin
+from scenesmith.floor_plan_agents.tools.floor_plan_submission import (
+    NormalizedFloorPlanSubmission,
+    normalize_floor_plan_submission,
+    synthesize_structural_layout,
+)
 from scenesmith.floor_plan_agents.tools.room_placement import (
     PlacementConfig,
     PlacementError,
@@ -152,9 +160,10 @@ class FloorPlanTools(DoorWindowMixin, OpenPlanMixin):
         placement_exterior_wall_clearance_m: float = 20.0,
         door_window_config: DoorWindowConfig | None = None,
         wall_height_min: float = 2.0,
-        wall_height_max: float = 4.5,
+        wall_height_max: float = 12.0,
         room_dim_min: float = 1.5,
         room_dim_max: float = 20.0,
+        checkpoint_callback: Callable[[], bool] | None = None,
     ):
         """Initialize floor plan tools.
 
@@ -171,6 +180,8 @@ class FloorPlanTools(DoorWindowMixin, OpenPlanMixin):
             wall_height_max: Maximum wall height in meters.
             room_dim_min: Minimum room dimension (width or depth) in meters.
             room_dim_max: Maximum room dimension (width or depth) in meters.
+            checkpoint_callback: Optional durable checkpoint hook invoked only
+                when the current layout is already valid.
         """
         self.layout = layout
         self.mode = mode
@@ -186,10 +197,12 @@ class FloorPlanTools(DoorWindowMixin, OpenPlanMixin):
         self.wall_height_max = wall_height_max
         self.room_dim_min = room_dim_min
         self.room_dim_max = room_dim_max
+        self.checkpoint_callback = checkpoint_callback
 
         # Build tools dictionary using closure pattern.
         # This avoids including 'self' in OpenAI function schemas.
         self.tools = self._create_tool_closures()
+        self.submit_floor_plan_tool = self._create_submit_floor_plan_tool()
 
     def _check_rooms_exist(self) -> Result | None:
         """Check if rooms have been defined.
@@ -203,6 +216,21 @@ class FloorPlanTools(DoorWindowMixin, OpenPlanMixin):
                 message="No rooms defined. Call generate_room_specs first.",
             )
         return None
+
+    def _checkpoint_if_valid(self) -> bool:
+        """Persist a valid layout without turning checkpoint I/O into a tool error."""
+
+        if (
+            self.checkpoint_callback is None
+            or not self.layout.placement_valid
+            or not self.layout.connectivity_valid
+        ):
+            return False
+        try:
+            return bool(self.checkpoint_callback())
+        except Exception as exc:
+            console_logger.warning("Floor-plan checkpoint hook failed: %s", exc)
+            return False
 
     def _fail(self, message: str) -> Result:
         """Log failure and return Result with success=False.
@@ -246,6 +274,10 @@ class FloorPlanTools(DoorWindowMixin, OpenPlanMixin):
                     Use for rooms needing guaranteed external door access, e.g., a hallway
                     with multiple room connections that still needs an entrance door.
 
+                    has_overhead_cover: Optional boolean. Set false for an open-air
+                    garden, courtyard, patio, terrace, yard, or rooftop. Covered or
+                    indoor spaces default to true.
+
             Returns:
                 RoomSpecsResult with placed rooms and wall segment labels.
             """
@@ -263,7 +295,7 @@ class FloorPlanTools(DoorWindowMixin, OpenPlanMixin):
             Returns:
                 Result indicating success or failure.
             """
-            return self._resize_room_impl(room_type=room_id, width=width, depth=depth)
+            return self._resize_room_impl(room_id=room_id, width=width, depth=depth)
 
         @function_tool
         def add_adjacency(room_a: str, room_b: str) -> Result:
@@ -333,8 +365,8 @@ class FloorPlanTools(DoorWindowMixin, OpenPlanMixin):
             """
             return self._set_wall_height_impl(height_meters=height_meters)
 
-        @function_tool
-        def set_structural_layout(structural_json: str) -> Result:
+        @function_tool(strict_mode=False)
+        def set_structural_layout(structural_json: dict[str, Any]) -> Result:
             """Add levels, arbitrary footprints, slopes, connectors, and platforms.
 
             Call after generate_room_specs when the prompt is multilevel, sloped,
@@ -342,7 +374,7 @@ class FloorPlanTools(DoorWindowMixin, OpenPlanMixin):
             This operation is atomic: invalid geometry leaves the layout unchanged.
 
             Args:
-                structural_json: JSON object with optional arrays: levels, rooms,
+                structural_json: Object with optional arrays: levels, rooms,
                     connectors, platforms, portals, heightfields, and
                     structural_meshes, plus an optional semantic_environment
                     object containing regions, chambers, passage networks,
@@ -359,6 +391,34 @@ class FloorPlanTools(DoorWindowMixin, OpenPlanMixin):
                     natural_passage or shaft connector may set
                     `parameters.geometry_embedded: true` when the imported room
                     mesh already embodies its full physical route.
+
+                    Canonical example::
+
+                        {
+                          "levels": [
+                            {"id": "ground", "elevation": 0,
+                             "nominal_height": 4},
+                            {"id": "upper", "elevation": 4,
+                             "nominal_height": 3}
+                          ],
+                          "rooms": [
+                            {"id": "library", "level_id": "ground",
+                             "position": [0, 0]}
+                          ],
+                          "connectors": [{
+                            "id": "stairs", "type": "stairs_straight",
+                            "start": {"space_id": "library",
+                                      "level_id": "ground",
+                                      "position": [1, 1, 0]},
+                            "end": {"space_id": "library",
+                                    "level_id": "upper",
+                                    "position": [7, 1, 4]},
+                            "parameters": {"riser_count": 24}
+                          }]
+                        }
+
+                    Room overrides use `id`; connector endpoints use `space_id`.
+                    Pass the object directly, not a JSON-encoded string.
 
             Returns:
                 Result indicating whether the complete structural spec validated.
@@ -498,7 +558,10 @@ class FloorPlanTools(DoorWindowMixin, OpenPlanMixin):
             Returns:
                 ValidationResult with any issues found.
             """
-            return self._validate_impl()
+            result = self._validate_impl()
+            if result.layout == "ok" and result.connectivity == "ok":
+                self._checkpoint_if_valid()
+            return result
 
         @function_tool
         def render_ascii() -> str:
@@ -530,16 +593,868 @@ class FloorPlanTools(DoorWindowMixin, OpenPlanMixin):
             "render_ascii": render_ascii,
         }
 
-    def _set_structural_layout_impl(self, structural_json: str) -> Result:
+    def _create_submit_floor_plan_tool(self) -> FunctionTool:
+        """Create the one-shot authoring tool used by the fast floor-plan path.
+
+        The original designer exposes every primitive as an LLM tool. That turns a
+        seven-step deterministic workflow into seven serial model requests. This
+        facade asks the model for design intent once, then applies the primitives
+        locally in their required order.
+        """
+
+        description = """Submit a complete floor-plan design in one call.
+
+        Prefer room_specs plus optional structural, wall_height_meters,
+        windows_per_room, material descriptions, and exterior_door_room_id. Common
+        aliases, camelCase, JSON-encoded fields, numeric IDs, design/plan envelopes,
+        and room maps are accepted. Structural connector endpoints should identify a
+        space, level, and 3D position. Doors, windows, materials, safe defaults,
+        structural repair, geometry validation, and fallbacks run locally. Call this
+        tool exactly once and do not narrate the design.
+        """
+
+        async def invoke(_context: Any, arguments_json: str) -> Result:
+            try:
+                raw = json.loads(extract_json_object(arguments_json))
+            except Exception as exc:
+                console_logger.warning(
+                    "Could not parse floor-plan tool arguments; using prompt "
+                    "fallback: %s",
+                    exc,
+                )
+                raw = {}
+            normalized = normalize_floor_plan_submission(
+                raw,
+                prompt=self.layout.house_prompt,
+                mode=self.mode,
+                room_dim_min=self.room_dim_min,
+                room_dim_max=self.room_dim_max,
+                wall_height_min=self.wall_height_min,
+                wall_height_max=self.wall_height_max,
+            )
+            for repair in normalized.repairs:
+                console_logger.info("Floor-plan input normalized: %s", repair)
+            return self._submit_floor_plan_with_fallback(normalized)
+
+        return FunctionTool(
+            name="submit_floor_plan",
+            description=description,
+            params_json_schema={
+                "type": "object",
+                "properties": {
+                    "room_specs": {},
+                    "rooms": {},
+                    "wall_height_meters": {},
+                    "structural": {},
+                    "windows_per_room": {},
+                    "materials": {},
+                    "design": {},
+                    "plan": {},
+                },
+                "additionalProperties": True,
+            },
+            on_invoke_tool=invoke,
+            strict_json_schema=False,
+        )
+
+    def _reset_structural_state_for_fallback(self) -> None:
+        """Return the shared layout object to its safe flat compatibility state."""
+
+        self.layout.levels = [default_ground_level()]
+        self.layout.connectors.clear()
+        self.layout.platforms.clear()
+        self.layout.portals.clear()
+        self.layout.heightfields.clear()
+        self.layout.structural_meshes.clear()
+        self.layout.connector_geometry_paths.clear()
+        self.layout.platform_geometry_paths.clear()
+        self.layout.heightfield_geometry_paths.clear()
+        self.layout.structural_mesh_geometry_paths.clear()
+        self.layout.semantic_environment = None
+        self.layout.semantic_environment_geometry_path = None
+        self.layout.semantic_detail_geometry_paths.clear()
+        self.layout.connectivity_valid = False
+        self.layout.invalidate_all_room_geometries()
+
+    def _submit_floor_plan_with_fallback(
+        self, submission: NormalizedFloorPlanSubmission
+    ) -> Result:
+        """Execute normalized intent, then degrade only as far as necessary."""
+
+        def attempt(kwargs: dict[str, Any], *, label: str) -> Result:
+            try:
+                return self._submit_floor_plan_impl(**kwargs)
+            except Exception as exc:
+                console_logger.exception(
+                    "%s floor-plan attempt raised; continuing to fallback", label
+                )
+                return Result(
+                    success=False,
+                    message=f"{label} attempt rejected malformed input: {exc}",
+                )
+
+        result = attempt(submission.tool_kwargs(), label="canonical")
+        if result.success:
+            return result
+        failures = [result.message]
+        console_logger.warning(
+            "Canonical floor-plan submission failed: %s", result.message
+        )
+
+        synthesized = synthesize_structural_layout(
+            self.layout.house_prompt,
+            submission.room_specs,
+            submission.wall_height_meters,
+            max_total_height=self.wall_height_max,
+        )
+        if submission.structural is not None and synthesized is not None:
+            self._reset_structural_state_for_fallback()
+            retry_kwargs = submission.tool_kwargs()
+            retry_kwargs["structural"] = synthesized
+            result = attempt(retry_kwargs, label="synthesized structural fallback")
+            if result.success:
+                diagnostics = tuple(synthesized.get("_diagnostics", ()))
+                for diagnostic in diagnostics:
+                    console_logger.warning(
+                        "Structural fallback degradation: %s", diagnostic
+                    )
+                return Result(
+                    success=True,
+                    message=(
+                        result.message
+                        + " Repaired the provider's structural payload with the "
+                        "deterministic multi-level fallback."
+                        + (" " + " ".join(diagnostics) if diagnostics else "")
+                    ),
+                )
+            failures.append(result.message)
+            console_logger.warning(
+                "Synthesized structural fallback failed: %s", result.message
+            )
+
+        # Geometry is still useful when optional multi-level intent is irreparable.
+        # Preserve the full room prompt so downstream furnishing still has all user
+        # requirements, and make the degradation explicit in logs/result metadata.
+        self._reset_structural_state_for_fallback()
+        retry_kwargs = submission.tool_kwargs()
+        retry_kwargs["structural"] = None
+        retry_kwargs["wall_height_meters"] = max(
+            self.wall_height_min,
+            min(self.wall_height_max, submission.wall_height_meters),
+        )
+        result = attempt(retry_kwargs, label="safe flat fallback")
+        if result.success:
+            return Result(
+                success=True,
+                message=(
+                    result.message
+                    + " Used a safe flat structural fallback after: "
+                    + " | ".join(dict.fromkeys(failures))
+                ),
+            )
+
+        failures.append(result.message)
+        console_logger.error(
+            "All deterministic floor-plan fallbacks failed: %s",
+            " | ".join(dict.fromkeys(failures)),
+        )
+        return Result(
+            success=False,
+            message="All deterministic floor-plan fallbacks failed: "
+            + " | ".join(dict.fromkeys(failures)),
+        )
+
+    def _submit_floor_plan_impl(
+        self,
+        *,
+        room_specs: list[dict[str, Any]],
+        wall_height_meters: float = 3.0,
+        structural: dict[str, Any] | None = None,
+        windows_per_room: int = 1,
+        floor_material_description: str = "warm wood floor",
+        wall_material_description: str = "neutral plaster wall",
+        exterior_material_description: str = "neutral exterior plaster",
+        exterior_door_room_id: str = "",
+    ) -> Result:
+        """Apply one model-produced design with deterministic finishing steps."""
+
+        console_logger.info("Tool called: submit_floor_plan")
+        if not isinstance(room_specs, list) or not room_specs:
+            return self._fail("room_specs must be a non-empty array")
+        if not all(isinstance(spec, dict) for spec in room_specs):
+            return self._fail("every room_specs entry must be an object")
+
+        rooms_result = self._generate_room_specs_impl(json.dumps(room_specs))
+        if not rooms_result.success:
+            return self._fail(rooms_result.message)
+
+        if structural:
+            if not isinstance(structural, dict):
+                return self._fail("structural must be an object when provided")
+            structural_result = self._set_structural_layout_impl(structural)
+            if not structural_result.success:
+                return self._fail(structural_result.message)
+
+            # Models often return a per-storey height while the legacy room shell
+            # needs the full vertical extent. Otherwise its ceiling cuts through
+            # the first stair flight and the geometric clearance pass vetoes it.
+            if self.layout.levels:
+                lowest_elevation = min(level.elevation for level in self.layout.levels)
+                structural_height = (
+                    max(
+                        level.elevation + level.nominal_height
+                        for level in self.layout.levels
+                    )
+                    - lowest_elevation
+                )
+                wall_height_meters = max(float(wall_height_meters), structural_height)
+
+        height_result = self._set_wall_height_impl(float(wall_height_meters))
+        if not height_result.success:
+            return height_result
+
+        door_error = self._add_required_doors_deterministically(
+            exterior_door_room_id=exterior_door_room_id
+        )
+        if door_error is not None:
+            return door_error
+
+        self._add_windows_deterministically(windows_per_room=windows_per_room)
+        self._assign_materials_deterministically(
+            floor_description=floor_material_description,
+            wall_description=wall_material_description,
+            exterior_description=exterior_material_description,
+        )
+
+        validation = self._validate_impl()
+        if validation.layout != "ok" or validation.connectivity != "ok":
+            return self._fail(
+                "Floor plan validation failed: "
+                f"layout={validation.layout}; connectivity={validation.connectivity}"
+            )
+
+        checkpoint_saved = self._checkpoint_if_valid()
+        if self.checkpoint_callback is not None and not checkpoint_saved:
+            return self._fail(
+                "The semantic layout passed, but geometry/checkpoint validation "
+                "failed; applying a deterministic structural fallback."
+            )
+        return Result(
+            success=True,
+            message=(
+                f"Completed and validated {len(self.layout.room_specs)} room(s), "
+                f"{len(self.layout.doors)} door(s), and "
+                f"{len(self.layout.windows)} window(s)."
+            ),
+        )
+
+    def _add_required_doors_deterministically(
+        self, *, exterior_door_room_id: str = ""
+    ) -> Result | None:
+        """Add required interior and exterior doors without another LLM turn."""
+
+        for wall_id, (room_a, room_b, _direction) in sorted(
+            self.layout.boundary_labels.items()
+        ):
+            if room_b is None:
+                continue
+            spec_a = self.layout.get_room_spec(room_a)
+            spec_b = self.layout.get_room_spec(room_b)
+            connection_a = spec_a.connections.get(room_b) if spec_a else None
+            connection_b = spec_b.connections.get(room_a) if spec_b else None
+            if ConnectionType.DOOR not in {connection_a, connection_b}:
+                continue
+            if any(
+                {door.room_a, door.room_b} == {room_a, room_b}
+                for door in self.layout.doors
+            ):
+                continue
+            result = self._try_opening_positions(self._add_door_impl, wall_id=wall_id)
+            if result is None or not result.success:
+                return self._fail(
+                    f"Could not add required door between {room_a} and {room_b}."
+                )
+
+        if any(door.room_b is None for door in self.layout.doors):
+            return None
+
+        preferred_room = (
+            exterior_door_room_id
+            if self.layout.get_room_spec(exterior_door_room_id)
+            else ""
+        )
+        candidates = [
+            (wall_id, room_a)
+            for wall_id, (room_a, room_b, _direction) in sorted(
+                self.layout.boundary_labels.items()
+            )
+            if room_b is None
+        ]
+        candidates.sort(key=lambda item: item[1] != preferred_room)
+        for wall_id, _room_id in candidates:
+            result = self._try_opening_positions(self._add_door_impl, wall_id=wall_id)
+            if result is not None and result.success:
+                return None
+        return self._fail("Could not place an exterior door on any exterior wall.")
+
+    @staticmethod
+    def _try_opening_positions(operation: Callable[..., Result], *, wall_id: str):
+        """Try stable wall segments in preferred order."""
+
+        last_result = None
+        for position in ("center", "left", "right"):
+            last_result = operation(wall_id=wall_id, position=position)
+            if last_result.success:
+                return last_result
+        return last_result
+
+    def _add_windows_deterministically(self, *, windows_per_room: int) -> None:
+        """Add requested windows to viable exterior walls, best effort."""
+
+        try:
+            target_count = max(0, min(8, int(windows_per_room)))
+        except (TypeError, ValueError):
+            target_count = 1
+        for room in self.layout.room_specs:
+            existing_count = sum(
+                window.room_id == room.room_id for window in self.layout.windows
+            )
+            if existing_count >= target_count:
+                continue
+            candidates = [
+                wall_id
+                for wall_id, (room_a, room_b, _direction) in sorted(
+                    self.layout.boundary_labels.items()
+                )
+                if room_a == room.room_id
+                and room_b is None
+                and not any(
+                    door.boundary_label == wall_id for door in self.layout.doors
+                )
+            ]
+            for wall_id in candidates:
+                for position in ("center", "left", "right"):
+                    result = self._add_window_impl(wall_id=wall_id, position=position)
+                    if result.success:
+                        existing_count += 1
+                        if existing_count >= target_count:
+                            break
+                if existing_count >= target_count:
+                    break
+            if existing_count < target_count:
+                console_logger.warning(
+                    "Placed %d of %d requested windows for room %s",
+                    existing_count,
+                    target_count,
+                    room.room_id,
+                )
+
+    def _assign_materials_deterministically(
+        self,
+        *,
+        floor_description: str,
+        wall_description: str,
+        exterior_description: str,
+    ) -> None:
+        """Resolve shared material intent once and apply it to every room."""
+
+        floor_material = self._get_material_impl(floor_description)
+        wall_material = self._get_material_impl(wall_description)
+        if floor_material.success and wall_material.success:
+            for room in self.layout.room_specs:
+                result = self._set_room_materials_impl(
+                    room_id=room.room_id,
+                    floor_material_id=floor_material.material_id,
+                    wall_material_id=wall_material.material_id,
+                )
+                if not result.success:
+                    console_logger.warning(result.message)
+
+        exterior_material = self._get_material_impl(exterior_description)
+        if exterior_material.success:
+            result = self._set_exterior_material_impl(exterior_material.material_id)
+            if not result.success:
+                console_logger.warning(result.message)
+
+    def _set_structural_layout_impl(
+        self, structural_json: str | dict[str, Any]
+    ) -> Result:
         """Atomically apply version-2 structural authoring data to the layout."""
 
         console_logger.info("Tool called: set_structural_layout")
-        try:
-            data = json.loads(structural_json)
-        except json.JSONDecodeError as exc:
-            return self._fail(f"Invalid structural JSON: {exc}")
+        if isinstance(structural_json, str):
+            try:
+                data = json.loads(structural_json)
+            except json.JSONDecodeError as exc:
+                return self._fail(f"Invalid structural JSON: {exc}")
+        elif isinstance(structural_json, dict):
+            # Never rewrite a caller-owned object while repairing common LLM aliases.
+            data = deepcopy(structural_json)
+        else:
+            return self._fail("structural_json must be an object")
         if not isinstance(data, dict):
             return self._fail("structural_json must be a JSON object")
+        diagnostics = data.pop("_diagnostics", ())
+        if isinstance(diagnostics, (list, tuple)):
+            for diagnostic in diagnostics:
+                console_logger.warning(
+                    "Structural authoring diagnostic: %s", diagnostic
+                )
+
+        def normalize_entity_collection(name: str) -> None:
+            """Coerce nested provider collections before any iteration occurs."""
+
+            if name not in data or data[name] is None:
+                return
+            value = data[name]
+            if isinstance(value, str):
+                try:
+                    value = json.loads(value)
+                except json.JSONDecodeError:
+                    console_logger.warning(
+                        "Ignoring malformed JSON string for structural %s", name
+                    )
+                    value = []
+            if isinstance(value, dict):
+                entity_markers = {
+                    "id",
+                    "level_id",
+                    "space_id",
+                    "room_id",
+                    "type",
+                    "elevation",
+                    "position",
+                    "start",
+                    "source_space_id",
+                    "mesh_path",
+                    "heights",
+                    "footprint",
+                }
+                if entity_markers.intersection(value):
+                    value = [value]
+                else:
+                    expanded = []
+                    for entity_id, entity in value.items():
+                        if not isinstance(entity, dict):
+                            continue
+                        normalized_entity = dict(entity)
+                        normalized_entity.setdefault("id", entity_id)
+                        expanded.append(normalized_entity)
+                    value = expanded
+            elif isinstance(value, tuple):
+                value = list(value)
+            if not isinstance(value, list):
+                console_logger.warning(
+                    "Ignoring non-collection structural %s value: %r", name, value
+                )
+                value = []
+            data[name] = value
+
+        for collection_name in (
+            "levels",
+            "rooms",
+            "connectors",
+            "platforms",
+            "portals",
+            "heightfields",
+            "structural_meshes",
+        ):
+            normalize_entity_collection(collection_name)
+
+        def normalize_footprint(value: Any) -> Any:
+            """Accept the common `polygon` alias at the authoring boundary."""
+
+            if not isinstance(value, dict) or "outer" in value:
+                return value
+            if "polygon" not in value:
+                return value
+            normalized = dict(value)
+            normalized["outer"] = normalized.pop("polygon")
+            normalized.setdefault("holes", [])
+            return normalized
+
+        def stable_id(value: Any, *, prefix: str, index: int) -> str:
+            """Return a deterministic schema-safe ID for LLM-authored entities."""
+
+            raw_value = value
+            if raw_value is None or not str(raw_value).strip():
+                raw_value = f"{prefix}_{index + 1}"
+            raw = str(raw_value).strip().lower()
+            normalized = "".join(
+                character if character.isalnum() or character in {"_", "-"} else "_"
+                for character in raw
+            ).strip("_-")
+            return normalized or f"{prefix}_{index + 1}"
+
+        # Providers routinely use `level_id` for a level definition and `name`
+        # for connector identity. Repair bookkeeping aliases before strict schema
+        # parsing; neither changes geometry intent.
+        levels = data.get("levels", [])
+        inferred_room_levels: dict[str, str] = {}
+        level_id_aliases: dict[str, str] = {}
+        if isinstance(levels, list):
+            for index, level in enumerate(levels):
+                if not isinstance(level, dict):
+                    continue
+                authored_level_id = level.get(
+                    "id", level.get("level_id", level.get("name"))
+                )
+                level["id"] = stable_id(
+                    authored_level_id,
+                    prefix="level",
+                    index=index,
+                )
+                if authored_level_id is not None:
+                    level_id_aliases[str(authored_level_id)] = str(level["id"])
+                if "nominal_height" not in level and "height" in level:
+                    level["nominal_height"] = level["height"]
+                level.pop("height", None)
+                nested_rooms = level.pop("rooms", [])
+                if isinstance(nested_rooms, list):
+                    for nested_room in nested_rooms:
+                        if not isinstance(nested_room, dict):
+                            continue
+                        space_id = nested_room.get(
+                            "id",
+                            nested_room.get("space_id", nested_room.get("room_id")),
+                        )
+                        if space_id:
+                            inferred_room_levels.setdefault(
+                                str(space_id), str(level["id"])
+                            )
+                level.pop("level_id", None)
+                level.pop("name", None)
+
+            valid_levels = [level for level in levels if isinstance(level, dict)]
+            if valid_levels:
+                base_level = min(
+                    valid_levels,
+                    key=lambda level: float(level.get("elevation", 0.0)),
+                )
+                for room_spec in self.layout.room_specs:
+                    inferred_room_levels.setdefault(
+                        room_spec.room_id, str(base_level["id"])
+                    )
+
+        level_elevations = {
+            str(level.get("id")): float(level.get("elevation", 0.0))
+            for level in data.get("levels", [])
+            if isinstance(level, dict) and level.get("id") is not None
+        }
+        space_level_ids = {
+            room.room_id: room.level_id for room in self.layout.room_specs
+        }
+
+        rooms = data.get("rooms", [])
+        if rooms is None:
+            rooms = []
+        if "rooms" not in data or data.get("rooms") is None:
+            data["rooms"] = rooms
+        if isinstance(rooms, list):
+            authored_room_ids = {
+                str(room.get("id", room.get("space_id")))
+                for room in rooms
+                if isinstance(room, dict)
+                and room.get("id", room.get("space_id")) is not None
+            }
+            for space_id, level_id in inferred_room_levels.items():
+                if space_id not in authored_room_ids:
+                    rooms.append({"id": space_id, "level_id": level_id})
+        if isinstance(rooms, list):
+            normalized_rooms: dict[str, dict[str, Any]] = {}
+            anonymous_rooms: list[dict[str, Any]] = []
+            for room in rooms:
+                if not isinstance(room, dict):
+                    continue
+                if "id" not in room and "space_id" in room:
+                    room["id"] = room["space_id"]
+                room.pop("space_id", None)
+                if room.get("level_id") is not None:
+                    authored_level_id = str(room["level_id"])
+                    room["level_id"] = level_id_aliases.get(
+                        authored_level_id, authored_level_id
+                    )
+                for field_name in (
+                    "footprint",
+                    "floor_footprint",
+                    "ceiling_footprint",
+                ):
+                    if field_name in room:
+                        room[field_name] = normalize_footprint(room[field_name])
+
+                room_id = str(room.get("id", "")).strip()
+                if not room_id:
+                    anonymous_rooms.append(room)
+                    continue
+                existing = normalized_rooms.get(room_id)
+                if existing is None:
+                    normalized_rooms[room_id] = room
+                    continue
+                # A single tall space is frequently repeated once per authored
+                # level. Keep its lowest-level override; connector endpoints still
+                # retain every vertical datum.
+                existing_elevation = level_elevations.get(
+                    str(existing.get("level_id")), float("inf")
+                )
+                candidate_elevation = level_elevations.get(
+                    str(room.get("level_id")), float("inf")
+                )
+                if candidate_elevation < existing_elevation:
+                    normalized_rooms[room_id] = room
+
+            rooms[:] = [*normalized_rooms.values(), *anonymous_rooms]
+            for room in rooms:
+                if room.get("id") in space_level_ids and room.get("level_id"):
+                    space_level_ids[str(room["id"])] = str(room["level_id"])
+
+        platforms = data.get("platforms", [])
+        if isinstance(platforms, list):
+            for platform in platforms:
+                if not isinstance(platform, dict):
+                    continue
+                if "space_id" not in platform and "room_id" in platform:
+                    platform["space_id"] = platform["room_id"]
+                platform.pop("room_id", None)
+                # A platform's elevation is absolute; level_id is redundant.
+                platform.pop("level_id", None)
+                if "footprint" in platform:
+                    platform["footprint"] = normalize_footprint(platform["footprint"])
+
+        connectors = data.get("connectors", [])
+        if isinstance(connectors, list):
+            for connector_index, connector in enumerate(connectors):
+                if not isinstance(connector, dict):
+                    continue
+                connector["id"] = stable_id(
+                    connector.get("id", connector.get("name")),
+                    prefix="connector",
+                    index=connector_index,
+                )
+                connector.pop("name", None)
+                if "clearance_height" not in connector and "clearance" in connector:
+                    connector["clearance_height"] = connector["clearance"]
+                connector.pop("clearance", None)
+                default_space_id = connector.get("space_id", connector.get("room_id"))
+                start_alias = connector.get("start", connector.get("source"))
+                end_alias = connector.get("end", connector.get("target"))
+
+                def normalize_endpoint(
+                    endpoint: Any, *, is_start: bool
+                ) -> dict[str, Any]:
+                    if isinstance(endpoint, str):
+                        normalized: dict[str, Any] = {"space_id": endpoint}
+                    elif isinstance(endpoint, dict):
+                        normalized = dict(endpoint)
+                    else:
+                        normalized = {}
+
+                    if "space_id" not in normalized:
+                        endpoint_space_aliases = (
+                            ("room_id", "source_space_id")
+                            if is_start
+                            else ("room_id", "target_space_id")
+                        )
+                        for alias in endpoint_space_aliases:
+                            if alias in normalized:
+                                normalized["space_id"] = normalized[alias]
+                                break
+                        else:
+                            if default_space_id is not None:
+                                normalized["space_id"] = default_space_id
+
+                    level_aliases = (
+                        ("from_level", "source_level_id")
+                        if is_start
+                        else ("to_level", "target_level_id")
+                    )
+                    if "level_id" not in normalized:
+                        for alias in level_aliases:
+                            if alias in normalized:
+                                normalized["level_id"] = normalized[alias]
+                                break
+                            if alias in connector:
+                                normalized["level_id"] = connector[alias]
+                                break
+                    if normalized.get("level_id") is not None:
+                        authored_level_id = str(normalized["level_id"])
+                        normalized["level_id"] = level_id_aliases.get(
+                            authored_level_id, authored_level_id
+                        )
+
+                    position_alias = "start_position" if is_start else "end_position"
+                    if "position" not in normalized and position_alias in connector:
+                        normalized["position"] = connector[position_alias]
+                    position = normalized.get("position")
+                    if isinstance(position, (list, tuple)) and len(position) == 2:
+                        elevation = level_elevations.get(
+                            str(normalized.get("level_id")), 0.0
+                        )
+                        normalized["position"] = [*position, elevation]
+
+                    for alias in (
+                        "room_id",
+                        "source_space_id",
+                        "target_space_id",
+                        "from_level",
+                        "to_level",
+                        "source_level_id",
+                        "target_level_id",
+                    ):
+                        normalized.pop(alias, None)
+                    return normalized
+
+                start = normalize_endpoint(start_alias, is_start=True)
+                end = normalize_endpoint(end_alias, is_start=False)
+                parameters = connector.get("parameters", {})
+                parameters = dict(parameters) if isinstance(parameters, dict) else {}
+                for parameter_name in (
+                    "center",
+                    "turns",
+                    "direction",
+                    "riser_count",
+                    "riser_counts",
+                    "waypoints",
+                    "rung_count",
+                    "yaw_degrees",
+                ):
+                    if parameter_name not in parameters and parameter_name in connector:
+                        parameters[parameter_name] = connector[parameter_name]
+
+                direction_aliases = {
+                    "clockwise": "cw",
+                    "counterclockwise": "ccw",
+                    "counter-clockwise": "ccw",
+                    "anticlockwise": "ccw",
+                    "anti-clockwise": "ccw",
+                }
+                authored_direction = parameters.get("direction")
+                if isinstance(authored_direction, str):
+                    parameters["direction"] = direction_aliases.get(
+                        authored_direction.strip().lower(),
+                        authored_direction.strip().lower(),
+                    )
+
+                # A frequent spiral authoring form supplies center/radius and puts
+                # both endpoints at the center. Convert that unambiguous shorthand
+                # to the canonical centerline endpoints required by the compiler.
+                if connector.get("type") == "stairs_spiral":
+                    center = parameters.get("center")
+                    radius = connector.get("radius", parameters.get("radius"))
+                    if not isinstance(radius, (int, float)) or radius <= 0:
+                        # Haiku commonly supplies the spiral center and stair width
+                        # but omits a centerline radius. A width-sized radius keeps
+                        # the inner edge positive and is a conservative default.
+                        authored_width = connector.get("width", 1.0)
+                        try:
+                            radius = max(1.0, float(authored_width))
+                        except (TypeError, ValueError):
+                            radius = 1.0
+                        parameters["radius"] = radius
+                    turns = parameters.get("turns")
+                    direction = parameters.get("direction")
+                    if (
+                        isinstance(center, (list, tuple))
+                        and len(center) == 2
+                        and isinstance(radius, (int, float))
+                        and radius > 0
+                        and isinstance(turns, (int, float))
+                        and turns > 0
+                        and direction in {"cw", "ccw"}
+                    ):
+                        start_position = start.get("position")
+                        end_position = end.get("position")
+                        start_z = (
+                            start_position[2]
+                            if isinstance(start_position, (list, tuple))
+                            and len(start_position) == 3
+                            else level_elevations.get(str(start.get("level_id")), 0.0)
+                        )
+                        end_z = (
+                            end_position[2]
+                            if isinstance(end_position, (list, tuple))
+                            and len(end_position) == 3
+                            else level_elevations.get(str(end.get("level_id")), 0.0)
+                        )
+                        if (
+                            not isinstance(start_position, (list, tuple))
+                            or len(start_position) < 2
+                            or math.dist(start_position[:2], center) < 1e-6
+                        ):
+                            start_angle = 0.0
+                        else:
+                            start_angle = math.atan2(
+                                start_position[1] - center[1],
+                                start_position[0] - center[0],
+                            )
+                        end_angle = start_angle + (
+                            (-1.0 if direction == "cw" else 1.0)
+                            * 2.0
+                            * math.pi
+                            * float(turns)
+                        )
+                        start["position"] = [
+                            center[0] + float(radius) * math.cos(start_angle),
+                            center[1] + float(radius) * math.sin(start_angle),
+                            start_z,
+                        ]
+                        end["position"] = [
+                            center[0] + float(radius) * math.cos(end_angle),
+                            center[1] + float(radius) * math.sin(end_angle),
+                            end_z,
+                        ]
+
+                connector["start"] = start
+                connector["end"] = end
+                connector["parameters"] = parameters
+                for alias in (
+                    "source",
+                    "target",
+                    "room_id",
+                    "space_id",
+                    "from_level",
+                    "to_level",
+                    "source_level_id",
+                    "target_level_id",
+                    "start_position",
+                    "end_position",
+                    "center",
+                    "radius",
+                    "turns",
+                    "direction",
+                    "riser_count",
+                    "riser_counts",
+                    "waypoints",
+                    "rung_count",
+                    "yaw_degrees",
+                ):
+                    connector.pop(alias, None)
+
+        portals = data.get("portals", [])
+        if isinstance(portals, list):
+            for portal_index, portal in enumerate(portals):
+                if not isinstance(portal, dict):
+                    continue
+                portal["id"] = stable_id(
+                    portal.get("id", portal.get("name")),
+                    prefix="portal",
+                    index=portal_index,
+                )
+                portal.pop("name", None)
+                if "source_space_id" not in portal:
+                    for alias in ("space_id", "room_id", "source_room_id"):
+                        if alias in portal:
+                            portal["source_space_id"] = portal[alias]
+                            break
+                if "target_space_id" not in portal and "target_room_id" in portal:
+                    portal["target_space_id"] = portal["target_room_id"]
+                for alias in (
+                    "space_id",
+                    "room_id",
+                    "source_room_id",
+                    "target_room_id",
+                ):
+                    portal.pop(alias, None)
+
         unknown = set(data) - {
             "levels",
             "rooms",
@@ -707,7 +1622,15 @@ class FloorPlanTools(DoorWindowMixin, OpenPlanMixin):
                             f"rooms '{room.room_id}' and '{other.room_id}' overlap "
                             f"on level '{room.level_id}'"
                         )
-        except (TypeError, ValueError, KeyError) as exc:
+        except KeyError as exc:
+            return self._fail(
+                f"Invalid structural layout: missing required field {exc}. "
+                "Canonical connector: {id, type, start: {space_id, level_id, "
+                "position: [x,y,z]}, end: {space_id, level_id, position: "
+                "[x,y,z]}, parameters: {...}}. Canonical portal: {id, type, "
+                "source_space_id, target_space_id?}."
+            )
+        except (TypeError, ValueError) as exc:
             return self._fail(f"Invalid structural layout: {exc}")
 
         self.layout.levels = levels
@@ -734,7 +1657,7 @@ class FloorPlanTools(DoorWindowMixin, OpenPlanMixin):
         ascii_result = generate_ascii_floor_plan(candidate_placed_rooms)
         self.layout.boundary_labels = ascii_result.boundary_labels
 
-        return Result(
+        result = Result(
             success=True,
             message=(
                 f"Applied structural layout: {len(levels)} levels, "
@@ -744,6 +1667,8 @@ class FloorPlanTools(DoorWindowMixin, OpenPlanMixin):
                 f"semantic environment, and {len(portals)} portals."
             ),
         )
+        self._checkpoint_if_valid()
+        return result
 
     def _generate_room_specs_impl(self, room_specs_json: str) -> RoomSpecsResult:
         """Create rooms with the specified dimensions and adjacencies.
@@ -846,6 +1771,30 @@ class FloorPlanTools(DoorWindowMixin, OpenPlanMixin):
             exterior_walls_raw = spec_dict.get("exterior_walls", [])
             exterior_walls = {WallDirection(w) for w in exterior_walls_raw}
 
+            explicit_cover = spec_dict.get(
+                "has_overhead_cover",
+                spec_dict.get(
+                    "has_roof", spec_dict.get("has_ceiling", spec_dict.get("covered"))
+                ),
+            )
+            if isinstance(explicit_cover, bool):
+                has_overhead_cover = explicit_cover
+            else:
+                outdoor_terms = {
+                    "garden",
+                    "courtyard",
+                    "patio",
+                    "terrace",
+                    "yard",
+                    "rooftop",
+                }
+                covered_terms = {"covered", "roofed", "indoor", "enclosed"}
+                semantic_text = f"{room_type} {prompt}".casefold()
+                has_overhead_cover = not (
+                    any(term in semantic_text for term in outdoor_terms)
+                    and not any(term in semantic_text for term in covered_terms)
+                )
+
             specs.append(
                 RoomSpec(
                     room_id=room_id,
@@ -855,6 +1804,7 @@ class FloorPlanTools(DoorWindowMixin, OpenPlanMixin):
                     length=room_width,  # X dimension.
                     connections=connections,
                     exterior_walls=exterior_walls,
+                    has_overhead_cover=has_overhead_cover,
                 )
             )
 

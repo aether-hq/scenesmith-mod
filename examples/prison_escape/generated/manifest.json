@@ -3,6 +3,14 @@
     "mesh_path": "structures/rooms/prison_block/0bdfebec8ea2a75949ee73c30ffd40309ac466bf011b09a4a2e392034338d06f/room_geometry_prison_block.obj",
     "sdf_path": "structures/rooms/prison_block/0bdfebec8ea2a75949ee73c30ffd40309ac466bf011b09a4a2e392034338d06f/room_geometry_prison_block.sdf"
   },
+  "build": {
+    "compiler_version": "semantic-environment-v3",
+    "provider": "semantic-compiler/cpu",
+    "rebuilt_from_recipe": true,
+    "source_path": "examples/prison_escape/generate_scene.py",
+    "source_sha256": "05a29ea31b067f367eafc2362870d0d90eace9432154f3e393bfd0ecb0b90f1a",
+    "status": "compiled"
+  },
   "description": "Underground prison room with a dug breach into a long lit escape tunnel",
   "entrypoint": "prison_escape.dmd.yaml",
   "lighting": {
@@ -54,79 +62,79 @@
         "surface_id": "room_geometry_prison_block_ceiling"
       },
       {
-        "clearance_to_edge": 1.7772239894833365e-16,
+        "clearance_to_edge": 8.326672684688674e-17,
         "id": "escape_light_04",
         "inward_normal": [
-          -0.05418343499440355,
-          0.07231711764343747,
-          -0.9959088260819624
+          -0.08503088634560538,
+          0.0977731188938594,
+          -0.9915695465215982
         ],
         "position": [
-          13.496207159550393,
-          0.5050621982350408,
-          2.778689562466745
+          13.494047837955808,
+          0.5068441183225703,
+          2.7961632560396903
         ],
-        "surface_id": "escape_tunnel_shell_auto_attachment_overhead_008786"
+        "surface_id": "escape_tunnel_shell_auto_attachment_overhead_008773"
       },
       {
-        "clearance_to_edge": 3.1401849173675503e-16,
+        "clearance_to_edge": 7.850462293418876e-17,
         "id": "escape_light_05",
         "inward_normal": [
-          -0.09722193162757356,
-          0.062108149601643604,
-          -0.9933229453524485
+          -0.16566240435672636,
+          0.06414276818325038,
+          -0.9840943415509198
         ],
         "position": [
-          25.493194464786068,
-          1.504347570472115,
-          1.8422817093027333
+          25.48840363169503,
+          1.5044899937728275,
+          1.8884830188814508
         ],
-        "surface_id": "escape_tunnel_shell_auto_attachment_overhead_008484"
+        "surface_id": "escape_tunnel_shell_auto_attachment_overhead_008471"
       },
       {
-        "clearance_to_edge": 0.1065184359935146,
+        "clearance_to_edge": 0.10697710299553984,
         "id": "escape_light_06",
         "inward_normal": [
-          -0.12164529014264831,
-          0.008559300384460969,
-          -0.9925367306871014
+          -0.17321229905943322,
+          0.010965621457259827,
+          -0.9848234636728562
         ],
         "position": [
-          39.491484829690016,
-          3.3505991510269126,
-          0.7663280696587413
+          39.48787513906584,
+          3.3507675935020087,
+          0.7824911509568152
         ],
-        "surface_id": "escape_tunnel_shell_auto_attachment_overhead_007973"
+        "surface_id": "escape_tunnel_shell_auto_attachment_overhead_007964"
       },
       {
-        "clearance_to_edge": 0.10626986393111157,
+        "clearance_to_edge": 0.10628385909972803,
         "id": "escape_light_07",
         "inward_normal": [
-          -0.0588585287440002,
-          0.02869395417889501,
-          -0.9978538623404086
+          -0.08287827613406991,
+          0.0076208569062622255,
+          -0.9965305383604957
         ],
         "position": [
-          53.49587990298792,
-          4.652008576792523,
-          -0.05879471796462015
+          53.494198520670615,
+          4.650533459983439,
+          -0.010408177348172537
         ],
-        "surface_id": "escape_tunnel_shell_auto_attachment_overhead_006542"
+        "surface_id": "escape_tunnel_shell_auto_attachment_overhead_006537"
       },
       {
-        "clearance_to_edge": 0.10619144396553905,
+        "clearance_to_edge": 0.11334793960786003,
         "id": "escape_light_08",
         "inward_normal": [
-          0.11067924397944355,
-          0.08084884807138805,
-          -0.9905622487848347
+          0.08423452091110527,
+          0.03873232340945811,
+          -0.9956929007531297
         ],
         "position": [
-          67.00774754707857,
-          7.655659419364998,
-          0.10840734423024251
+          67.00589641646378,
+          7.652711262638663,
+          0.15535852471299744
         ],
-        "surface_id": "escape_tunnel_shell_auto_attachment_overhead_006981"
+        "surface_id": "escape_tunnel_shell_auto_attachment_overhead_006974"
       }
     ]
   },
@@ -135,13 +143,13 @@
     "centerline_length_m": 70.18888640425128,
     "end_elevation_m": -5.0,
     "environment_hash": "bb015ff258a2db0063f4e46173408bd3462356a25d4d803632342a9b3deeb62a",
-    "mesh_path": "structures/meshes/escape_tunnel_shell/aa70fc98bfa42462eca3e751643b4bf48aa6307d0dc22b982e1a16368d7aa080/escape_tunnel_shell.obj",
+    "mesh_path": "structures/meshes/escape_tunnel_shell/62cba137decc0a8128566055e2793309d40456bc2a03fb2ec08cd5e15362a722/escape_tunnel_shell.obj",
     "minimum_clearance_height_m": 3.0,
     "minimum_width_m": 3.4,
-    "sdf_path": "structures/meshes/escape_tunnel_shell/aa70fc98bfa42462eca3e751643b4bf48aa6307d0dc22b982e1a16368d7aa080/escape_tunnel_shell.sdf",
+    "sdf_path": "structures/meshes/escape_tunnel_shell/62cba137decc0a8128566055e2793309d40456bc2a03fb2ec08cd5e15362a722/escape_tunnel_shell.sdf",
     "sections": 12,
     "semantic_source_id": "long_way_out",
-    "visual_triangles": 8875
+    "visual_triangles": 8862
   },
   "verification": {
     "blocked_connectors": [],

@@ -1,14 +1,21 @@
 """Unit tests for Objaverse (ObjectThor) retrieval module."""
 
 import json
+import gzip
+import pickle
 import shutil
+import sqlite3
 import tempfile
 import unittest
 
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
 
 import numpy as np
+import trimesh
 import yaml
+from PIL import Image
 
 from scenesmith.agent_utils.objaverse_retrieval.clip_similarity import (
     compute_clip_similarities,
@@ -20,7 +27,9 @@ from scenesmith.agent_utils.objaverse_retrieval.data_loader import (
     ObjaversePreprocessedData,
     construct_objaverse_mesh_path,
     load_preprocessed_data,
+    resolve_catalog_mesh_path,
 )
+from scenesmith.agent_utils.objaverse_retrieval.retrieval import ObjaverseRetriever
 
 
 class TestObjaverseConfig(unittest.TestCase):
@@ -110,6 +119,61 @@ class TestMeshPaths(unittest.TestCase):
         with self.assertRaises(FileNotFoundError) as cm:
             construct_objaverse_mesh_path(objaverse_dir, uid)
         self.assertIn("Objaverse mesh not found", str(cm.exception))
+
+    def test_resolve_generic_catalog_mesh_path(self):
+        """Catalog metadata can point at an authored GLTF outside ObjectThor."""
+        catalog_dir = self.tmp_path / "polyhaven"
+        mesh_path = catalog_dir / "models" / "chair" / "chair_2k.gltf"
+        mesh_path.parent.mkdir(parents=True)
+        mesh_path.touch()
+        metadata = ObjaverseMeshMetadata(
+            uid="polyhaven__chair",
+            name="Chair",
+            category="large_objects",
+            bounding_box=(0.8, 0.8, 1.0),
+            mesh_path="models/chair/chair_2k.gltf",
+            asset_source="polyhaven",
+            license="CC0-1.0",
+        )
+
+        self.assertEqual(resolve_catalog_mesh_path(catalog_dir, metadata), mesh_path)
+
+    def test_construct_mesh_path_converts_objathor_bundle(self):
+        """ObjectThor's native pickle and textures are converted and cached."""
+        objaverse_dir = self.tmp_path / "objathor-assets"
+        uid = "native123"
+        asset_dir = objaverse_dir / "assets" / uid
+        asset_dir.mkdir(parents=True)
+        asset = {
+            "vertices": [
+                {"x": 0.0, "y": 0.0, "z": 0.0},
+                {"x": 1.0, "y": 0.0, "z": 0.0},
+                {"x": 0.0, "y": 1.0, "z": 0.0},
+            ],
+            "triangles": [0, 1, 2],
+            "normals": [
+                {"x": 0.0, "y": 0.0, "z": 1.0},
+                {"x": 0.0, "y": 0.0, "z": 1.0},
+                {"x": 0.0, "y": 0.0, "z": 1.0},
+            ],
+            "uvs": [
+                {"x": 0.0, "y": 0.0},
+                {"x": 1.0, "y": 0.0},
+                {"x": 0.0, "y": 1.0},
+            ],
+        }
+        with gzip.open(asset_dir / f"{uid}.pkl.gz", "wb") as output:
+            pickle.dump(asset, output)
+        Image.new("RGB", (2, 2), (180, 90, 40)).save(asset_dir / "albedo.jpg")
+
+        path = construct_objaverse_mesh_path(objaverse_dir, uid)
+        self.assertEqual(path, asset_dir / f"{uid}.glb")
+        self.assertTrue(path.exists())
+        loaded = trimesh.load(path, force="scene")
+        self.assertEqual(len(loaded.geometry), 1)
+
+        # A second call reuses the cached conversion.
+        self.assertEqual(construct_objaverse_mesh_path(objaverse_dir, uid), path)
 
 
 class TestClipSimilarity(unittest.TestCase):
@@ -276,6 +340,65 @@ class TestDataLoader(unittest.TestCase):
         with self.assertRaises(FileNotFoundError):
             load_preprocessed_data(preprocessed_path)
 
+    def test_global_catalog_reads_sqlite_source_of_truth(self):
+        """Global metadata wins over a stale compatibility JSON projection."""
+        preprocessed_path = self.tmp_path / "preprocessed"
+        preprocessed_path.mkdir()
+        np.save(
+            preprocessed_path / "clip_embeddings.npy",
+            np.ones((1, 768), dtype=np.float32),
+        )
+        (preprocessed_path / "embedding_index.yaml").write_text("- global__chair\n")
+        (preprocessed_path / "object_categories.json").write_text(
+            json.dumps({"large_objects": ["global__chair"]})
+        )
+        (preprocessed_path / "metadata_index.json").write_text(
+            json.dumps(
+                {
+                    "global__chair": {
+                        "name": "STALE JSON",
+                        "category": "small_objects",
+                        "bounding_box": [0.1, 0.1, 0.1],
+                    }
+                }
+            )
+        )
+        connection = sqlite3.connect(preprocessed_path / "catalog.sqlite3")
+        connection.execute(
+            """CREATE TABLE assets (
+            uid TEXT PRIMARY KEY, source TEXT, source_id TEXT, name TEXT,
+            description TEXT, aliases_json TEXT, tags_json TEXT,
+            ontology_path TEXT, placement_class TEXT,
+            placement_classes_json TEXT, dimensions_json TEXT,
+            canonical_up TEXT, canonical_front TEXT, support_zones_json TEXT,
+            clearance_zones_json TEXT, license TEXT, quality_score REAL,
+            thumbnail TEXT, mesh_path TEXT, embedding_row INTEGER)"""
+        )
+        connection.execute(
+            "INSERT INTO assets VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (
+                "global__chair", "fixture", "chair", "SQLite Chair",
+                "A normalized chair", '["seat"]', '["chair"]',
+                "furniture/seating/chair", "large_objects",
+                '["large_objects"]', "[0.8, 0.8, 1.0]", "0,1,0", "0,0,1",
+                '[{"kind":"seat"}]', '[{"kind":"front"}]', "CC0-1.0",
+                0.98, "chair.png", "/catalog/chair.glb", 0,
+            ),
+        )
+        connection.commit()
+        connection.close()
+
+        data = load_preprocessed_data(preprocessed_path)
+        chair = data.get_metadata("global__chair")
+
+        self.assertEqual(chair.name, "SQLite Chair")
+        self.assertEqual(chair.ontology_path, "furniture/seating/chair")
+        self.assertEqual(chair.canonical_front, "0,0,1")
+        self.assertEqual(chair.support_zones[0]["kind"], "seat")
+        self.assertEqual(chair.clearance_zones[0]["kind"], "front")
+        self.assertEqual(chair.quality_score, 0.98)
+        self.assertTrue(chair.deferred_loading)
+
 
 class TestObjaverseMeshMetadata(unittest.TestCase):
     """Test ObjaverseMeshMetadata dataclass."""
@@ -307,6 +430,103 @@ class TestObjaverseMeshMetadata(unittest.TestCase):
 
         self.assertEqual(metadata.uid, "test456")
         self.assertIsNone(metadata.description)
+
+
+class TestObjaverseRetriever(unittest.TestCase):
+    def test_ontology_aliases_rerank_terminal_ahead_of_electronic_safe(self):
+        metadata = {
+            "safe": ObjaverseMeshMetadata(
+                uid="safe",
+                name="Electronic Safe with Storage",
+                description="Electronic fingerprint safe",
+                category="large_objects",
+                bounding_box=(0.0, 0.0, 0.0),
+                ontology_path="hssd/wordnet/safe.n.01",
+                quality_score=0.76,
+                deferred_loading=True,
+            ),
+            "terminal": ObjaverseMeshMetadata(
+                uid="terminal",
+                name="Computer Terminal",
+                description="Large console workstation with computer in center",
+                category="large_objects",
+                bounding_box=(0.0, 0.0, 0.0),
+                ontology_path="electronics/computers/terminals",
+                quality_score=0.66,
+                deferred_loading=True,
+            ),
+        }
+        retriever = object.__new__(ObjaverseRetriever)
+        retriever.config = SimpleNamespace(
+            object_type_mapping={"FURNITURE": "large_objects"}, use_top_k=50
+        )
+        retriever.clip_device = "cpu"
+        retriever.preprocessed_data = MagicMock()
+        retriever.preprocessed_data.get_metadata.side_effect = metadata.get
+
+        with patch(
+            "scenesmith.agent_utils.objaverse_retrieval.retrieval.get_top_k_similar_meshes",
+            return_value=[("safe", 1.0), ("terminal", 0.98)],
+        ):
+            candidates = retriever.retrieve_multiple(
+                description="advanced diagnostic monitoring station",
+                object_type="furniture",
+                desired_dimensions=np.array([1.2, 0.6, 1.4]),
+                max_candidates=2,
+            )
+
+        self.assertEqual(
+            [candidate.uid for candidate in candidates], ["terminal", "safe"]
+        )
+
+    def test_ranks_indexed_bounds_before_loading_only_requested_meshes(self):
+        metadata = {
+            "too_small": ObjaverseMeshMetadata(
+                uid="too_small",
+                name="Small chair",
+                category="large_objects",
+                bounding_box=(0.1, 0.1, 0.1),
+            ),
+            "matching": ObjaverseMeshMetadata(
+                uid="matching",
+                name="Matching chair",
+                category="large_objects",
+                bounding_box=(0.8, 0.8, 1.0),
+            ),
+            "too_large": ObjaverseMeshMetadata(
+                uid="too_large",
+                name="Large chair",
+                category="large_objects",
+                bounding_box=(3.0, 3.0, 3.0),
+            ),
+        }
+        retriever = object.__new__(ObjaverseRetriever)
+        retriever.config = SimpleNamespace(
+            object_type_mapping={"FURNITURE": "large_objects"}, use_top_k=3
+        )
+        retriever.clip_device = "cpu"
+        retriever.preprocessed_data = MagicMock()
+        retriever.preprocessed_data.get_metadata.side_effect = metadata.get
+        loaded_mesh = trimesh.creation.box(extents=(0.8, 0.8, 1.0))
+        retriever._load_mesh = MagicMock(return_value=loaded_mesh)
+
+        with patch(
+            "scenesmith.agent_utils.objaverse_retrieval.retrieval.get_top_k_similar_meshes",
+            return_value=[
+                ("too_small", 0.9),
+                ("matching", 0.8),
+                ("too_large", 0.7),
+            ],
+        ):
+            candidates = retriever.retrieve_multiple(
+                description="chair",
+                object_type="furniture",
+                desired_dimensions=np.array([0.8, 0.8, 1.0]),
+                max_candidates=1,
+            )
+
+        self.assertEqual([candidate.uid for candidate in candidates], ["matching"])
+        retriever._load_mesh.assert_called_once_with(metadata["matching"])
 
 
 if __name__ == "__main__":

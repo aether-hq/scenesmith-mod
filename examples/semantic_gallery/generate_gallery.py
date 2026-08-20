@@ -26,6 +26,7 @@ from scenesmith.agent_utils.semantic_environment_compiler import (
     SemanticCompileOptions,
     compile_semantic_environment,
 )
+from scenesmith.agent_utils.atomic_output import rebuild_directory_atomically
 from scenesmith.agent_utils.semantic_environment_details import (
     DETAIL_SAMPLER_VERSION,
     compile_environment_details,
@@ -770,6 +771,35 @@ def _write_json_atomic(path: Path, value: object) -> None:
         raise
 
 
+def _attach_build_provenance(
+    scene: dict[str, object], descriptor_path: Path
+) -> dict[str, object]:
+    """Attach normalized recipe/provider provenance to one gallery entry."""
+
+    representation = scene["representation"]
+    reference_only = representation == "full_fidelity_gltf"
+    if representation == "compiled_semantic_geometry":
+        provider = "semantic-compiler/cpu"
+        compiler_version = (
+            f"{SEMANTIC_ENVIRONMENT_COMPILER_VERSION}+{GALLERY_COMPILER_VERSION}"
+        )
+    elif representation == "semantic_proxy_diagnostic":
+        provider = "structural-compiler/cpu"
+        compiler_version = f"structural-compiler-v1+{GALLERY_COMPILER_VERSION}"
+    else:
+        provider = "pinned-reference/no-runtime"
+        compiler_version = "not-recompiled"
+    scene["build"] = {
+        "status": "reference_only" if reference_only else "compiled",
+        "rebuilt_from_recipe": not reference_only,
+        "source_path": _relative(descriptor_path, REPOSITORY_ROOT),
+        "source_sha256": hashlib.sha256(descriptor_path.read_bytes()).hexdigest(),
+        "provider": provider,
+        "compiler_version": compiler_version,
+    }
+    return scene
+
+
 def generate_gallery(
     output_directory: Path | str = DEFAULT_OUTPUT_DIRECTORY,
     *,
@@ -797,7 +827,7 @@ def generate_gallery(
                 }
             )
             continue
-        scenes.append(_compile_trial(data, output))
+        scenes.append(_attach_build_provenance(_compile_trial(data, output), path))
     control_records = [
         (path, json.loads(path.read_text(encoding="utf-8"))) for path in control_paths
     ]
@@ -806,10 +836,13 @@ def generate_gallery(
     )
     for path, data in control_records:
         scenes.append(
-            _compile_control(
-                data,
-                output,
-                descriptor_path=path,
+            _attach_build_provenance(
+                _compile_control(
+                    data,
+                    output,
+                    descriptor_path=path,
+                ),
+                path,
             )
         )
     if not scenes:
@@ -827,13 +860,32 @@ def generate_gallery(
     return manifest
 
 
+def rebuild_gallery(
+    output_directory: Path | str = DEFAULT_OUTPUT_DIRECTORY,
+    *,
+    trial_directory: Path | str = DEFAULT_TRIAL_DIRECTORY,
+    control_directory: Path | str = DEFAULT_CONTROL_DIRECTORY,
+) -> dict[str, object]:
+    """Compile the gallery in a fresh tree and publish it atomically."""
+
+    output = Path(output_directory)
+    return rebuild_directory_atomically(
+        output,
+        lambda staging: generate_gallery(
+            staging,
+            trial_directory=trial_directory,
+            control_directory=control_directory,
+        ),
+    )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIRECTORY)
     parser.add_argument("--trials-dir", type=Path, default=DEFAULT_TRIAL_DIRECTORY)
     parser.add_argument("--controls-dir", type=Path, default=DEFAULT_CONTROL_DIRECTORY)
     args = parser.parse_args()
-    manifest = generate_gallery(
+    manifest = rebuild_gallery(
         args.output_dir,
         trial_directory=args.trials_dir,
         control_directory=args.controls_dir,

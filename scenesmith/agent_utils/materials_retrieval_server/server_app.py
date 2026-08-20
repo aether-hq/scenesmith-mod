@@ -20,6 +20,7 @@ from scenesmith.agent_utils.materials_retrieval_server.config import MaterialsCo
 from scenesmith.agent_utils.materials_retrieval_server.retrieval import (
     MaterialsRetriever,
 )
+from scenesmith.agent_utils.retrieval_policy import stream_local_results
 from scenesmith.agent_utils.scheduler import QueuedRequest, StrictRoundRobinScheduler
 from scenesmith.utils.material import Material
 
@@ -124,6 +125,7 @@ class MaterialsRetrievalApp(flask.Flask):
             if not self._retriever.initialize():
                 console_logger.error("Failed to initialize materials retriever")
                 raise RuntimeError("Materials retriever initialization failed")
+            self._retriever.warmup()
 
         return self._retriever
 
@@ -135,7 +137,7 @@ class MaterialsRetrievalApp(flask.Flask):
 
         console_logger.info("Starting materials retrieval processing thread")
         self._processing_active = True
-        self._processing_thread = Thread(target=self._process_queue, daemon=False)
+        self._processing_thread = Thread(target=self._process_queue, daemon=True)
         self._processing_thread.start()
 
     def stop_processing(self) -> None:
@@ -197,6 +199,11 @@ class MaterialsRetrievalApp(flask.Flask):
             self._completed_requests += 1
             processing_time = time.time() - start_time
             self._request_times.append(processing_time)
+            console_logger.info(
+                "Materials local retrieval '%s' completed in %.3fs",
+                queued_request.request.material_description,
+                processing_time,
+            )
             if len(self._request_times) > 100:
                 self._request_times.pop(0)
 
@@ -398,12 +405,10 @@ class MaterialsRetrievalApp(flask.Flask):
             batch_id = first_scene_id if first_scene_id else str(uuid.uuid4())
 
             client_result_queue: Queue = Queue()
-            results_received = 0
             batch_size = len(batch_requests)
 
             def result_callback(index: int, result: tuple[str, dict]) -> None:
                 """Route results to client queue."""
-                nonlocal results_received
                 client_result_queue.put((index, result))
 
             # Add to scheduler.
@@ -416,26 +421,16 @@ class MaterialsRetrievalApp(flask.Flask):
 
             self._total_requests += batch_size
 
-            def generate():
-                """Stream NDJSON responses."""
-                nonlocal results_received
-
-                while results_received < batch_size:
-                    index, (status, result_data) = client_result_queue.get()
-
-                    if status == "success":
-                        streamed_result = StreamedResult(
-                            index=index, status="success", data=result_data
-                        )
-                    else:
-                        streamed_result = StreamedResult(
-                            index=index, status="error", error=result_data
-                        )
-
-                    yield streamed_result.to_json() + "\n"
-                    results_received += 1
-
-            return flask.Response(generate(), mimetype="application/x-ndjson")
+            return flask.Response(
+                stream_local_results(
+                    result_queue=client_result_queue,
+                    batch_size=batch_size,
+                    result_type=StreamedResult,
+                    catalog_name="Materials",
+                    logger=console_logger,
+                ),
+                mimetype="application/x-ndjson",
+            )
 
         except Exception as e:
             console_logger.error(f"Batch request handling failed: {e}")

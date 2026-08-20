@@ -550,7 +550,7 @@ def project_fill_objects_non_penetrating(
 
         try:
             # Load directives into plant.
-            directives = LoadModelDirectives(directive_path)
+            directives = LoadModelDirectives(str(directive_path))
             ProcessModelDirectives(directives, plant, parser=None)
             plant.Finalize()
 
@@ -830,7 +830,7 @@ def simulate_fill_physics(
 
         try:
             # Load directives.
-            directives = LoadModelDirectives(directive_path)
+            directives = LoadModelDirectives(str(directive_path))
             ProcessModelDirectives(directives, plant, parser=None)
             plant.Finalize()
 

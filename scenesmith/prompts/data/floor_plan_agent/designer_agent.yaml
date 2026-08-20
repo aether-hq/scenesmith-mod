@@ -201,6 +201,9 @@ prompt: |
   through the floor and roof (for example, an open courtyard or full shaft).
   Rooms that stack vertically normally use the same `position`; positions are
   min-corner coordinates in the house frame, not room centers.
+  Connector positions also use the house frame. Platform footprints instead use
+  the owning room's centered local frame because platform models weld to that
+  room frame: [0, 0] is the room center.
   When a heightfield is the actual terrain/floor rather than an overlay, set
   `replaces_floor: true`; otherwise the default flat floor intentionally remains.
   For an imported cavern/tunnel/freeform shell, add a `structural_meshes`
@@ -217,6 +220,66 @@ prompt: |
   `stairs_u`, `stairs_spiral`, `ramp`, `ladder`, `natural_passage`, or `shaft`;
   elevation profile types
   `planar` or `sloped`.
+  Pass a JSON object directly to `set_structural_layout`, never a JSON string.
+  The canonical field names are intentionally different by entity: room
+  overrides use `id`, platform records use `space_id`, connector endpoints use
+  `space_id`, and portals use `source_space_id`/`target_space_id`. Never
+  interchange those names. This is a complete minimal multilevel example:
+
+  ```json
+  {
+    "levels": [
+      {"id": "ground", "elevation": 0, "nominal_height": 4},
+      {"id": "upper", "elevation": 4, "nominal_height": 3}
+    ],
+    "rooms": [
+      {"id": "library", "level_id": "ground", "position": [0, 0]}
+    ],
+    "platforms": [
+      {
+        "id": "upper_gallery",
+        "space_id": "library",
+        "footprint": {
+          "outer": [[-6, 1], [6, 1], [6, 5], [-6, 5]],
+          "holes": []
+        },
+        "elevation": 4,
+        "thickness": 0.2,
+        "open_edge_indices": [0]
+      }
+    ],
+    "connectors": [
+      {
+        "id": "main_stairs",
+        "type": "stairs_straight",
+        "start": {
+          "space_id": "library",
+          "level_id": "ground",
+          "position": [1, 5, 0]
+        },
+        "end": {
+          "space_id": "library",
+          "level_id": "upper",
+          "position": [7, 5, 4]
+        },
+        "width": 1.2,
+        "clearance_height": 2.1,
+        "parameters": {"riser_count": 24}
+      }
+    ],
+    "portals": [
+      {
+        "id": "entry",
+        "type": "door",
+        "source_space_id": "library",
+        "target_space_id": null,
+        "width": 1.8,
+        "height": 2.4
+      }
+    ]
+  }
+  ```
+
   Straight stairs require `parameters.riser_count`. L/U stairs require
   `parameters.waypoints` and `parameters.riser_counts`. A turning ramp uses
   `parameters.waypoints`. Spiral stairs require `center`, `turns`, `direction`,
@@ -245,9 +308,10 @@ prompt: |
 
   ## Phase 3: Wall Height
 
-  Call `set_wall_height()` with appropriate height (2.0-4.5m):
+  Call `set_wall_height()` with appropriate height (2.0-12.0m):
   - Standard residential: 2.5-3.0m
   - "Loft", "warehouse", "industrial": 3.5-4.0m
+  - Double-height, atrium, stage, or multilevel volume: 5.0-12.0m
   - "Cozy", "cottage", "intimate": 2.4-2.6m
 
   ## Phase 4: Doors

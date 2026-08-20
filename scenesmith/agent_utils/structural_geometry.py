@@ -1418,6 +1418,14 @@ def validate_structural_references(
                 entity_id=connector.connector_id,
             )
         connector_ids.add(connector.connector_id)
+        # One tall semantic space (an atrium, library hall, stage, etc.) may
+        # contain several structural datums. Internal stairs therefore retain
+        # their authored endpoint levels even though the enclosing room has one
+        # canonical topology level. Cross-space connectors remain strict.
+        is_internal_multilevel_connector = (
+            connector.start.space_id == connector.end.space_id
+            and connector.start.level_id != connector.end.level_id
+        )
         for endpoint in (connector.start, connector.end):
             if endpoint.space_id not in known_spaces:
                 raise UnknownConnectorEndpointError(
@@ -1428,7 +1436,10 @@ def validate_structural_references(
                     endpoint.level_id, entity_id=connector.connector_id
                 )
             expected_level = space_level_ids[endpoint.space_id]
-            if endpoint.level_id != expected_level:
+            if (
+                endpoint.level_id != expected_level
+                and not is_internal_multilevel_connector
+            ):
                 raise GeometryValidationError(
                     "connector_level_mismatch",
                     f"endpoint space '{endpoint.space_id}' belongs to level "

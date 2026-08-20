@@ -108,6 +108,33 @@ class GeneratedGeometry:
     objaverse_uid: str | None = None
     """Objaverse/ObjectThor unique identifier (for objaverse assets, None for others)."""
 
+    catalog_id: str | None = None
+    """Provider-independent catalog identifier for retrieved assets."""
+
+    license: str | None = None
+    """License identifier carried from the source catalog, when known."""
+
+    ontology_path: str | None = None
+    """Normalized ontology path in the global asset catalog."""
+
+    placement_classes: tuple[str, ...] = ()
+    """Valid placement classes recorded for the selected asset."""
+
+    canonical_up: str | None = None
+    canonical_front: str | None = None
+    """Provider canonical-frame vectors, when the source supplies them."""
+
+    support_zones: tuple[dict, ...] = ()
+    clearance_zones: tuple[dict, ...] = ()
+    """Deterministic solver zones attached to the catalog asset."""
+
+    quality_score: float | None = None
+    thumbnail: str | None = None
+    """Catalog quality score and preview image provenance."""
+
+    catalog_semantics: str | None = None
+    """Joined source metadata used to validate cache reuse deterministically."""
+
 
 @dataclass
 class ArticulatedGeometry:

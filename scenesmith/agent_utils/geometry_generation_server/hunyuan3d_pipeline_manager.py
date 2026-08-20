@@ -9,6 +9,8 @@ from typing import Any, Literal, Tuple
 
 import torch
 
+from scenesmith.agent_utils.execution_providers import release_torch_cache
+
 console_logger = logging.getLogger(__name__)
 
 
@@ -120,10 +122,9 @@ class Hunyuan3DPipelineManager:
         del cls._face_reducer
         del cls._background_remover
 
-        # Force garbage collection and clear CUDA cache.
+        # Force garbage collection and release the selected provider cache.
         gc.collect()
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
+        release_torch_cache("cuda", torch_module=torch)
 
     @classmethod
     def reset_pipelines(cls) -> None:

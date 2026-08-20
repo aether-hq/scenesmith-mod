@@ -1,5 +1,9 @@
 # Geometry Generation Server
 
+> Geometry execution is provider-backed: SAM3D supports CUDA and Apple
+> Silicon/MLX, Hunyuan3D supports CUDA, and any host can connect to an external
+> service. See [hardware providers](../../../docs/HARDWARE_PROVIDERS.md).
+
 Flask server for converting 2D images to 3D geometry (GLB files). Supports two
 backends:
 
@@ -26,10 +30,10 @@ SDF conversion is handled client-side for better parallel processing.
                   │ Queue Processing
                   ▼
 ┌─────────────────────────────────────┐
-│        Request Queue Thread         │  ← Sequential Processing
-│   • Thread-safe queue handling      │
+│    Provider-backed Worker Pool      │  ← Fair Processing
+│   • Injected execution targets      │
 │   • Error isolation per request     │
-│   • Pipeline lifecycle management   │
+│   • Provider-owned environments     │
 └─────────────────┬───────────────────┘
                   │ Backend Selection
                   ▼
@@ -37,7 +41,7 @@ SDF conversion is handled client-side for better parallel processing.
 │  Hunyuan3D        │  SAM3D          │
 │  Pipeline Manager │  Pipeline Mgr   │  ← GPU Model Management
 │  • Diffusion      │  • SAM3 segm.   │
-│  • Image → mesh   │  • 3DGS recon   │
+│  • CUDA → mesh    │  • CUDA or MLX  │
 └───────────────────┴─────────────────┘
                   │ Return Geometry
                   ▼
@@ -62,6 +66,7 @@ python -m scenesmith.agent_utils.geometry_generation_server.standalone_server
 # SAM3D backend
 python -m scenesmith.agent_utils.geometry_generation_server.standalone_server \
   --backend sam3d \
+  --provider mlx \
   --sam3-checkpoint external/checkpoints/sam3.pt \
   --sam3d-checkpoint external/checkpoints/pipeline.yaml
 ```
@@ -80,6 +85,7 @@ server = GeometryGenerationServer(
     port=7000,
     backend="sam3d",
     sam3d_config={
+        "provider": "auto",
         "sam3_checkpoint": "external/checkpoints/sam3.pt",
         "sam3d_checkpoint": "external/checkpoints/pipeline.yaml",
     },
@@ -132,6 +138,7 @@ for index, response in client.generate_geometries(requests):
 |---------|-----------|-------|
 | Quality | Good | Higher |
 | Speed | Faster | Slower |
-| GPU Memory | ~24GB | ~32GB |
+| Local providers | CUDA | CUDA or MLX/Metal |
+| Accelerator memory | ~24GB CUDA | ~32GB CUDA; MLX depends on unified memory |
 | Textures | Basic | UV-mapped |
 | Best for | Development | Production |

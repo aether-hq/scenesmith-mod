@@ -12,10 +12,11 @@ from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from agents import Agent, Runner, RunResult
+from agents import Agent, RunResult
 from omegaconf import DictConfig
 from pydantic import BaseModel, Field
 
+from scenesmith.agent_utils.agent_runtime import BoundedRunner as Runner
 from scenesmith.prompts import RobotEvalPrompts, prompt_registry
 from scenesmith.robot_eval.dmd_scene import DMDScene, load_scene_for_validation
 from scenesmith.robot_eval.tools import create_state_tools, create_vision_tools

@@ -63,7 +63,8 @@ class TestTriangleMesh(unittest.TestCase):
         )
         obj = mesh.to_obj(object_name="triangle")
         self.assertIn("o triangle\n", obj)
-        self.assertIn("f 1 2 3\n", obj)
+        self.assertIn("vn 0 0 1\n", obj)
+        self.assertIn("f 1//1 2//2 3//3\n", obj)
 
 
 class TestStraightStairs(unittest.TestCase):
@@ -752,9 +753,12 @@ class TestCompiledStructureExport(unittest.TestCase):
             self.assertTrue(paths.mesh_path.exists())
             self.assertTrue(paths.sdf_path.exists())
             self.assertTrue(paths.surfaces_path.exists())
-            self.assertIn("f 1 3 2", paths.mesh_path.read_text(encoding="utf-8"))
+            mesh_text = paths.mesh_path.read_text(encoding="utf-8")
+            self.assertIn("vn ", mesh_text)
+            self.assertIn("f 1//1 3//3 2//2", mesh_text)
 
             sdf = ET.parse(paths.sdf_path)
+            self.assertEqual(sdf.findtext(".//model/static"), "false")
             collisions = sdf.findall(".//collision")
             self.assertEqual(len(collisions), 18)
             self.assertTrue(

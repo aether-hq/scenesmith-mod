@@ -1,0 +1,6 @@
+name: "floor_plan_designer_one_shot_instruction"
+version: "1.0"
+description: "One-shot floor-plan compiler instruction"
+template_variables: []
+prompt: |
+  Submit the complete floor plan now with one `submit_floor_plan` call.

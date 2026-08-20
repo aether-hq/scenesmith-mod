@@ -1,10 +1,11 @@
 import logging
+import os
 import re
 import shutil
 import time
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -18,6 +19,10 @@ from scenesmith.agent_utils.articulated_retrieval_server import (
     ArticulatedRetrievalClient,
 )
 from scenesmith.agent_utils.asset_registry import AssetRegistry
+from scenesmith.agent_utils.asset_semantics import (
+    catalog_candidate_is_compatible,
+    is_structural_architecture_request,
+)
 from scenesmith.agent_utils.asset_router import AssetRouter
 from scenesmith.agent_utils.asset_router.dataclasses import (
     ArticulatedGeometry,
@@ -32,6 +37,10 @@ from scenesmith.agent_utils.geometry_generation_server.client import (
 from scenesmith.agent_utils.geometry_generation_server.dataclasses import (
     GeometryGenerationError,
     GeometryGenerationServerRequest,
+)
+from scenesmith.agent_utils.geometry_generation_server.sam_provider import (
+    sam_provider_config_from_mapping,
+    validate_sam_provider_config,
 )
 from scenesmith.agent_utils.hssd_retrieval_server import HssdRetrievalClient
 from scenesmith.agent_utils.hssd_retrieval_server.dataclasses import (
@@ -52,6 +61,7 @@ from scenesmith.agent_utils.mesh_utils import (
     remove_mesh_floaters,
     scale_mesh_uniformly_to_dimensions,
 )
+from scenesmith.agent_utils.llm_harness import LLMHarnessConfig
 from scenesmith.agent_utils.objaverse_retrieval_server import ObjaverseRetrievalClient
 from scenesmith.agent_utils.objaverse_retrieval_server.dataclasses import (
     ObjaverseRetrievalServerRequest,
@@ -74,6 +84,22 @@ if TYPE_CHECKING:
     from scenesmith.agent_utils.blender import BlenderServer
 
 console_logger = logging.getLogger(__name__)
+
+
+def _subscription_aware_worker_count(
+    configured_workers: int, request_count: int
+) -> int:
+    """Return honest concurrency for work that may call the configured LLM.
+
+    Subscription CLIs are single interactive workers protected by a process-wide
+    lock. Sending several HTTP requests at them only builds a hidden queue; it
+    cannot increase throughput and used to make batch-wide timers expire while
+    otherwise healthy turns were waiting. Keep API providers parallel, but feed
+    subscription workers one request at a time.
+    """
+    if LLMHarnessConfig.from_env().uses_cli_bridge:
+        return min(1, request_count)
+    return min(configured_workers, request_count)
 
 
 @dataclass
@@ -218,6 +244,8 @@ class AssetManager:
         materials_server_port: int = 7008,
         objaverse_server_host: str = "127.0.0.1",
         objaverse_server_port: int = 7009,
+        polyhaven_server_host: str = "127.0.0.1",
+        polyhaven_server_port: int = 7010,
     ) -> None:
         """Initialize the asset manager.
 
@@ -241,6 +269,8 @@ class AssetManager:
             materials_server_port: Port for materials retrieval server.
             objaverse_server_host: Host for Objaverse retrieval server.
             objaverse_server_port: Port for Objaverse retrieval server.
+            polyhaven_server_host: Host for Poly Haven retrieval server.
+            polyhaven_server_port: Port for Poly Haven retrieval server.
         """
         self.output_dir = logger.output_dir
         self.logger = logger
@@ -286,16 +316,44 @@ class AssetManager:
 
         # Initialize registry with auto-save to enable incremental persistence.
         registry_path = generated_assets_dir / "asset_registry.json"
-        self.registry = AssetRegistry(auto_save_path=registry_path)
+        shared_registry_value = cfg.asset_manager.get("shared_registry_path")
+        shared_registry_path = (
+            Path(str(shared_registry_value)).expanduser()
+            if shared_registry_value
+            else None
+        )
+        self.registry = AssetRegistry(
+            auto_save_path=registry_path,
+            mirror_save_path=shared_registry_path,
+        )
+        if shared_registry_path is not None and shared_registry_path.is_file():
+            try:
+                self.registry.load_from_file(file_path=shared_registry_path)
+                self._quarantine_incompatible_cached_assets()
+                self.registry.save_to_file(file_path=registry_path)
+                console_logger.info(
+                    f"Loaded shared {agent_type.value} asset cache from "
+                    f"{shared_registry_path}"
+                )
+            except Exception as exc:
+                console_logger.warning(
+                    f"Could not load shared asset cache {shared_registry_path}: {exc}"
+                )
 
         # Initialize strategy-specific clients.
         self.general_asset_source = cfg.asset_manager.general_asset_source
-        if self.general_asset_source not in ["generated", "hssd", "objaverse"]:
+        if self.general_asset_source not in [
+            "generated",
+            "hssd",
+            "objaverse",
+            "polyhaven",
+            "all",
+        ]:
             raise ValueError(f"Unknown asset source: {self.general_asset_source}")
 
         # Initialize geometry generation client if source is "generated".
         self.geometry_client: GeometryGenerationClient | None = None
-        if self.general_asset_source == "generated":
+        if self.general_asset_source in ["generated", "all"]:
             console_logger.info("Initializing geometry generation client")
             self.geometry_client = GeometryGenerationClient(
                 host=geometry_server_host, port=geometry_server_port
@@ -315,6 +373,20 @@ class AssetManager:
             console_logger.info("Initializing Objaverse retrieval client")
             self.objaverse_client = ObjaverseRetrievalClient(
                 host=objaverse_server_host, port=objaverse_server_port
+            )
+
+        # Direct Poly Haven and the normalized global catalog share the generic
+        # catalog retrieval protocol; ``all`` points this client at the latter.
+        self.polyhaven_client: ObjaverseRetrievalClient | None = None
+        if self.general_asset_source in ["polyhaven", "all"]:
+            catalog_label = (
+                "global asset catalog"
+                if self.general_asset_source == "all"
+                else "Poly Haven"
+            )
+            console_logger.info("Initializing %s retrieval client", catalog_label)
+            self.polyhaven_client = ObjaverseRetrievalClient(
+                host=polyhaven_server_host, port=polyhaven_server_port
             )
 
         # Initialize articulated retrieval client if articulated strategy is enabled.
@@ -441,27 +513,8 @@ class AssetManager:
 
         sam3d_cfg = self.cfg.asset_manager.sam3d
 
-        # Validate required checkpoint fields.
-        required_fields = ["sam3_checkpoint", "sam3d_checkpoint"]
-        for field in required_fields:
-            if field not in sam3d_cfg:
-                raise ValueError(f"SAM3D configuration missing required field: {field}")
-
-        # Validate checkpoint files exist.
-        sam3_checkpoint = Path(sam3d_cfg.sam3_checkpoint)
-        sam3d_checkpoint = Path(sam3d_cfg.sam3d_checkpoint)
-
-        if not sam3_checkpoint.exists():
-            raise FileNotFoundError(
-                f"SAM3 checkpoint not found: {sam3_checkpoint}. "
-                f"Run 'bash scripts/install_sam3d.sh' to download checkpoints."
-            )
-
-        if not sam3d_checkpoint.exists():
-            raise FileNotFoundError(
-                f"SAM 3D Objects checkpoint not found: {sam3d_checkpoint}. "
-                f"Run 'bash scripts/install_sam3d.sh' to download checkpoints."
-            )
+        provider_config = sam_provider_config_from_mapping(sam3d_cfg)
+        provider = validate_sam_provider_config(provider_config)
 
         # Validate mode field.
         mode = sam3d_cfg.mode
@@ -479,8 +532,8 @@ class AssetManager:
             )
 
         console_logger.info(
-            f"SAM3D configuration validated successfully (mode={mode}, "
-            f"threshold={threshold})"
+            f"SAM3D configuration validated successfully (provider={provider}, "
+            f"mode={mode}, threshold={threshold})"
         )
 
     def _retrieve_hssd_assets(
@@ -693,7 +746,10 @@ class AssetManager:
         )
 
     def _retrieve_objaverse_assets(
-        self, request: AssetGenerationRequest
+        self,
+        request: AssetGenerationRequest,
+        client: ObjaverseRetrievalClient | None = None,
+        source_label: str = "objaverse",
     ) -> AssetGenerationResult:
         """Retrieve assets from Objaverse (ObjectThor) library using server client.
 
@@ -703,15 +759,17 @@ class AssetManager:
         Returns:
             AssetGenerationResult with retrieved assets.
         """
-        if self.objaverse_client is None:
-            raise RuntimeError("Objaverse retrieval client not initialized")
+        retrieval_client = client or self.objaverse_client
+        if retrieval_client is None:
+            raise RuntimeError(f"{source_label} retrieval client not initialized")
         if self.collision_client is None:
             raise RuntimeError(
                 "Collision client not available. Cannot generate collision geometry."
             )
 
         console_logger.info(
-            f"Retrieving {len(request.object_descriptions)} assets from Objaverse server"
+            f"Retrieving {len(request.object_descriptions)} assets from "
+            f"{source_label} server"
         )
 
         # Create asset path configurations for output directories.
@@ -744,9 +802,7 @@ class AssetManager:
         failed_assets: list[FailedAsset] = []
 
         # Submit batch to server and process streaming responses.
-        for index, response in self.objaverse_client.retrieve_objects(
-            retrieval_requests
-        ):
+        for index, response in retrieval_client.retrieve_objects(retrieval_requests):
             desc = request.object_descriptions[index]
             short_name = request.short_names[index]
             config = asset_path_configs[index]
@@ -873,8 +929,10 @@ class AssetManager:
                     bbox_min=bbox_min,
                     bbox_max=bbox_max,
                     additional_metadata={
-                        "asset_source": "objaverse",
+                        "asset_source": result.asset_source,
                         "objaverse_mesh_id": mesh_id,
+                        "catalog_id": mesh_id,
+                        "license": result.license,
                     },
                 )
 
@@ -1025,6 +1083,47 @@ class AssetManager:
             f"{'enabled' if self.router is not None else 'disabled'}."
         )
 
+        # Traversable architecture is authored and compiled by the floor-plan
+        # stage.  Treating it as furniture creates duplicate stairs and allows a
+        # semantically unrelated catalog mesh to masquerade as structure.
+        if request.object_type == ObjectType.FURNITURE:
+            accepted_indices = [
+                index
+                for index, (description, short_name) in enumerate(
+                    zip(request.object_descriptions, request.short_names)
+                )
+                if not is_structural_architecture_request(f"{short_name} {description}")
+            ]
+            if len(accepted_indices) != len(request.object_descriptions):
+                rejected = [
+                    request.object_descriptions[index]
+                    for index in range(len(request.object_descriptions))
+                    if index not in accepted_indices
+                ]
+                console_logger.warning(
+                    "Ignored structural architecture requested through the furniture "
+                    "channel (already owned by the floor plan): %s",
+                    rejected,
+                )
+                if not accepted_indices:
+                    return AssetGenerationResult(
+                        successful_assets=[],
+                        failed_assets=[],
+                        modification_info=None,
+                    )
+                request = replace(
+                    request,
+                    object_descriptions=[
+                        request.object_descriptions[index] for index in accepted_indices
+                    ],
+                    short_names=[
+                        request.short_names[index] for index in accepted_indices
+                    ],
+                    desired_dimensions=[
+                        request.desired_dimensions[index] for index in accepted_indices
+                    ],
+                )
+
         # If router is enabled, analyze and potentially modify the request.
         if self.router is not None:
             return self._generate_assets_with_router(request)
@@ -1034,11 +1133,56 @@ class AssetManager:
             return self._retrieve_hssd_assets(request)
         elif self.general_asset_source == "objaverse":
             return self._retrieve_objaverse_assets(request)
+        elif self.general_asset_source == "polyhaven":
+            return self._retrieve_objaverse_assets(
+                request,
+                client=self.polyhaven_client,
+                source_label="polyhaven",
+            )
+        elif self.general_asset_source == "all":
+            raise ValueError("Asset source 'all' requires asset_manager.router.enabled")
         elif self.general_asset_source == "generated":
             return self._generate_assets_with_model(request)
         else:
             # This should never happen due to __init__ validation.
             raise ValueError(f"Unknown asset source: {self.general_asset_source}")
+
+    def _quarantine_incompatible_cached_assets(self) -> None:
+        """Remove stale catalog aliases before they can be placed in a new scene."""
+
+        for asset in list(self.registry.list_all()):
+            request_text = f"{asset.name} {asset.description}"
+            metadata = asset.metadata or {}
+            source = str(metadata.get("asset_source", "")).casefold()
+            reason = ""
+            compatible = True
+            if is_structural_architecture_request(request_text):
+                compatible = False
+                reason = "architectural structure cannot be cached as furniture"
+            elif source in {"hssd", "objaverse", "polyhaven"}:
+                compatible, reason = catalog_candidate_is_compatible(
+                    request_text=request_text,
+                    candidate_text=str(
+                        metadata.get("catalog_semantics")
+                        or metadata.get("ontology_path")
+                        or ""
+                    ),
+                    quality_score=(
+                        float(metadata["asset_quality_score"])
+                        if metadata.get("asset_quality_score") is not None
+                        else None
+                    ),
+                    minimum_quality=0.70,
+                )
+            if compatible:
+                continue
+            console_logger.warning(
+                "Rejecting cached asset %s for '%s': %s",
+                asset.object_id,
+                request_text,
+                reason,
+            )
+            self.registry.discard(asset.object_id)
 
     def _generate_assets_with_router(
         self, request: AssetGenerationRequest
@@ -1110,76 +1254,107 @@ class AssetManager:
                 f"-> {len(unique_requests)} unique"
             )
 
-        # Parallel analysis: LLM API calls are thread-safe.
-        configured_workers = self.cfg.asset_manager.router.parallel_workers
-        max_workers = min(configured_workers, len(unique_requests))
-
-        console_logger.info(
-            f"Analyzing {len(unique_requests)} requests in parallel "
-            f"with {max_workers} workers"
+        deterministic_analysis = bool(
+            self.cfg.asset_manager.router.get("deterministic_analysis", False)
         )
+        if deterministic_analysis:
+            # These tool requests already contain one atomic object, dimensions,
+            # a short name, and a placement type. Reconstructing those fields with
+            # an LLM added 20-60 seconds per item and blocked asyncio deadlines.
+            for (desc, dims), idx in unique_requests.items():
+                all_items.append(
+                    self._build_deterministic_asset_item(
+                        description=desc,
+                        short_name=request.short_names[idx],
+                        dimensions=list(dims),
+                        object_type=request.object_type,
+                    )
+                )
+            console_logger.info(
+                "Deterministically routed %d structured asset requests in-process",
+                len(all_items),
+            )
+        else:
+            # API-backed analysis may run in parallel. Subscription CLIs are one
+            # supervised local worker, so their requests are intentionally serialized.
+            configured_workers = self.cfg.asset_manager.router.parallel_workers
+            max_workers = _subscription_aware_worker_count(
+                configured_workers, len(unique_requests)
+            )
 
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            futures = {
-                executor.submit(
-                    self.router.analyze_request,
-                    description=desc,
-                    dimensions=list(dims),
-                ): (idx, desc)
-                for (desc, dims), idx in unique_requests.items()
-            }
+            console_logger.info(
+                f"Analyzing {len(unique_requests)} requests "
+                f"with {max_workers} workers"
+            )
 
-            for future in as_completed(futures):
-                idx, desc = futures[future]
-                try:
-                    analysis = future.result()
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                futures = {
+                    executor.submit(
+                        self.router.analyze_request,
+                        description=desc,
+                        dimensions=list(dims),
+                    ): (idx, desc)
+                    for (desc, dims), idx in unique_requests.items()
+                }
 
-                    if analysis.error:
-                        console_logger.warning(
-                            f"Router rejected '{desc}': {analysis.error}"
+                # Each model turn owns its liveness and hard-orphan watchdog. A
+                # batch-wide wall-clock timeout is incorrect because queued turns
+                # have not started yet.
+                for future in as_completed(futures):
+                    idx, desc = futures[future]
+                    try:
+                        analysis = future.result()
+
+                        if analysis.error:
+                            console_logger.warning(
+                                f"Router rejected '{desc}': {analysis.error}"
+                            )
+                            failed_assets.append(
+                                FailedAsset(
+                                    index=idx,
+                                    description=desc,
+                                    error_message=analysis.error,
+                                )
+                            )
+                            continue
+
+                        # Validate item types match this agent.
+                        type_error = self.router.validate_item_types(analysis.items)
+                        if type_error:
+                            console_logger.warning(
+                                f"Router type validation failed: {type_error}"
+                            )
+                            failed_assets.append(
+                                FailedAsset(
+                                    index=idx,
+                                    description=desc,
+                                    error_message=type_error,
+                                )
+                            )
+                            continue
+
+                        # Collect items and track modifications.
+                        all_items.extend(analysis.items)
+
+                        if analysis.was_modified:
+                            had_modifications = True
+                            original_descriptions.append(
+                                analysis.original_description or desc
+                            )
+                            if analysis.discarded_manipulands:
+                                all_discarded_manipulands.extend(
+                                    analysis.discarded_manipulands
+                                )
+
+                    except Exception as e:
+                        console_logger.error(
+                            f"Analysis failed for '{desc}': {e}", exc_info=True
                         )
                         failed_assets.append(
                             FailedAsset(
-                                index=idx,
-                                description=desc,
-                                error_message=analysis.error,
+                                index=idx, description=desc, error_message=str(e)
                             )
                         )
-                        continue
-
-                    # Validate item types match this agent.
-                    type_error = self.router.validate_item_types(analysis.items)
-                    if type_error:
-                        console_logger.warning(
-                            f"Router type validation failed: {type_error}"
-                        )
-                        failed_assets.append(
-                            FailedAsset(
-                                index=idx, description=desc, error_message=type_error
-                            )
-                        )
-                        continue
-
-                    # Collect items and track modifications.
-                    all_items.extend(analysis.items)
-
-                    if analysis.was_modified:
-                        had_modifications = True
-                        original_descriptions.append(
-                            analysis.original_description or desc
-                        )
-                        if analysis.discarded_manipulands:
-                            all_discarded_manipulands.extend(
-                                analysis.discarded_manipulands
-                            )
-
-                except Exception as e:
-                    console_logger.error(
-                        f"Analysis failed for '{desc}': {e}", exc_info=True
-                    )
-                    failed_assets.append(
-                        FailedAsset(index=idx, description=desc, error_message=str(e))
-                    )
 
         if not all_items:
             console_logger.warning("Router returned no items to generate")
@@ -1226,6 +1401,62 @@ class AssetManager:
             modification_info=modification_info,
         )
 
+    @staticmethod
+    def _build_deterministic_asset_item(
+        *,
+        description: str,
+        short_name: str,
+        dimensions: list[float],
+        object_type: ObjectType,
+    ) -> AssetItem:
+        """Map an already-structured tool request to a retrieval strategy."""
+        normalized = description.casefold()
+        articulated_terms = (
+            "cabinet",
+            "cupboard",
+            "drawer",
+            "dresser",
+            "wardrobe",
+            "refrigerator",
+            "fridge",
+            "locker",
+        )
+        floor_covering_terms = ("rug", "carpet", "floor mat", "runner")
+        wall_covering_terms = ("poster", "painting", "wall art", "tapestry")
+        surface_covering_terms = ("tablecloth", "placemat", "desk mat")
+
+        thin_covering_type = None
+        if object_type == ObjectType.FURNITURE and any(
+            term in normalized for term in floor_covering_terms
+        ):
+            strategies = ["thin_covering", "generated"]
+            thin_covering_type = "tileable"
+        elif object_type == ObjectType.WALL_MOUNTED and any(
+            term in normalized for term in wall_covering_terms
+        ):
+            strategies = ["thin_covering", "generated"]
+            thin_covering_type = "single_image"
+        elif object_type == ObjectType.MANIPULAND and any(
+            term in normalized for term in surface_covering_terms
+        ):
+            strategies = ["thin_covering", "generated"]
+            thin_covering_type = "tileable"
+        elif object_type == ObjectType.FURNITURE and any(
+            term in normalized for term in articulated_terms
+        ):
+            strategies = ["articulated", "generated"]
+        else:
+            strategies = ["generated"]
+
+        return AssetItem(
+            description=description,
+            short_name=short_name,
+            dimensions=dimensions,
+            object_type=object_type,
+            strategies=strategies,
+            thin_covering_type=thin_covering_type,
+        )
+
     def _generate_items_with_validation(
         self, unique_items: dict[str, "AssetItem"], request: AssetGenerationRequest
     ) -> AssetGenerationResult:
@@ -1250,7 +1481,13 @@ class AssetManager:
 
         configured_workers = self.cfg.asset_manager.router.parallel_workers
         items_list = list(unique_items.items())
-        max_workers = min(configured_workers, len(items_list))
+        # Candidate validation includes model-based mesh analysis. Running these
+        # tasks in parallel against a subscription CLI only creates a hidden
+        # model queue and also makes local CLIP retrievers contend for MPS. Feed
+        # that pipeline serially in subscription mode; API mode remains parallel.
+        max_workers = _subscription_aware_worker_count(
+            configured_workers, len(items_list)
+        )
 
         console_logger.info(
             f"Generating {len(items_list)} items with {max_workers} parallel workers "
@@ -1267,6 +1504,9 @@ class AssetManager:
                 for idx, (desc, item) in enumerate(items_list)
             }
 
+            # Retrieval/generation clients enforce per-request deadlines. Do not
+            # impose a second deadline on the whole batch: later futures may be
+            # healthy and merely waiting for a bounded local worker.
             for future in as_completed(futures):
                 idx, desc, item = futures[future]
                 try:
@@ -1353,6 +1593,7 @@ class AssetManager:
             style_context=request.style_context,
             hssd_client=self.hssd_client,
             objaverse_client=self.objaverse_client,
+            polyhaven_client=self.polyhaven_client,
             articulated_client=self.articulated_client,
             materials_client=self.materials_client,
             scene_id=request.scene_id,
@@ -1426,6 +1667,8 @@ class AssetManager:
                     object_type=request.object_type,
                     desired_dimensions=item.dimensions,
                     asset_source=generated.asset_source,
+                    canonical_up=generated.canonical_up,
+                    canonical_front=generated.canonical_front,
                 )
             )
 
@@ -1433,6 +1676,30 @@ class AssetManager:
         additional_metadata = {"asset_source": generated.asset_source}
         if generated.hssd_id is not None:
             additional_metadata["hssd_mesh_id"] = generated.hssd_id
+        if generated.objaverse_uid is not None:
+            additional_metadata["objaverse_mesh_id"] = generated.objaverse_uid
+        if generated.catalog_id is not None:
+            additional_metadata["catalog_id"] = generated.catalog_id
+        if generated.license is not None:
+            additional_metadata["license"] = generated.license
+        if generated.ontology_path is not None:
+            additional_metadata["ontology_path"] = generated.ontology_path
+        if generated.placement_classes:
+            additional_metadata["placement_classes"] = list(generated.placement_classes)
+        if generated.canonical_up is not None:
+            additional_metadata["canonical_up"] = generated.canonical_up
+        if generated.canonical_front is not None:
+            additional_metadata["canonical_front"] = generated.canonical_front
+        if generated.support_zones:
+            additional_metadata["support_zones"] = list(generated.support_zones)
+        if generated.clearance_zones:
+            additional_metadata["clearance_zones"] = list(generated.clearance_zones)
+        if generated.quality_score is not None:
+            additional_metadata["asset_quality_score"] = generated.quality_score
+        if generated.thumbnail is not None:
+            additional_metadata["asset_thumbnail"] = generated.thumbnail
+        if generated.catalog_semantics is not None:
+            additional_metadata["catalog_semantics"] = generated.catalog_semantics
 
         # Add thin_covering-specific metadata for physics validation.
         if generated.asset_source == "thin_covering":
@@ -1661,18 +1928,12 @@ class AssetManager:
             if backend == "sam3d":
                 sam3d_cfg = self.cfg.asset_manager.sam3d
                 mode = sam3d_cfg.mode
-                sam3d_config = {
-                    "sam3_checkpoint": str(sam3d_cfg.sam3_checkpoint),
-                    "sam3d_checkpoint": str(sam3d_cfg.sam3d_checkpoint),
-                    "mode": mode,
-                    "text_prompt": getattr(sam3d_cfg, "text_prompt", None),
-                    "threshold": sam3d_cfg.threshold,
-                }
-                # Pass object description for "object_description" mode.
-                # Uses the same description that generated the image for
-                # semantic-aware segmentation.
-                if mode == "object_description":
-                    sam3d_config["object_description"] = config.description
+                sam3d_config = sam_provider_config_from_mapping(
+                    sam3d_cfg,
+                    object_description=(
+                        config.description if mode == "object_description" else None
+                    ),
+                )
 
             geometry_request = GeometryGenerationServerRequest(
                 image_path=str(config.image_path),
@@ -1788,6 +2049,8 @@ class AssetManager:
         object_type: ObjectType,
         desired_dimensions: list[float] | None = None,
         asset_source: str = "generated",
+        canonical_up: str | None = None,
+        canonical_front: str | None = None,
     ) -> tuple[Path, Path, np.ndarray, np.ndarray, float]:
         """Convert mesh to a simulatable Drake SDF.
 
@@ -1852,27 +2115,44 @@ class AssetManager:
         # Use geometry_path stem to match asset naming pattern (e.g., "desk_A_1234567890").
         debug_dir = self.debug_dir / config.geometry_path.stem
 
-        # HSSD assets use specialized prompts and skip vertical views since they're
-        # already upright (Z-up). Generated assets need full orientation analysis.
+        # Authored catalog assets already have a canonical source frame and are
+        # deterministically reranked. Six-image VLM physics inference took 50-145s
+        # per local asset, even though mass/friction only need stable estimates.
+        # Keep visual inference for genuinely generated, untrusted meshes.
         is_hssd = asset_source == "hssd"
-        prompt_type = "hssd" if is_hssd else "generated"
-        include_vertical_views = not is_hssd
-
-        console_logger.info(
-            f"Running VLM analysis for mesh physics "
-            f"(asset_source={asset_source}, prompt_type={prompt_type})"
-        )
-        physics_analysis = analyze_mesh_orientation_and_material(
-            mesh_path=gltf_path,
-            vlm_service=self.vlm_service,
-            cfg=self.cfg,
-            elevation_degrees=self.side_view_elevation_degrees,
-            blender_server=self.blender_server,
-            num_side_views=self.num_side_views_for_physics_analysis,
-            debug_output_dir=debug_dir,
-            prompt_type=prompt_type,
-            include_vertical_views=include_vertical_views,
-        )
+        if asset_source != "generated":
+            physics_analysis = self._deterministic_catalog_physics(
+                description=config.description,
+                desired_dimensions=desired_dimensions,
+                object_type=object_type,
+                canonical_up=canonical_up,
+                canonical_front=canonical_front,
+            )
+            console_logger.info(
+                "Using deterministic catalog physics: source=%s, up=%s, "
+                "front=%s, material=%s, mass=%.2fkg",
+                asset_source,
+                physics_analysis.up_axis,
+                physics_analysis.front_axis,
+                physics_analysis.material,
+                physics_analysis.mass_kg,
+            )
+        else:
+            console_logger.info(
+                "Running VLM analysis for generated mesh physics " "(asset_source=%s)",
+                asset_source,
+            )
+            physics_analysis = analyze_mesh_orientation_and_material(
+                mesh_path=gltf_path,
+                vlm_service=self.vlm_service,
+                cfg=self.cfg,
+                elevation_degrees=self.side_view_elevation_degrees,
+                blender_server=self.blender_server,
+                num_side_views=self.num_side_views_for_physics_analysis,
+                debug_output_dir=debug_dir,
+                prompt_type="generated",
+                include_vertical_views=True,
+            )
 
         console_logger.info(
             f"VLM analysis complete: up={physics_analysis.up_axis}, "
@@ -1880,14 +2160,29 @@ class AssetManager:
             f"mass={physics_analysis.mass_kg}kg"
         )
 
+        # HSSD catalog axes describe the source glTF/Habitat frame, while the
+        # canonicalizer receives axes after Blender has imported that Y-up file.
+        # Convert those authored axes exactly once. Other catalog sources use
+        # Blender-frame deterministic defaults and must not be remapped here.
+        canonical_up_axis = physics_analysis.up_axis
+        canonical_front_axis = physics_analysis.front_axis
+        if is_hssd:
+            canonical_up_axis = self._gltf_axis_to_blender(canonical_up_axis)
+            canonical_front_axis = self._gltf_axis_to_blender(canonical_front_axis)
+            console_logger.info(
+                "Converted HSSD source axes to Blender frame: up=%s, front=%s",
+                canonical_up_axis,
+                canonical_front_axis,
+            )
+
         # Canonicalize mesh in Blender (rotate to canonical orientation + placement).
         # Input: Y-up GLTF, Output: Z-up GLTF for Drake.
         canonical_path = config.sdf_dir / f"{config.short_name}_canonical.gltf"
         canonicalize_mesh(
             gltf_path=gltf_path,
             output_path=canonical_path,
-            up_axis=physics_analysis.up_axis,
-            front_axis=physics_analysis.front_axis,
+            up_axis=canonical_up_axis,
+            front_axis=canonical_front_axis,
             blender_server=self.blender_server,
             object_type=object_type,
         )
@@ -1900,16 +2195,26 @@ class AssetManager:
         final_gltf_path = canonical_path
         initial_scale = 1.0
         if desired_dimensions is not None:
+            # Agent dimensions are scene/Drake [width, depth, height]. The mesh
+            # is standard Y-up glTF [width, height, depth] at this stage.
+            mesh_target_dimensions = [
+                desired_dimensions[0],
+                desired_dimensions[2],
+                desired_dimensions[1],
+            ]
             console_logger.info(
-                f"Scaling mesh to desired dimensions: {desired_dimensions}"
+                "Scaling mesh to scene dimensions %s (glTF containing box %s)",
+                desired_dimensions,
+                mesh_target_dimensions,
             )
             final_gltf_path = config.sdf_dir / f"{config.short_name}.gltf"
             final_gltf_path, applied_scale = scale_mesh_uniformly_to_dimensions(
                 mesh_path=canonical_path,
-                desired_dimensions=desired_dimensions,
+                desired_dimensions=mesh_target_dimensions,
                 output_path=final_gltf_path,
                 min_dimension_meters=self.min_mesh_dimension_meters,
                 relative_threshold=self.mesh_relative_dimension_threshold,
+                allow_wall_plane_quarter_turn=(object_type == ObjectType.WALL_MOUNTED),
             )
             # HSSD pre-computed surfaces are at original mesh dimensions.
             # They need scale_factor to match the physical scaling applied above.
@@ -1960,6 +2265,93 @@ class AssetManager:
         )
 
         return sdf_path, final_gltf_path, bbox_min, bbox_max, initial_scale
+
+    @staticmethod
+    def _gltf_axis_to_blender(axis: str) -> str:
+        """Map a signed source glTF axis into Blender's imported frame."""
+        mapping = {
+            "+X": "+X",
+            "-X": "-X",
+            "+Y": "+Z",
+            "-Y": "-Z",
+            "+Z": "-Y",
+            "-Z": "+Y",
+        }
+        return mapping.get(axis.upper(), axis.upper())
+
+    @staticmethod
+    def _canonical_axis(value: str | None, default: str) -> str:
+        """Normalize catalog vectors such as ``0,0,-1`` to signed axes."""
+        if not value:
+            return default
+        normalized = value.strip().upper()
+        if normalized in {"+X", "-X", "+Y", "-Y", "+Z", "-Z"}:
+            return normalized
+        try:
+            components = [float(part.strip()) for part in value.split(",")]
+        except ValueError:
+            return default
+        if (
+            len(components) != 3
+            or max(abs(component) for component in components) < 1e-6
+        ):
+            return default
+        index = max(range(3), key=lambda item: abs(components[item]))
+        sign = "+" if components[index] >= 0 else "-"
+        return f"{sign}{'XYZ'[index]}"
+
+    @classmethod
+    def _deterministic_catalog_physics(
+        cls,
+        *,
+        description: str,
+        desired_dimensions: list[float] | None,
+        object_type: ObjectType,
+        canonical_up: str | None,
+        canonical_front: str | None,
+    ) -> MeshPhysicsAnalysis:
+        """Derive stable simulation properties without a model or render pass."""
+        normalized = description.casefold()
+        material_terms = (
+            ("metal", ("metal", "steel", "aluminum", "chrome", "iron")),
+            ("glass", ("glass", "crystal")),
+            ("plastic", ("plastic", "polymer", "acrylic")),
+            ("fabric", ("fabric", "upholstered", "cloth", "velvet", "linen")),
+            ("wood", ("wood", "oak", "walnut", "timber", "plywood")),
+        )
+        material = next(
+            (
+                name
+                for name, terms in material_terms
+                if any(term in normalized for term in terms)
+            ),
+            "wood" if object_type == ObjectType.FURNITURE else "plastic",
+        )
+
+        volume = float(np.prod(desired_dimensions or [0.3, 0.3, 0.3]))
+        density_by_type = {
+            ObjectType.FURNITURE: 60.0,
+            ObjectType.MANIPULAND: 180.0,
+            ObjectType.WALL_MOUNTED: 40.0,
+            ObjectType.CEILING_MOUNTED: 35.0,
+        }
+        bounds_by_type = {
+            ObjectType.FURNITURE: (2.0, 200.0),
+            ObjectType.MANIPULAND: (0.05, 15.0),
+            ObjectType.WALL_MOUNTED: (0.1, 30.0),
+            ObjectType.CEILING_MOUNTED: (0.2, 40.0),
+        }
+        density = density_by_type.get(object_type, 60.0)
+        lower, upper = bounds_by_type.get(object_type, (0.1, 200.0))
+        mass = min(upper, max(lower, volume * density))
+
+        return MeshPhysicsAnalysis(
+            up_axis=cls._canonical_axis(canonical_up, "+Z"),
+            front_axis=cls._canonical_axis(canonical_front, "+Y"),
+            material=material,
+            mass_kg=mass,
+            mass_range_kg=(mass * 0.6, mass * 1.4),
+        )
 
     def _convert_thin_covering_to_simulation_asset(
         self,

@@ -4,27 +4,27 @@ Provides simple async structured LLM calls without Agent SDK overhead.
 Uses OpenAI's structured output API for guaranteed schema compliance.
 """
 
-import logging
+import asyncio
+import json
 
 from typing import TypeVar
 
-from openai import AsyncOpenAI
 from pydantic import BaseModel
 
-console_logger = logging.getLogger(__name__)
+from scenesmith.agent_utils.vlm_service import VLMService
 
 T = TypeVar("T", bound=BaseModel)
 
-# Lazy-initialized client.
-_client: AsyncOpenAI | None = None
+# Lazy-initialized provider-neutral harness facade.
+_service: VLMService | None = None
 
 
-def _get_client() -> AsyncOpenAI:
-    """Get or create the async OpenAI client."""
-    global _client
-    if _client is None:
-        _client = AsyncOpenAI()
-    return _client
+def _get_service() -> VLMService:
+    """Get the common SceneSmith LLM harness."""
+    global _service
+    if _service is None:
+        _service = VLMService()
+    return _service
 
 
 async def structured_llm_call(
@@ -48,22 +48,19 @@ async def structured_llm_call(
     Raises:
         OpenAI API errors if the call fails.
     """
-    client = _get_client()
-
-    response = await client.beta.chat.completions.parse(
+    schema = json.dumps(output_type.model_json_schema(), separators=(",", ":"))
+    content = await asyncio.to_thread(
+        _get_service().create_completion,
         model=model,
         messages=[
-            {"role": "system", "content": system_prompt},
+            {
+                "role": "system",
+                "content": f"{system_prompt}\nReturn JSON matching this schema: {schema}",
+            },
             {"role": "user", "content": user_input},
         ],
-        response_format=output_type,
+        reasoning_effort="low",
+        verbosity="low",
+        response_format={"type": "json_object"},
     )
-
-    parsed = response.choices[0].message.parsed
-    if parsed is None:
-        raise RuntimeError(
-            f"Failed to parse structured output. "
-            f"Refusal: {response.choices[0].message.refusal}"
-        )
-
-    return parsed
+    return output_type.model_validate_json(content)

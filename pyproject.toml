@@ -11,7 +11,10 @@ dependencies = [
     "coacd>=1.0.7",
     "colorama>=0.4.6",
     "diffusers>=0.35.1",
-    "drake>=1.47.0",
+    # Drake stopped publishing Python 3.11 macOS wheels after 1.40. Keep the
+    # compatible host runtime until SceneSmith and bpy move to Python 3.13+.
+    "drake==1.40.0; sys_platform == 'darwin'",
+    "drake>=1.47.0; sys_platform == 'linux' and platform_machine == 'x86_64'",
     "einops>=0.8.1",
     "flask>=3.1.2",
     "google-genai>=1.0.0",
@@ -19,14 +22,17 @@ dependencies = [
     "isort==5.12.0",
     "lxml>=6.0.0",
     "manifold3d>=3.0.0",
-    "mathutils>=3.3.0",
+    # The Blender wheel already bundles mathutils on macOS. The standalone
+    # package tries to compile against a system Eigen install there.
+    "mathutils>=3.3.0; sys_platform != 'darwin'",
     "ninja>=1.13.0",
     "numpy>=1.26,<2.0",
     "objathor>=0.0.8",
     "omegaconf>=2.3.0",
     "open-clip-torch>=2.20.0",
-    "openai>=2.8.0",
-    "openai-agents>=0.6.5,<0.7",
+    # openai-agents 0.6.x constructs usage types removed in OpenAI 2.12+.
+    "openai>=2.8.0,<2.12",
+    "openai-agents[litellm]>=0.6.5,<0.7",
     "opencv-python>=4.10.0.84,<4.12",
     "pybind11>=3.0.1",
     "pygltflib>=1.16.5",
@@ -38,14 +44,24 @@ dependencies = [
     "setuptools<71.0.0",
     # Provides constrained_delaunay_triangles for structural polygon compilation.
     "shapely>=2.1.2",
-    "torch>=2.5.0,<2.6.0",
-    "torchvision>=0.20.0,<0.21.0",
     "tqdm>=4.67.1",
     "transformers>=4.55.4",
     "trimesh>=4.7.4",
     "vhacdx>=0.0.10",
     "wandb>=0.21.1",
     "xatlas>=0.0.11",
+]
+
+[project.optional-dependencies]
+# Select exactly one explicit hardware profile. Portable uses CPU wheels on
+# Linux and native PyPI wheels (MPS/CPU) on macOS; CUDA uses cu124 wheels.
+portable = [
+    "torch>=2.5.0,<2.6.0",
+    "torchvision>=0.20.0,<0.21.0",
+]
+cuda = [
+    "torch>=2.5.0,<2.6.0",
+    "torchvision>=0.20.0,<0.21.0",
 ]
 
 [dependency-groups]
@@ -86,4 +102,30 @@ url = "https://download.blender.org/pypi/"
 explicit = true 
 
 [tool.uv.sources]
-bpy = { index = "blender" }                                                                                                                                                                                               
+bpy = { index = "blender" }
+torch = [
+    { index = "pytorch-cpu", extra = "portable", marker = "sys_platform == 'linux'" },
+    { index = "pytorch-cu124", extra = "cuda", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
+]
+torchvision = [
+    { index = "pytorch-cpu", extra = "portable", marker = "sys_platform == 'linux'" },
+    { index = "pytorch-cu124", extra = "cuda", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
+]
+
+[tool.uv]
+conflicts = [
+    [
+        { extra = "portable" },
+        { extra = "cuda" },
+    ],
+]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[[tool.uv.index]]
+name = "pytorch-cu124"
+url = "https://download.pytorch.org/whl/cu124"
+explicit = true

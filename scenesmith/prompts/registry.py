@@ -77,6 +77,8 @@ class FloorPlanAgentPrompts(PromptEnum):
     DESIGNER_AGENT = "designer_agent"
     DESIGNER_INITIAL_INSTRUCTION = "designer_initial_instruction"
     DESIGNER_CRITIQUE_INSTRUCTION = "designer_critique_instruction"
+    DESIGNER_ONE_SHOT_AGENT = "designer_one_shot_agent"
+    DESIGNER_ONE_SHOT_INSTRUCTION = "designer_one_shot_instruction"
 
     # Critic prompts.
     CRITIC_AGENT = "critic_agent"

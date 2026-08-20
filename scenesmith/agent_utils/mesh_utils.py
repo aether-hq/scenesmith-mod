@@ -1,4 +1,5 @@
 import logging
+import math
 
 from pathlib import Path
 
@@ -371,23 +372,22 @@ def scale_mesh_uniformly_to_dimensions(
     output_path: Path | None = None,
     min_dimension_meters: float = 0.001,
     relative_threshold: float = 0.01,
+    allow_wall_plane_quarter_turn: bool = False,
 ) -> tuple[Path, float]:
-    """Scale a 3D mesh uniformly to match desired dimensions.
+    """Scale a 3D mesh uniformly to fit within desired dimensions.
 
-    Uses the median scale factor across all axes to preserve the mesh's
-    original proportions while scaling to match the target dimensions. This
-    is appropriate for image-to-3D generated meshes where the relative
-    proportions are likely correct but the absolute scale is unknown.
+    Uses the smallest per-axis scale factor so the scaled mesh cannot exceed
+    its requested containing box.  Canonical wall assets use glTF's Y-up frame,
+    where X/Y are the wall plane and Z is depth; they may optionally receive a
+    90-degree in-plane turn to honor portrait versus landscape intent.
 
     Validates mesh dimensions to reject degenerate geometries that would
     produce incorrect results when uniformly scaled.
 
     Args:
         mesh_path: Path to input mesh file (GLB, OBJ, STL, etc.). Must exist.
-        desired_dimensions: Target (width, depth, height) in meters to fit
-            within. Must be positive values. Width corresponds to X-axis, depth
-            to Y-axis, and height to Z-axis in the mesh's local coordinate
-            system.
+        desired_dimensions: Target X/Y/Z containing dimensions in the mesh's
+            local coordinate system. Must be positive values.
         output_path: Optional output path for the scaled mesh. If None, the
             input mesh will be overwritten. The format is inferred from the file
             extension.
@@ -396,6 +396,8 @@ def scale_mesh_uniformly_to_dimensions(
         relative_threshold: Minimum ratio between smallest and largest dimension.
             Meshes where min_dim/max_dim < this threshold are rejected. Default:
             0.01 (1%, meaning aspect ratios worse than 100:1 are rejected).
+        allow_wall_plane_quarter_turn: If true, rotate 90 degrees around local Z
+            when that more closely matches the requested X/Y wall-plane aspect.
 
     Returns:
         Tuple of (path to scaled mesh file, uniform scale factor applied).
@@ -425,6 +427,26 @@ def scale_mesh_uniformly_to_dimensions(
     # Get current bounding box.
     bounds = mesh.bounds  # [[xmin, ymin, zmin], [xmax, ymax, zmax]]
     current_dimensions = bounds[1] - bounds[0]  # [width, depth, height]
+
+    if allow_wall_plane_quarter_turn:
+        desired_array = np.asarray(desired_dimensions, dtype=float)
+
+        def _aspect_error(dimensions: np.ndarray) -> float:
+            current_ratio = max(float(dimensions[0] / dimensions[1]), 1e-9)
+            target_ratio = max(float(desired_array[0] / desired_array[1]), 1e-9)
+            return abs(math.log(current_ratio) - math.log(target_ratio))
+
+        turned_dimensions = current_dimensions[[1, 0, 2]]
+        if _aspect_error(turned_dimensions) + 1e-6 < _aspect_error(current_dimensions):
+            mesh.apply_transform(
+                trimesh.transformations.rotation_matrix(math.pi / 2.0, [0, 0, 1])
+            )
+            bounds = mesh.bounds
+            current_dimensions = bounds[1] - bounds[0]
+            console_logger.info(
+                "Rotated wall asset 90 degrees in its plane to match requested "
+                "portrait/landscape orientation"
+            )
 
     # Check for degenerate dimensions (completely flat meshes).
     if np.any(current_dimensions < min_dimension_meters):
@@ -460,11 +482,11 @@ def scale_mesh_uniformly_to_dimensions(
             f"where the model produced near-2D geometry. Please regenerate the asset."
         )
 
-    # Calculate uniform scale factor (median to match target dimensions).
-    # Use median instead of mean for robustness to near-degenerate dimensions.
+    # The desired dimensions are a containing box. Using median/mean can make one
+    # or two axes escape the box (for example a 1.8m shelf becoming 4.3m tall).
     desired_array = np.array(desired_dimensions)
     scale_factors = desired_array / current_dimensions
-    uniform_scale = np.median(scale_factors)
+    uniform_scale = np.min(scale_factors)
 
     # Calculate actual resulting dimensions.
     actual_dimensions = current_dimensions * uniform_scale

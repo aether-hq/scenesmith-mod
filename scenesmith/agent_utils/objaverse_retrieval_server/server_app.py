@@ -14,7 +14,9 @@ from threading import Thread
 import flask
 import numpy as np
 
+from scenesmith.agent_utils.asset_semantics import candidate_metadata_text
 from scenesmith.agent_utils.objaverse_retrieval.retrieval import ObjaverseRetriever
+from scenesmith.agent_utils.retrieval_policy import stream_local_results
 from scenesmith.agent_utils.scheduler import QueuedRequest, StrictRoundRobinScheduler
 
 from .dataclasses import (
@@ -134,6 +136,7 @@ class ObjaverseRetrievalApp(flask.Flask):
             self._retriever = ObjaverseRetriever(
                 config=config, clip_device=self._clip_device
             )
+            self._retriever.warmup()
         return self._retriever
 
     def start_processing(self) -> None:
@@ -144,7 +147,7 @@ class ObjaverseRetrievalApp(flask.Flask):
 
         console_logger.info("Starting Objaverse retrieval processing thread")
         self._processing_active = True
-        self._processing_thread = Thread(target=self._process_queue, daemon=False)
+        self._processing_thread = Thread(target=self._process_queue, daemon=True)
         self._processing_thread.start()
 
     def stop_processing(self) -> None:
@@ -206,6 +209,11 @@ class ObjaverseRetrievalApp(flask.Flask):
             self._completed_requests += 1
             processing_time = time.time() - start_time
             self._request_times.append(processing_time)
+            console_logger.info(
+                "Objaverse local retrieval '%s' completed in %.3fs",
+                queued_request.request.object_description,
+                processing_time,
+            )
             if len(self._request_times) > 100:
                 self._request_times.pop(0)
 
@@ -269,19 +277,43 @@ class ObjaverseRetrievalApp(flask.Flask):
 
         results: list[ObjaverseRetrievalResult] = []
         for candidate in candidates:
-            mesh_filename = f"{candidate.uid}.glb"
-            mesh_path = output_dir / mesh_filename
-            candidate.mesh.export(str(mesh_path))
-
-            console_logger.debug(f"Exported candidate mesh to {mesh_path}")
+            if candidate.mesh is None:
+                mesh_path = Path(candidate.metadata.mesh_path or "")
+                if not mesh_path.is_absolute():
+                    mesh_path = retriever.config.data_path / mesh_path
+                size = tuple(candidate.metadata.bounding_box)
+            else:
+                mesh_filename = f"{candidate.uid}.glb"
+                mesh_path = output_dir / mesh_filename
+                candidate.mesh.export(str(mesh_path))
+                size = tuple(candidate.mesh.extents.tolist())
+                console_logger.debug(f"Exported candidate mesh to {mesh_path}")
 
             result = ObjaverseRetrievalResult(
                 mesh_path=str(mesh_path),
                 objaverse_uid=candidate.uid,
-                object_name=request.object_description,
+                object_name=candidate.metadata.name,
                 similarity_score=float(candidate.clip_score),
-                size=tuple(candidate.mesh.extents.tolist()),
-                category=category,
+                size=size,
+                category=candidate.metadata.category or category,
+                asset_source=candidate.metadata.asset_source,
+                license=candidate.metadata.license,
+                source_id=candidate.metadata.source_id,
+                ontology_path=candidate.metadata.ontology_path,
+                placement_classes=candidate.metadata.placement_classes,
+                canonical_up=candidate.metadata.canonical_up,
+                canonical_front=candidate.metadata.canonical_front,
+                support_zones=candidate.metadata.support_zones,
+                clearance_zones=candidate.metadata.clearance_zones,
+                quality_score=candidate.metadata.quality_score,
+                thumbnail=candidate.metadata.thumbnail,
+                semantic_metadata=candidate_metadata_text(
+                    name=candidate.metadata.name,
+                    description=candidate.metadata.description or "",
+                    aliases=candidate.metadata.aliases,
+                    tags=candidate.metadata.tags,
+                    ontology_path=candidate.metadata.ontology_path or "",
+                ),
             )
             results.append(result)
 
@@ -377,12 +409,10 @@ class ObjaverseRetrievalApp(flask.Flask):
             batch_id = first_scene_id if first_scene_id else str(uuid.uuid4())
 
             client_result_queue = Queue()
-            results_received = 0
             batch_size = len(batch_requests)
 
             def result_callback(index: int, result: tuple[str, dict]) -> None:
                 """Route results to client queue."""
-                nonlocal results_received
                 client_result_queue.put((index, result))
 
             # Add to scheduler.
@@ -395,26 +425,16 @@ class ObjaverseRetrievalApp(flask.Flask):
 
             self._total_requests += batch_size
 
-            def generate():
-                """Stream NDJSON responses."""
-                nonlocal results_received
-
-                while results_received < batch_size:
-                    index, (status, result_data) = client_result_queue.get()
-
-                    if status == "success":
-                        streamed_result = StreamedResult(
-                            index=index, status="success", data=result_data
-                        )
-                    else:
-                        streamed_result = StreamedResult(
-                            index=index, status="error", error=result_data
-                        )
-
-                    yield streamed_result.to_json() + "\n"
-                    results_received += 1
-
-            return flask.Response(generate(), mimetype="application/x-ndjson")
+            return flask.Response(
+                stream_local_results(
+                    result_queue=client_result_queue,
+                    batch_size=batch_size,
+                    result_type=StreamedResult,
+                    catalog_name="Objaverse",
+                    logger=console_logger,
+                ),
+                mimetype="application/x-ndjson",
+            )
 
         except Exception as e:
             console_logger.error(f"Batch request handling failed: {e}")

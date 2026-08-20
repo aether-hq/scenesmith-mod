@@ -2,8 +2,10 @@
 Main file for the project. This will create and run new experiments.
 """
 
+import faulthandler
 import logging
 import os
+import signal
 import time
 
 from datetime import timedelta
@@ -26,6 +28,54 @@ from scenesmith.utils.print_utils import cyan
 
 console_logger = logging.getLogger(__name__)
 
+if hasattr(signal, "SIGUSR1"):
+    # The UI sends SIGUSR1 immediately before terminating an inactive engine.
+    # Dump every Python thread to stderr so the next hang has evidence rather
+    # than another opaque timeout message.
+    faulthandler.register(signal.SIGUSR1, all_threads=True)
+
+
+def configure_llm_provider(cfg: DictConfig) -> None:
+    """Configure and capability-check SceneSmith's provider-neutral LLM harness."""
+    from scenesmith.agent_utils.llm_harness import (
+        LLMHarnessConfig,
+        install_agents_runtime,
+    )
+
+    harness = LLMHarnessConfig.from_env(default_model="gpt-5")
+    provider = harness.provider
+    model, capabilities = install_agents_runtime(harness)
+
+    with open_dict(cfg):
+        for agent_name in (
+            "floor_plan_agent",
+            "furniture_agent",
+            "wall_agent",
+            "ceiling_agent",
+            "manipuland_agent",
+        ):
+            agent_cfg = cfg.get(agent_name)
+            if agent_cfg is None:
+                continue
+            agent_cfg.openai.model = model
+            if agent_cfg.get("session_memory"):
+                agent_cfg.session_memory.summarization_model = model
+            # Claude is a reasoning/vision provider, not an image generator.
+            # Keep federated scenes retrieval-only unless a separate image
+            # provider is configured for generated geometry.
+            federated = agent_cfg.get("asset_manager", {}).get("federated")
+            if federated and not os.environ.get("SCENESMITH_ENABLE_GENERATED_FALLBACK"):
+                federated.source_order = [
+                    source for source in federated.source_order if source != "generated"
+                ]
+
+    console_logger.info(
+        "Configured LLM harness provider=%s model=%s capabilities=%s",
+        provider,
+        model,
+        capabilities,
+    )
+
 
 def run_local(cfg: DictConfig):
     # Delay some imports in case they are not needed in non-local envs for submission.
@@ -36,6 +86,7 @@ def run_local(cfg: DictConfig):
     # Resolve the config.
     register_resolvers()
     OmegaConf.resolve(cfg)
+    configure_llm_provider(cfg)
 
     # Get yaml names.
     hydra_cfg = hydra.core.hydra_config.HydraConfig.get()

@@ -682,6 +682,9 @@ class RoomSpec:
     ceiling_profile: ElevationProfile | None = None
     """Optional ceiling profile; None uses the layout/level nominal height."""
 
+    has_overhead_cover: bool = True
+    """Whether the space has a roof/ceiling outside authored ceiling holes."""
+
     def __post_init__(self) -> None:
         self.room_id = require_safe_identifier(self.room_id, "room_id")
         self.position = _finite_xy_position(self.position, entity_id=self.room_id)
@@ -735,6 +738,7 @@ class RoomSpec:
             "ceiling_profile": (
                 self.ceiling_profile.to_dict() if self.ceiling_profile else None
             ),
+            "has_overhead_cover": self.has_overhead_cover,
         }
 
     @classmethod
@@ -779,6 +783,7 @@ class RoomSpec:
                 if data.get("ceiling_profile")
                 else None
             ),
+            has_overhead_cover=bool(data.get("has_overhead_cover", True)),
         )
 
 
@@ -873,6 +878,9 @@ class RoomGeometry:
     wall_height: float = 2.5
     """Wall height in meters (needed for wall height violation check)."""
 
+    has_overhead_cover: bool = True
+    """Whether legacy wall height represents a roof/ceiling constraint."""
+
     wall_thickness: float = 0.05
     """Wall thickness in meters (needed for wall surface offset from room boundary)."""
 
@@ -947,6 +955,7 @@ class RoomGeometry:
         floor_plan_dict["ceiling_profile"] = (
             self.ceiling_profile.to_dict() if self.ceiling_profile is not None else None
         )
+        floor_plan_dict["has_overhead_cover"] = self.has_overhead_cover
         floor_plan_dict["structural_surfaces"] = [
             surface.to_dict() for surface in self.structural_surfaces
         ]
@@ -1013,6 +1022,7 @@ class RoomGeometry:
             "width": self.width,
             "length": self.length,
             "wall_height": self.wall_height,
+            "has_overhead_cover": self.has_overhead_cover,
             "wall_thickness": self.wall_thickness,
             "openings": [o.to_dict() for o in self.openings],
             "floor": floor_data,
@@ -1106,6 +1116,7 @@ class RoomGeometry:
             width=data["width"],
             length=data["length"],
             wall_height=data.get("wall_height", 2.5),
+            has_overhead_cover=bool(data.get("has_overhead_cover", True)),
             wall_thickness=data.get("wall_thickness", 0.05),
             openings=[
                 ClearanceOpeningData.from_dict(o) for o in data.get("openings", [])
@@ -1816,6 +1827,7 @@ class HouseLayout:
                     and heightfield.replaces_floor
                     for heightfield in self.heightfields
                 ),
+                include_ceiling=room_spec.has_overhead_cover,
                 floor_profile=room_spec.floor_profile,
                 ceiling_profile=room_spec.ceiling_profile,
                 wall_height=self.wall_height,
@@ -1840,6 +1852,7 @@ class HouseLayout:
                 width=footprint_depth,
                 length=footprint_width,
                 wall_height=self.wall_height,
+                has_overhead_cover=room_spec.has_overhead_cover,
                 footprint=local_footprint,
                 floor_footprint=local_floor_footprint,
                 ceiling_footprint=local_ceiling_footprint,
@@ -3101,8 +3114,11 @@ class HouseScene:
     def _export_blend(self, output_dir: Path, cfg: dict | DictConfig) -> None:
         """Export Blender file for all rooms to combined directory.
 
-        Uses the combined directive for both single and multi-room cases.
-        Single room is just a house with one room at identity transform.
+        Uses the welded visualization directive for both single and multi-room
+        cases.  The free-body directive remains the simulation artifact, but
+        Drake's Blender renderer does not apply ``default_free_body_pose`` to
+        imported visual geometry.  Rendering that directive collapses every
+        movable asset to its model origin.
 
         Args:
             output_dir: Directory to save house.blend.
@@ -3110,9 +3126,11 @@ class HouseScene:
         """
         from scenesmith.agent_utils.rendering import save_directive_as_blend
 
-        directive_path = output_dir / "house.dmd.yaml"
+        directive_path = output_dir / "house_furniture_welded.dmd.yaml"
         if not directive_path.exists():
-            console_logger.error("Combined directive not found, skipping house.blend")
+            console_logger.error(
+                "Welded visualization directive not found, skipping house.blend"
+            )
             return
 
         blend_output_path = output_dir / "house.blend"

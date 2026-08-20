@@ -48,6 +48,7 @@ from scenesmith.agent_utils.blender.render_dataclasses import (
 from scenesmith.agent_utils.blender.render_settings import (
     apply_image_type_settings,
     apply_render_settings,
+    setup_cycles_gpu_rendering,
     setup_metric_world,
 )
 from scenesmith.agent_utils.blender.scene_setup_mixin import SceneSetupMixin
@@ -545,6 +546,7 @@ class BlenderRenderer(
             # Set up rendering with CYCLES (offline process, higher quality).
             scene = bpy.context.scene
             scene.render.engine = "CYCLES"
+            setup_cycles_gpu_rendering()
             scene.cycles.samples = CYCLES_CLIP_SAMPLES
             scene.render.resolution_x = width
             scene.render.resolution_y = height

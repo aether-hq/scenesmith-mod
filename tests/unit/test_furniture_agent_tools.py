@@ -639,6 +639,61 @@ class TestFurnitureTools(BaseAgentToolsTest):
         # Error message should show the exact requested coordinates, not noisy ones.
         self.assertIn("(5.010,", result["message"])
 
+    def _envelope_object(
+        self,
+        *,
+        bbox_min=(-0.5, -0.5, 0.0),
+        bbox_max=(0.5, 0.5, 1.0),
+        position=(0.0, 0.0, 0.0),
+    ):
+        return SceneObject(
+            object_id=UniqueID("envelope_object"),
+            object_type=ObjectType.FURNITURE,
+            name="Envelope object",
+            description="Furniture used to test room containment",
+            transform=RigidTransform(p=position),
+            bbox_min=np.asarray(bbox_min, dtype=float),
+            bbox_max=np.asarray(bbox_max, dtype=float),
+        )
+
+    def _legacy_envelope_room(self, *, covered=True):
+        room = Mock()
+        room.length = 6.0
+        room.width = 6.0
+        room.wall_height = 3.2
+        room.wall_thickness = 0.05
+        room.has_overhead_cover = covered
+        self.mock_scene.room_geometry = room
+        self.furniture_tools._structural_surface_index = False
+
+    def test_indoor_furniture_is_rejected_when_it_exceeds_ceiling(self):
+        self._legacy_envelope_room(covered=True)
+        valid, message = self.furniture_tools._validate_spatial_envelope(
+            self._envelope_object(bbox_max=(0.5, 0.5, 4.33))
+        )
+
+        self.assertFalse(valid)
+        self.assertIn("overhead", message)
+        self.assertIn("4.330m", message)
+        self.assertIn("3.200m", message)
+
+    def test_open_air_space_has_no_vertical_furniture_limit(self):
+        self._legacy_envelope_room(covered=False)
+        valid, message = self.furniture_tools._validate_spatial_envelope(
+            self._envelope_object(bbox_max=(0.5, 0.5, 4.33))
+        )
+
+        self.assertTrue(valid, message)
+
+    def test_full_furniture_footprint_must_fit_inside_room(self):
+        self._legacy_envelope_room(covered=False)
+        valid, message = self.furniture_tools._validate_spatial_envelope(
+            self._envelope_object(position=(2.8, 0.0, 0.0))
+        )
+
+        self.assertFalse(valid)
+        self.assertIn("footprint", message)
+
 
 class TestFacingCheck(BaseAgentToolsTest):
     """Test facing check tool for spatial relationships between objects."""

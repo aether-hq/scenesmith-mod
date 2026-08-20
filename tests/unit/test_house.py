@@ -322,6 +322,7 @@ class TestRoundTrip(unittest.TestCase):
                 holes=(((2, 2), (2, 3), (4, 3), (4, 2)),),
             ),
             ceiling_footprint=boundary,
+            has_overhead_cover=False,
         )
         restored = RoomSpec.from_dict(original.to_dict())
         assert restored.room_id == original.room_id
@@ -333,6 +334,7 @@ class TestRoundTrip(unittest.TestCase):
         assert restored.connections == original.connections
         assert restored.floor_footprint == original.floor_footprint
         assert restored.ceiling_footprint == original.ceiling_footprint
+        assert restored.has_overhead_cover is False
 
     def test_house_layout_round_trip(self) -> None:
         """HouseLayout with nested objects survives to_dict/from_dict."""

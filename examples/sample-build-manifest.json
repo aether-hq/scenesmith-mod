@@ -1,0 +1,225 @@
+{
+  "inventory_strategy": {
+    "deterministic_demos": [
+      "examples/prison_escape/generate_scene.py"
+    ],
+    "five_agent_prompts": "configurations/experiment/base_experiment.yaml",
+    "gallery_controls": "examples/semantic_gallery/sources/*.json",
+    "gallery_trials": "docs/geometry-extension/llm-trials/results/heldout_*.json"
+  },
+  "sample_count": 8,
+  "samples": [
+    {
+      "build": {
+        "compiler_version": "semantic-environment-v3+semantic-gallery-v3",
+        "provider": "semantic-compiler/cpu",
+        "rebuilt_from_recipe": true,
+        "source_path": "docs/geometry-extension/llm-trials/results/heldout_branching_network_v1.json",
+        "source_sha256": "b29640574a5a6b8eadf3968b71f2c58201c2548f74c1a5cdd703f0a9439cee16",
+        "status": "compiled"
+      },
+      "diagnostics": [],
+      "id": "heldout_branching_network_v1",
+      "kind": "semantic_gallery_scene",
+      "outputs": [
+        "examples/semantic_gallery/generated/scenes/heldout_branching_network_v1/shell/e95e326c100d9b14636c7f61cdf7a89a8080c587e1272d66e14cd17c36763622/heldout_branching_network_v1_shell.obj"
+      ],
+      "render": {
+        "scene_id": "heldout_branching_network_v1",
+        "status": "pending",
+        "target": "semantic_gallery"
+      },
+      "support_status": "runnable",
+      "title": "Branching Network"
+    },
+    {
+      "build": {
+        "compiler_version": "semantic-environment-v3+semantic-gallery-v3",
+        "provider": "semantic-compiler/cpu",
+        "rebuilt_from_recipe": true,
+        "source_path": "docs/geometry-extension/llm-trials/results/heldout_dragon_scale_cavern_v1.json",
+        "source_sha256": "0146fbb64af350736dcc00d31c8fccddf06c48a2ae69767fc9387ee350b650d7",
+        "status": "compiled"
+      },
+      "diagnostics": [
+        "[disjoint_chamber_junction] junction_approach_cavern_entry did not overlap its referenced chamber",
+        "[declared_opening_missing] opening_cavern_sky_skylight did not create a physical aperture"
+      ],
+      "id": "heldout_dragon_scale_cavern_v1",
+      "kind": "semantic_gallery_scene",
+      "outputs": [
+        "examples/semantic_gallery/generated/scenes/heldout_dragon_scale_cavern_v1/shell/35b661b37bb5b83a0441e20827f2359d320886b591b1972b5c38a96f2f30bda3/heldout_dragon_scale_cavern_v1_shell.obj",
+        "examples/semantic_gallery/generated/scenes/heldout_dragon_scale_cavern_v1/details/detail_cavern_stalactites/2631c2cab63a0d577d56876b662eb2a78d621e5f3001b611839a848b02be8a2c/detail_cavern_stalactites.obj",
+        "examples/semantic_gallery/generated/scenes/heldout_dragon_scale_cavern_v1/details/hero_dragon_scale_spire/9f10bce15d4bc75107113d4784dcd805320eba452c509bfc79382d9c206983b1/hero_dragon_scale_spire.obj"
+      ],
+      "render": {
+        "scene_id": "heldout_dragon_scale_cavern_v1",
+        "status": "pending",
+        "target": "semantic_gallery"
+      },
+      "support_status": "runnable",
+      "title": "Dragon Scale Cavern"
+    },
+    {
+      "build": {
+        "compiler_version": "not-recompiled",
+        "provider": "pinned-reference/no-runtime",
+        "rebuilt_from_recipe": false,
+        "source_path": "examples/semantic_gallery/sources/original_scenesmith_bar.json",
+        "source_sha256": "0e73ceb567559574f8ba9a95eae33719a25f2f0584e10fff58b7d788d28e418f",
+        "status": "reference_only"
+      },
+      "diagnostics": [],
+      "id": "original_scenesmith_bar",
+      "kind": "semantic_gallery_scene",
+      "outputs": [
+        "examples/semantic_gallery/generated/scenes/original_scenesmith_bar/full_fidelity_scene.glb"
+      ],
+      "render": {
+        "scene_id": "original_scenesmith_bar",
+        "status": "pending",
+        "target": "semantic_gallery"
+      },
+      "support_status": "reference_only",
+      "title": "Original SceneSmith Bar \u2014 Full Render"
+    },
+    {
+      "build": {
+        "compiler_version": "structural-compiler-v1+semantic-gallery-v3",
+        "provider": "structural-compiler/cpu",
+        "rebuilt_from_recipe": true,
+        "source_path": "examples/semantic_gallery/sources/original_aether_bar.json",
+        "source_sha256": "7539ca271a9e2ff785c4ec2d55b4452d78cdd8488637faf224d4caaf8e8c58d1",
+        "status": "compiled"
+      },
+      "diagnostics": [],
+      "id": "original_aether_bar",
+      "kind": "semantic_gallery_scene",
+      "outputs": [
+        "examples/semantic_gallery/generated/scenes/original_aether_bar/shell/2458b170d23593ab24489a5f9b4d39baf1135763e063b3edb6a9c9ff32ed1672/original_aether_bar_shell.obj",
+        "examples/semantic_gallery/generated/scenes/original_aether_bar/details/dressing/853d420dd3152a0131e2bc4c277a676d0b672ba0ae263d359e955d1db7431f35/original_aether_bar_dressing.obj",
+        "examples/semantic_gallery/generated/scenes/original_aether_bar/details/fixtures/f9ad01a9b0c5b452b33159f1ca65c083b1ef4fac3e9ad4ffbb53eb1a03fe690c/original_aether_bar_fixtures.obj",
+        "examples/semantic_gallery/generated/scenes/original_aether_bar/details/furniture/741680622ec775c22a0cfdcf8d6b9ec925551276ae4658631f93c9f5ebf1e39d/original_aether_bar_furniture.obj",
+        "examples/semantic_gallery/generated/scenes/original_aether_bar/details/practical_light/122afdae5f07d3b85b7d49886186dd463192d37161f114c52fcf5042033b28ab/original_aether_bar_practical_light.obj"
+      ],
+      "render": {
+        "scene_id": "original_aether_bar",
+        "status": "pending",
+        "target": "semantic_gallery"
+      },
+      "support_status": "runnable",
+      "title": "Aether Bar \u2014 Semantic Proxy Diagnostic"
+    },
+    {
+      "build": {
+        "compiler_version": "semantic-environment-v3",
+        "provider": "semantic-compiler/cpu",
+        "rebuilt_from_recipe": true,
+        "source_path": "examples/prison_escape/generate_scene.py",
+        "source_sha256": "05a29ea31b067f367eafc2362870d0d90eace9432154f3e393bfd0ecb0b90f1a",
+        "status": "compiled"
+      },
+      "diagnostics": [],
+      "id": "prison_escape_long_way_out",
+      "kind": "deterministic_architecture_demo",
+      "outputs": [
+        "examples/prison_escape/generated/manifest.json",
+        "examples/prison_escape/generated/preview.svg",
+        "examples/prison_escape/generated/structures/rooms/prison_block/0bdfebec8ea2a75949ee73c30ffd40309ac466bf011b09a4a2e392034338d06f/room_geometry_prison_block.obj",
+        "examples/prison_escape/generated/structures/rooms/prison_block/0bdfebec8ea2a75949ee73c30ffd40309ac466bf011b09a4a2e392034338d06f/room_geometry_prison_block.sdf",
+        "examples/prison_escape/generated/structures/meshes/escape_tunnel_shell/62cba137decc0a8128566055e2793309d40456bc2a03fb2ec08cd5e15362a722/escape_tunnel_shell.obj",
+        "examples/prison_escape/generated/structures/meshes/escape_tunnel_shell/62cba137decc0a8128566055e2793309d40456bc2a03fb2ec08cd5e15362a722/escape_tunnel_shell.sdf",
+        "examples/prison_escape/generated/details/lights/ceiling_lights.obj",
+        "examples/prison_escape/generated/details/prison/prison_details.obj"
+      ],
+      "render": {
+        "scene_id": "prison_escape_long_way_out",
+        "status": "pending",
+        "target": "prison_escape"
+      },
+      "support_status": "runnable",
+      "title": "The Long Way Out"
+    },
+    {
+      "build": {
+        "compiler_version": "SceneSmith five-agent pipeline",
+        "provider": "configured-at-runtime",
+        "rebuilt_from_recipe": false,
+        "source_path": "configurations/experiment/base_experiment.yaml",
+        "source_sha256": "21d3fd14c6738f28ab78bb0a12b90d0cc1a51debd03b5da9285b1de884f4ffb7",
+        "status": "not_run"
+      },
+      "diagnostics": [
+        "OPENAI_API_KEY and GOOGLE_API_KEY for the configured agent/image providers",
+        "SAM3/SAM3D provider checkpoints or a compatible external geometry service",
+        "downloaded HSSD, Objaverse, articulated-object, and material indexes"
+      ],
+      "id": "default_five_agent_prompt_001",
+      "kind": "five_agent_text_to_scene_prompt",
+      "outputs": [],
+      "prompt": "A bedroom with a bed, two nightstands, and a wardrobe in the corner of the room.",
+      "render": {
+        "status": "not_run",
+        "target": "five_agent_pipeline"
+      },
+      "support_status": "model_gated",
+      "title": "Default five-agent prompt 1"
+    },
+    {
+      "build": {
+        "compiler_version": "SceneSmith five-agent pipeline",
+        "provider": "configured-at-runtime",
+        "rebuilt_from_recipe": false,
+        "source_path": "configurations/experiment/base_experiment.yaml",
+        "source_sha256": "21d3fd14c6738f28ab78bb0a12b90d0cc1a51debd03b5da9285b1de884f4ffb7",
+        "status": "not_run"
+      },
+      "diagnostics": [
+        "OPENAI_API_KEY and GOOGLE_API_KEY for the configured agent/image providers",
+        "SAM3/SAM3D provider checkpoints or a compatible external geometry service",
+        "downloaded HSSD, Objaverse, articulated-object, and material indexes"
+      ],
+      "id": "default_five_agent_prompt_002",
+      "kind": "five_agent_text_to_scene_prompt",
+      "outputs": [],
+      "prompt": "A living room with a two-seater sofa against the wall, a square rug in the middle in front of the sofa, and two large plants on the floor near the sofa.",
+      "render": {
+        "status": "not_run",
+        "target": "five_agent_pipeline"
+      },
+      "support_status": "model_gated",
+      "title": "Default five-agent prompt 2"
+    },
+    {
+      "build": {
+        "compiler_version": "SceneSmith five-agent pipeline",
+        "provider": "configured-at-runtime",
+        "rebuilt_from_recipe": false,
+        "source_path": "configurations/experiment/base_experiment.yaml",
+        "source_sha256": "21d3fd14c6738f28ab78bb0a12b90d0cc1a51debd03b5da9285b1de884f4ffb7",
+        "status": "not_run"
+      },
+      "diagnostics": [
+        "OPENAI_API_KEY and GOOGLE_API_KEY for the configured agent/image providers",
+        "SAM3/SAM3D provider checkpoints or a compatible external geometry service",
+        "downloaded HSSD, Objaverse, articulated-object, and material indexes"
+      ],
+      "id": "default_five_agent_prompt_003",
+      "kind": "five_agent_text_to_scene_prompt",
+      "outputs": [],
+      "prompt": "A classroom with six student desks, each with a chair. A teacher's desk sits at the front near the chalkboard, which hangs on the wall.",
+      "render": {
+        "status": "not_run",
+        "target": "five_agent_pipeline"
+      },
+      "support_status": "model_gated",
+      "title": "Default five-agent prompt 3"
+    }
+  ],
+  "schema_version": 1,
+  "summary": {
+    "model_gated": 3,
+    "reference_only": 1,
+    "runnable": 4
+  }
+}

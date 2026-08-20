@@ -3,17 +3,15 @@
 This module contains the complete geometry generation server implementation,
 including server infrastructure and both Hunyuan3D and SAM3D backends.
 
-For multi-GPU support, the server automatically detects available GPUs and
-spawns one worker process per GPU. Use CUDA_VISIBLE_DEVICES to control which
-GPUs are used.
+Local execution is selected through an injectable geometry provider. CUDA uses
+one isolated worker per visible NVIDIA device; MLX uses one Metal worker.
 
 IMPORTANT: The server-related imports (GeometryGenerationServer, GeometryGenerationClient)
-do NOT initialize CUDA. CUDA-dependent imports (generate_geometry_from_image, pipeline
-managers) are accessed via lazy loading to avoid accidental CUDA initialization in the
-parent process when using multi-GPU mode.
+do not initialize an accelerator runtime. Model implementations are accessed via
+lazy loading so provider initialization remains isolated to workers.
 """
 
-# Safe imports that don't initialize CUDA.
+# Safe imports that do not initialize an accelerator runtime.
 from .client import GeometryGenerationClient
 from .dataclasses import (
     GeometryGenerationServerRequest,
@@ -21,14 +19,14 @@ from .dataclasses import (
 )
 from .server_manager import GeometryGenerationServer
 
-# Lazy imports for CUDA-dependent modules.
-# These should only be imported in GPU worker processes or when explicitly needed.
+# Lazy imports for model-specific modules.
+# These should only be imported in provider workers or when explicitly needed.
 
 
 def __getattr__(name: str):
-    """Lazy loading for CUDA-dependent modules.
+    """Lazy load model implementations.
 
-    This prevents CUDA initialization in the parent process when using multi-GPU mode.
+    This prevents accelerator initialization in the parent process.
     """
     if name == "generate_geometry_from_image":
         from .geometry_generation import generate_geometry_from_image
@@ -49,12 +47,12 @@ def __getattr__(name: str):
 
 
 __all__ = [
-    # Safe imports (no CUDA initialization).
+    # Safe imports (no accelerator initialization).
     "GeometryGenerationClient",
     "GeometryGenerationServer",
     "GeometryGenerationServerRequest",
     "GeometryGenerationServerResponse",
-    # Lazy imports (CUDA initialization on access).
+    # Lazy model implementation imports.
     "generate_geometry_from_image",
     "Hunyuan3DPipelineManager",
     "SAM3DPipelineManager",

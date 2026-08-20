@@ -1,14 +1,16 @@
 # Semantic Environments Development and Experiment Plan
 
-Status: implementation-ready roadmap
+Status: active roadmap
 
-Date: 2026-08-12
+Date: 2026-08-14
 
 Source of truth: [Semantic Environments Specification](SEMANTIC-ENVIRONMENTS-SPEC.md)
 
-Execution status: E0–E2 delivered; the initial E3 aperture/detail/hero slice is
-delivered with dependency-light tests. Stable chunking/LOD and the advanced E3
-policies listed below remain open.
+Execution status: E0–E2 compiler core and the initial E3
+aperture/detail/hero slice are delivered with dependency-light tests. The P0
+unified-pipeline integration phase below remains open; direct compilation and
+gallery rendering do not close it. Stable chunking/LOD and the advanced E3
+policies listed below also remain open.
 
 ## 1. Outcome
 
@@ -21,6 +23,11 @@ This is an extension of the delivered structural-geometry core. Existing
 `LevelSpec`, polygonal rooms, `PortalSpec`, `ConnectorSpec`, heightfields,
 `StructuralMeshSpec`, `StructuralSurface`, topology, surface queries, and SDF
 export remain the downstream contracts.
+
+The delivery target is the existing five-agent SceneSmith pipeline. There is no
+separate cave mode: the floor-plan agent authors the structural recipe, the
+compiler publishes its derived contract, and the furniture, wall-mounted,
+ceiling-mounted, and manipuland agents consume that contract in the same run.
 
 ## 2. Priorities
 
@@ -78,7 +85,7 @@ Deliverables:
 
 Exit gate:
 
-- GEN-001, GEN-002, GEN-008, and the legacy regression command pass;
+- GEN-001, GEN-002, GEN-008, and the existing-scene regression command pass;
 - the prison example is provably an example consumer, not an imported core
   implementation dependency.
 
@@ -165,6 +172,59 @@ Exit gate:
 - all required walk routes pass a swept capsule/clearance test;
 - a renamed and transformed network compiles without production-code changes;
 - the prison escape demo uses only public environment primitives.
+
+### Phase E2.5 — Unified five-agent pipeline integration
+
+Priority: P0. This phase is required before additional cave visual features can
+be called production-integrated.
+
+Goal: make semantic structure an automatic part of the normal SceneSmith run,
+not a direct compiler/gallery workflow.
+
+Deliverables:
+
+- have the stateful floor-plan runtime compile `semantic_environment` through
+  one `DerivedSceneContract` before downstream generation and export;
+- persist and restore that contract's authenticated products in normal
+  checkpoints and resumed runs;
+- expose house/region topology and structural surface queries to each per-space
+  `RoomScene` without duplicating or dropping house-frame geometry;
+- make furniture consume arbitrary support, clearance, and collision surfaces;
+- make wall-mounted agents address arbitrary attachment patches with stable
+  semantic IDs rather than requiring cardinal walls;
+- make ceiling-mounted agents consume arbitrary overhead patches and opening
+  masks;
+- make manipuland placement and physical feasibility use the same structural
+  support/collision contract;
+- assemble semantic structure, generated/retrieved assets, materials, and all
+  five stage checkpoints into the normal Blender, GLB, Drake, and scene-state
+  outputs; and
+- keep `main.py` and SetComposer as the common prompt entry points, with no
+  special cave-only build endpoint.
+
+Tests:
+
+- one cave prompt runs through all five stages and produces nonempty assets in
+  the final scene, not only a structural shell;
+- one mixed constructed/natural prompt produces a furnished prison connected
+  to a traversable escape tunnel;
+- the original full-fidelity bar builds through the same runtime and remains a
+  visual/output regression control;
+- checkpoint resume works at every stage with semantic structure present;
+- furniture, wall, ceiling, and manipuland placements each exercise a
+  non-axis-aligned semantic surface;
+- final Drake/Blender/GLB outputs contain matching structure and agent assets;
+  and
+- the end-to-end test does not import or invoke the semantic gallery generator.
+
+Exit gate:
+
+- the semantic environment fixture and conventional bar fixture both pass the
+  same five-stage runner and artifact assertions;
+- no downstream agent silently falls back to rectangular bounds when semantic
+  surfaces are available; and
+- SetComposer can submit either prompt without selecting a different engine
+  path.
 
 ### Phase E3 — Large caverns, openings, detail fields, and hero features
 
@@ -338,7 +398,7 @@ Tests:
 
 - AUTH-001–AUTH-012 with 10 trials each;
 - all held-out GEN cases;
-- legacy floor-plan prompt trials to detect regressions;
+- existing floor-plan prompt trials to detect regressions;
 - export cases EXP-001–EXP-006.
 
 Exit gate:
@@ -367,7 +427,7 @@ case-specific predicates below.
 | MODEL-005 | P1 | Layered material assembly | Layer order, thickness, collision, fracture, debris, and reinforcement policies survive normalization |
 | MODEL-006 | P1 | Ordered damage stack | List order is retained and participates in semantic content hash |
 | MODEL-007 | P1 | Terrain feature stack | Patch references, feature order, and opening bindings validate |
-| MODEL-008 | P0 | Existing v1/v2 structural scene | New empty environment collections do not alter legacy serialization/geometry behavior |
+| MODEL-008 | P0 | Existing v1/v2 structural scene | New empty environment collections do not alter existing serialization/geometry behavior |
 
 ### 4.2 Cave and passage cases
 

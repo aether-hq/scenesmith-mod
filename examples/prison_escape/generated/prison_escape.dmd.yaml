@@ -20,7 +20,7 @@ directives:
     child: room_geometry_prison_block::room_geometry_body_link
 - add_model:
     name: structure_semantic_environment
-    file: package://scene/structures/meshes/escape_tunnel_shell/aa70fc98bfa42462eca3e751643b4bf48aa6307d0dc22b982e1a16368d7aa080/escape_tunnel_shell.sdf
+    file: package://scene/structures/meshes/escape_tunnel_shell/62cba137decc0a8128566055e2793309d40456bc2a03fb2ec08cd5e15362a722/escape_tunnel_shell.sdf
 - add_weld:
     parent: house_frame
     child: structure_semantic_environment::structure_link

@@ -176,7 +176,23 @@ class CeilingTools:
                 rotation_deg=rotation_deg,
                 ceiling_height=self.ceiling_height,
             )
-        pose = surface_index.overhead_pose(x, y, yaw=math.radians(rotation_deg))
+        # The structural index also contains the underside of the room's floor,
+        # because that surface is a valid overhead boundary for geometry below
+        # the room.  A ceiling fixture placed *inside* this room must only query
+        # surfaces above its walkable floor; otherwise the lowest-overhead rule
+        # selects z=-floor_thickness and hangs the fixture below the building.
+        reference_z = 0.0
+        floor = self.scene.room_geometry.floor
+        if floor is not None:
+            floor_bounds = floor.compute_world_bounds()
+            if floor_bounds is not None:
+                reference_z = float(floor_bounds[1][2])
+        pose = surface_index.overhead_pose(
+            x,
+            y,
+            reference_z=reference_z,
+            yaw=math.radians(rotation_deg),
+        )
         if pose is None:
             return None
 

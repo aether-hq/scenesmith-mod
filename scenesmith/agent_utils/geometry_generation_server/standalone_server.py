@@ -9,9 +9,13 @@ variables or import side effects.
 
 import argparse
 import logging
+import os
 import signal
 import sys
 
+from pathlib import Path
+
+from .execution_provider import resolve_geometry_execution_provider
 from .server_manager import GeometryGenerationServer
 
 console_logger = logging.getLogger(__name__)
@@ -65,6 +69,12 @@ def parse_arguments() -> argparse.Namespace:
         help="Which 3D generation backend to use (default: %(default)s).",
     )
     parser.add_argument(
+        "--provider",
+        choices=["auto", "cuda", "mlx"],
+        default="auto",
+        help="Local execution provider (default: %(default)s).",
+    )
+    parser.add_argument(
         "--sam3-checkpoint",
         type=str,
         default="external/checkpoints/sam3.pt",
@@ -79,17 +89,49 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument(
         "--sam3d-mode",
         type=str,
-        choices=["foreground", "text"],
+        choices=["foreground", "object_description"],
         default="foreground",
         help="SAM3D segmentation mode (default: %(default)s). "
         "'foreground' auto-detects objects on uniform backgrounds, "
-        "'text' uses text prompts for segmentation.",
+        "'object_description' uses text prompts for segmentation.",
     )
     parser.add_argument(
         "--sam3d-threshold",
         type=float,
         default=0.5,
         help="SAM3D confidence threshold for mask generation (default: %(default)s).",
+    )
+    parser.add_argument(
+        "--mlx-repo-path",
+        default="external/Sam3D-Objects-MLX",
+        help="SAM3D MLX checkout path (default: %(default)s).",
+    )
+    parser.add_argument(
+        "--mlx-python-path",
+        default="external/Sam3D-Objects-MLX/.venv/bin/python",
+        help="SAM3D MLX interpreter path (default: %(default)s).",
+    )
+    parser.add_argument(
+        "--mlx-checkpoint-dir",
+        default="external/Sam3D-Objects-MLX/checkpoints/hf",
+        help="SAM3D MLX checkpoint directory (default: %(default)s).",
+    )
+    parser.add_argument("--mlx-steps", type=int, default=12)
+    parser.add_argument("--mlx-seed", type=int, default=42)
+    parser.add_argument("--mlx-simplify-ratio", type=float, default=0.0)
+    parser.add_argument("--mlx-mask-color-threshold", type=float, default=24.0)
+    parser.add_argument("--mlx-timeout-seconds", type=int, default=7200)
+    parser.add_argument("--mlx-mps-high-watermark-ratio", type=float, default=0.8)
+    parser.add_argument(
+        "--artifact-root",
+        type=Path,
+        default=None,
+        help="Enable content-addressed artifact transport at this directory.",
+    )
+    parser.add_argument(
+        "--auth-token-env",
+        default="SCENESMITH_GEOMETRY_TOKEN",
+        help="Environment variable containing the bearer token.",
     )
     parser.add_argument(
         "--verbose", "-v", action="store_true", help="Enable verbose logging."
@@ -138,12 +180,30 @@ def main() -> int:
         sam3d_config = None
         if args.backend == "sam3d":
             sam3d_config = {
+                "provider": args.provider,
                 "sam3_checkpoint": args.sam3_checkpoint,
                 "sam3d_checkpoint": args.sam3d_checkpoint,
                 "mode": args.sam3d_mode,
                 "text_prompt": None,
                 "threshold": args.sam3d_threshold,
+                "mlx_repo_path": args.mlx_repo_path,
+                "mlx_python_path": args.mlx_python_path,
+                "mlx_checkpoint_dir": args.mlx_checkpoint_dir,
+                "mlx_steps": args.mlx_steps,
+                "mlx_seed": args.mlx_seed,
+                "mlx_simplify_ratio": args.mlx_simplify_ratio,
+                "mlx_mask_color_threshold": args.mlx_mask_color_threshold,
+                "mlx_timeout_seconds": args.mlx_timeout_seconds,
+                "mlx_mps_high_watermark_ratio": args.mlx_mps_high_watermark_ratio,
             }
+
+        execution_provider = resolve_geometry_execution_provider(
+            backend=args.backend,
+            sam3d_config=sam3d_config,
+            requested=args.provider,
+            environ={},
+        )
+        auth_token = os.environ.get(args.auth_token_env)
 
         # Create and start the server.
         server = GeometryGenerationServer(
@@ -153,6 +213,9 @@ def main() -> int:
             use_mini=args.use_mini,
             backend=args.backend,
             sam3d_config=sam3d_config,
+            execution_provider=execution_provider,
+            artifact_root=args.artifact_root,
+            auth_token=auth_token,
         )
         server.start()
 

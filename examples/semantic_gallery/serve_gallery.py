@@ -22,7 +22,7 @@ from examples.semantic_gallery.generate_gallery import (
     DEFAULT_CONTROL_DIRECTORY,
     DEFAULT_OUTPUT_DIRECTORY,
     DEFAULT_TRIAL_DIRECTORY,
-    generate_gallery,
+    rebuild_gallery,
 )
 
 
@@ -90,7 +90,7 @@ def main() -> None:
     root = Path(__file__).resolve().parent
     if not args.no_generate:
         print("Discovering and compiling retained semantic scenes…")
-        generate_gallery(
+        rebuild_gallery(
             args.output_dir,
             trial_directory=args.trials_dir,
             control_directory=args.controls_dir,

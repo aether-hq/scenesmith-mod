@@ -136,7 +136,9 @@ def create_plant_from_dmd(
         parser.package_map().Add("scene", str(scene_dir))
 
     # Load and process directives using Drake's native machinery.
-    directives = LoadModelDirectives(directive_path)
+    # Drake <= 1.40 (the last Apple Silicon/Python 3.11 wheel) does not
+    # accept pathlib.Path here; newer releases do.
+    directives = LoadModelDirectives(str(directive_path))
     ProcessModelDirectives(directives, parser)
 
     plant.Finalize()

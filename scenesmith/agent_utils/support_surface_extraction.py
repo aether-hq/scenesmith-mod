@@ -93,6 +93,15 @@ class SupportSurfaceExtractionConfig:
     recompute_hssd_surfaces: bool = False
     """Recompute HSSD surfaces using HSM instead of loading from JSON."""
 
+    use_catalog_aabb_fast_path: bool = True
+    """Use bounded canonical AABB planes for catalog assets instead of dense HSM."""
+
+    aabb_inset_ratio: float = 0.08
+    """Inset each side of an AABB support plane to avoid object edges."""
+
+    bed_surface_height_ratio: float = 0.48
+    """Approximate mattress height within a canonical bed AABB."""
+
     @classmethod
     def from_config(cls, cfg: DictConfig) -> "SupportSurfaceExtractionConfig":
         """Create config from Hydra/OmegaConf nested structure.
@@ -103,6 +112,10 @@ class SupportSurfaceExtractionConfig:
         Returns:
             SupportSurfaceExtractionConfig instance.
         """
+        # ``fast_path`` was added after the original configuration contract.
+        # Resumed runs and downstream callers may still supply the older shape,
+        # so use the dataclass defaults instead of rejecting a valid config.
+        fast_path = cfg.get("fast_path") or {}
         return cls(
             # Face clustering parameters.
             normal_cluster_threshold=cfg.face_clustering.normal_cluster_threshold,
@@ -126,6 +139,10 @@ class SupportSurfaceExtractionConfig:
             height_tolerance_m=cfg.height.height_tolerance_m,
             # HSSD surface handling.
             recompute_hssd_surfaces=cfg.hssd.recompute_surfaces,
+            # Deterministic catalog fast path.
+            use_catalog_aabb_fast_path=fast_path.get("enabled", True),
+            aabb_inset_ratio=fast_path.get("aabb_inset_ratio", 0.08),
+            bed_surface_height_ratio=fast_path.get("bed_surface_height_ratio", 0.48),
         )
 
 

@@ -55,8 +55,8 @@ class ObjaverseRetrievalClient:
     def retrieve_objects(
         self,
         retrieval_requests: list[ObjaverseRetrievalServerRequest],
-        max_retries: int = 3,
-        timeout_s: int = 3600,
+        max_retries: int = 1,
+        timeout_s: float | None = None,
     ) -> Iterator[tuple[int, ObjaverseRetrievalServerResponse]]:
         """Send batch Objaverse retrieval requests and yield results as they complete.
 
@@ -86,6 +86,17 @@ class ObjaverseRetrievalClient:
         if not retrieval_requests:
             raise ValueError("Requests list cannot be empty")
 
+        if timeout_s is None:
+            from scenesmith.agent_utils.retrieval_policy import (
+                local_retrieval_timeout_seconds,
+            )
+
+            timeout_s = local_retrieval_timeout_seconds()
+        if max_retries < 1:
+            raise ValueError("max_retries must allow at least one attempt")
+
+        batch_started = time.monotonic()
+
         for attempt in range(max_retries):
             try:
                 console_logger.debug(
@@ -101,7 +112,7 @@ class ObjaverseRetrievalClient:
                     f"{self.base_url}/retrieve_objects",
                     json=request_data,
                     stream=True,
-                    timeout=(10, timeout_s),  # 10s connect, timeout_s read.
+                    timeout=(min(1.0, timeout_s), timeout_s),
                 )
                 http_response.raise_for_status()
 
@@ -136,7 +147,12 @@ class ObjaverseRetrievalClient:
                                 f"Invalid JSON in streaming response: {e}"
                             ) from e
 
-                console_logger.debug("Batch request completed successfully")
+                elapsed = time.monotonic() - batch_started
+                console_logger.info(
+                    "Objaverse local retrieval completed in %.3fs (%d request(s))",
+                    elapsed,
+                    len(retrieval_requests),
+                )
                 return  # Success, exit retry loop.
 
             except requests.exceptions.ConnectionError as e:
@@ -180,8 +196,15 @@ class ObjaverseRetrievalClient:
                 ) from e
 
             except requests.exceptions.Timeout as e:
-                console_logger.error("Batch Objaverse retrieval request timed out")
-                raise TimeoutError("Batch Objaverse retrieval request timed out") from e
+                elapsed = time.monotonic() - batch_started
+                console_logger.error(
+                    "Objaverse local retrieval exceeded %.3fs after %.3fs; failing batch",
+                    timeout_s,
+                    elapsed,
+                )
+                raise TimeoutError(
+                    f"Objaverse local retrieval exceeded {timeout_s:g}s"
+                ) from e
 
     def health_check(self) -> bool:
         """Check if the Objaverse retrieval server is healthy and responsive.

@@ -13,6 +13,7 @@ from scenesmith.agent_utils.hssd_retrieval.alignment import (
 from scenesmith.agent_utils.hssd_retrieval.clip_similarity import (
     get_top_k_similar_meshes,
 )
+from scenesmith.agent_utils.clip_embeddings import warm_clip_text_encoder
 from scenesmith.agent_utils.hssd_retrieval.config import HssdConfig
 from scenesmith.agent_utils.hssd_retrieval.data_loader import (
     HssdMeshMetadata,
@@ -65,6 +66,10 @@ class HssdRetriever:
         self.clip_device = clip_device
         self.preprocessed_data = load_preprocessed_data(config.preprocessed_path)
         console_logger.info(f"HSSD retriever initialized (clip_device={clip_device})")
+
+    def warmup(self) -> None:
+        """Initialize the text encoder before serving bounded requests."""
+        warm_clip_text_encoder(device=self.clip_device)
 
     def _calculate_bbox_score(
         self, target_dimensions: np.ndarray, mesh_extents: np.ndarray

@@ -77,7 +77,7 @@ Unless a row explicitly opts out, every deterministic case must verify:
 | ID | Pri | I/S | Geometry | Expected checks |
 |---|---|---|---|---|
 | G-001 | P0 | I5/S5 | Existing 5×4 m flat rectangular room | Byte-stable v1 fields; v2 migration creates `ground`; same four wall poses |
-| G-002 | P0 | I5/S5 | Existing multiroom flat house | All legacy adjacency/door/window tests remain valid |
+| G-002 | P0 | I5/S5 | Existing multiroom flat house | All existing adjacency/door/window tests remain valid |
 | G-003 | P0 | I5/S5 | One room at elevation +3 m | Drake room frame translation Z is 3; local floor remains z=0 |
 | G-004 | P0 | I5/S5 | Basement at -2.8 m | Negative elevation round trips and exports |
 | G-005 | P0 | I5/S4 | Two rooms with identical XY footprint at different levels | They do not count as colliding; topology stays disconnected without connector |
@@ -89,7 +89,7 @@ Unless a row explicitly opts out, every deterministic case must verify:
 
 | ID | Pri | I/S | Geometry | Expected checks |
 |---|---|---|---|---|
-| G-010 | P0 | I5/S5 | Axis-aligned rectangle represented as polygon | Matches legacy dimensions and area |
+| G-010 | P0 | I5/S5 | Axis-aligned rectangle represented as polygon | Matches existing dimensions and area |
 | G-011 | P0 | I5/S4 | Rotated rectangle | Four arbitrary-direction boundary segments; no cardinal assumption |
 | G-012 | P0 | I5/S4 | Convex triangle | Three walls, valid floor triangulation, usable support surface |
 | G-013 | P0 | I5/S4 | Convex pentagon | Five walls/normals and correct area |
@@ -291,7 +291,7 @@ unbounded Cartesian product:
 | C-06 | cavern mesh × parametric platform × catwalk |
 | C-07 | tunnel mesh × natural ramp × low-clearance segment |
 | C-08 | heightfield × imported structure × USD/MuJoCo export |
-| C-09 | legacy rectangle × new multilevel neighbor × old checkpoint load |
+| C-09 | existing rectangle × new multilevel neighbor × old checkpoint load |
 | C-10 | invalid freeform mesh × repair mode × strict mode |
 | C-11 | semantic cave graph × sky opening × terrain cover |
 | C-12 | large cavern × formation fields × protected walk/fly routes |

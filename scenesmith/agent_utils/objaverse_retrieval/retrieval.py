@@ -1,23 +1,68 @@
 """Main Objaverse retrieval logic with two-stage process: CLIP -> size ranking."""
 
 import logging
+import re
 
 from dataclasses import dataclass
 
 import numpy as np
 import trimesh
 
+from scenesmith.agent_utils.asset_semantics import (
+    candidate_metadata_text,
+    catalog_candidate_is_compatible,
+    semantic_families,
+)
 from scenesmith.agent_utils.objaverse_retrieval.clip_similarity import (
     get_top_k_similar_meshes,
+    warm_objaverse_text_encoder,
 )
 from scenesmith.agent_utils.objaverse_retrieval.config import ObjaverseConfig
 from scenesmith.agent_utils.objaverse_retrieval.data_loader import (
     ObjaverseMeshMetadata,
-    construct_objaverse_mesh_path,
     load_preprocessed_data,
+    resolve_catalog_mesh_path,
 )
 
 console_logger = logging.getLogger(__name__)
+
+_SEARCH_STOP_WORDS = {"a", "an", "and", "for", "of", "the", "with"}
+_SEARCH_SYNONYM_GROUPS = (
+    {"armchair", "chair", "seat", "seating", "stool"},
+    {"bed", "cot", "examination", "gurney", "treatment"},
+    {"cabinet", "cupboard", "locker", "storage", "wardrobe"},
+    {
+        "computer",
+        "console",
+        "diagnostic",
+        "display",
+        "monitor",
+        "monitoring",
+        "station",
+        "terminal",
+        "workstation",
+    },
+    {"couch", "loveseat", "sofa"},
+    {"lamp", "light", "lighting", "luminaire"},
+    {"screen", "television", "tv"},
+)
+_SEARCH_EXPANSIONS = {
+    token: group
+    for group in _SEARCH_SYNONYM_GROUPS
+    for token in group
+}
+
+
+def _search_tokens(value: str) -> set[str]:
+    tokens = {
+        token
+        for token in re.findall(r"[a-z]+", value.lower().replace("armchair", "arm chair"))
+        if token not in _SEARCH_STOP_WORDS
+    }
+    expanded = set(tokens)
+    for token in tokens:
+        expanded.update(_SEARCH_EXPANSIONS.get(token, ()))
+    return expanded
 
 
 @dataclass
@@ -27,8 +72,8 @@ class RetrievalCandidate:
     uid: str
     """Objaverse mesh UID."""
 
-    mesh: trimesh.Trimesh
-    """Loaded mesh."""
+    mesh: trimesh.Trimesh | None
+    """Loaded mesh, or None for a deferred global-catalog candidate."""
 
     metadata: ObjaverseMeshMetadata
     """Objaverse metadata."""
@@ -67,6 +112,10 @@ class ObjaverseRetriever:
             f"Objaverse retriever initialized (clip_device={clip_device})"
         )
 
+    def warmup(self) -> None:
+        """Initialize the catalog-specific text encoder before serving requests."""
+        warm_objaverse_text_encoder(device=self.clip_device)
+
     def _calculate_bbox_score(
         self, target_dimensions: np.ndarray, mesh_extents: np.ndarray
     ) -> float:
@@ -89,20 +138,20 @@ class ObjaverseRetriever:
         sorted_extents = np.sort(mesh_extents)
         return float(np.sum(np.abs(sorted_target - sorted_extents)))
 
-    def _load_mesh(self, uid: str) -> trimesh.Trimesh:
+    def _load_mesh(self, metadata: ObjaverseMeshMetadata) -> trimesh.Trimesh:
         """Load mesh from Objaverse data directory.
 
         Unlike HSSD, Objaverse meshes are loaded directly without alignment
         transforms. VLM physics analysis handles orientation downstream.
 
         Args:
-            uid: Objaverse mesh UID.
+            metadata: Catalog metadata, including an optional explicit mesh path.
 
         Returns:
             Loaded mesh (Y-up GLB format).
         """
-        mesh_path = construct_objaverse_mesh_path(
-            data_path=self.config.data_path, uid=uid
+        mesh_path = resolve_catalog_mesh_path(
+            data_path=self.config.data_path, metadata=metadata
         )
 
         mesh = trimesh.load(mesh_path, force="mesh")
@@ -203,7 +252,9 @@ class ObjaverseRetriever:
 
         console_logger.info(f"Processing {len(top_k_meshes)} CLIP-filtered candidates")
 
-        candidates: list[RetrievalCandidate] = []
+        ranked_metadata: list[
+            tuple[str, float, ObjaverseMeshMetadata, float]
+        ] = []
 
         for uid, clip_score in top_k_meshes:
             metadata = self.preprocessed_data.get_metadata(uid)
@@ -211,44 +262,150 @@ class ObjaverseRetriever:
                 console_logger.warning(f"Metadata not found for mesh {uid}")
                 continue
 
-            try:
-                mesh = self._load_mesh(uid)
-            except Exception as e:
-                console_logger.warning(f"Failed to load mesh {uid}: {e}", exc_info=True)
-                continue
-
             if desired_dimensions is not None:
-                mesh_extents = mesh.extents
                 bbox_score = self._calculate_bbox_score(
-                    target_dimensions=desired_dimensions, mesh_extents=mesh_extents
+                    target_dimensions=desired_dimensions,
+                    mesh_extents=np.asarray(metadata.bounding_box, dtype=float),
                 )
             else:
                 bbox_score = 0.0
 
-            candidate = RetrievalCandidate(
-                uid=uid,
-                mesh=mesh,
-                metadata=metadata,
-                clip_score=clip_score,
-                bbox_score=bbox_score,
+            compatible, compatibility_reason = catalog_candidate_is_compatible(
+                request_text=description,
+                candidate_text=candidate_metadata_text(
+                    name=metadata.name,
+                    description=metadata.description or "",
+                    aliases=metadata.aliases,
+                    tags=metadata.tags,
+                    ontology_path=metadata.ontology_path or "",
+                ),
+                quality_score=metadata.quality_score,
             )
-            candidates.append(candidate)
+            if not compatible:
+                console_logger.info(
+                    "Rejected catalog candidate %s for '%s': %s",
+                    uid,
+                    description,
+                    compatibility_reason,
+                )
+                continue
 
             console_logger.debug(
                 f"Candidate {uid[:8]}: CLIP={clip_score:.3f}, "
-                f"bbox={bbox_score:.3f}, extents={mesh.extents}"
+                f"bbox={bbox_score:.3f}, indexed_extents={metadata.bounding_box}"
+            )
+
+            ranked_metadata.append((uid, clip_score, metadata, bbox_score))
+
+        # For recognized furniture/object families, prefer curated candidates
+        # when the global pool contains them.  Low-score meshes remain a useful
+        # fallback for long-tail requests whose category is unknown, but should
+        # not outrank a curated chair, bed, table, or other known family merely
+        # because its prose description repeats the query more literally.
+        if semantic_families(description) and any(
+            metadata.quality_score >= 0.70
+            for _uid, _clip, metadata, _bbox in ranked_metadata
+        ):
+            ranked_metadata = [
+                entry for entry in ranked_metadata if entry[2].quality_score >= 0.70
+            ]
+
+        # ObjectThor historically uses size as the second-stage ranker. Poly
+        # Haven has much richer text metadata, so retain semantic relevance as
+        # the primary signal and use dimensions as a bounded tie-breaker. This
+        # avoids a correctly-sized clock outranking a fire alarm for "fire alarm".
+        query_tokens = _search_tokens(description)
+
+        def ranking_score(
+            entry: tuple[str, float, ObjaverseMeshMetadata, float]
+        ) -> float:
+            _uid, clip_score, metadata, bbox_score = entry
+            semantic_penalty = 1.0 - clip_score
+            metadata_tokens = _search_tokens(
+                " ".join(
+                    [
+                        metadata.name,
+                        metadata.description or "",
+                        *metadata.aliases,
+                        *metadata.tags,
+                        metadata.ontology_path or "",
+                    ]
+                )
+            )
+            lexical_coverage = (
+                len(query_tokens & metadata_tokens) / len(query_tokens)
+                if query_tokens
+                else 0.0
+            )
+            lexical_penalty = 0.35 * (1.0 - lexical_coverage)
+            dimensions = np.asarray(metadata.bounding_box, dtype=float)
+            has_dimensions = dimensions.shape == (3,) and np.all(dimensions > 0)
+            size_penalty = 0.0
+            if desired_dimensions is not None:
+                if has_dimensions:
+                    relative_size_error = bbox_score / max(
+                        float(np.sum(np.abs(desired_dimensions))), 0.1
+                    )
+                    size_penalty = 0.12 * min(relative_size_error, 3.0)
+                else:
+                    size_penalty = 0.04
+            quality_penalty = 0.08 * (1.0 - metadata.quality_score)
+            completeness_penalty = (
+                0.10
+                if metadata.name.strip().lower() in {"", "none", "unknown"}
+                and not (metadata.description or "").strip()
+                else 0.0
+            )
+            return (
+                semantic_penalty
+                + lexical_penalty
+                + size_penalty
+                + quality_penalty
+                + completeness_penalty
+            )
+
+        ranked_metadata.sort(key=ranking_score)
+
+        # Bounding boxes are part of the semantic index. Rank with that metadata
+        # first, then load only the assets we will actually return. The previous
+        # implementation parsed every top-K GLB (and lazily converted every
+        # ObjectThor bundle) before discarding all but one or two candidates.
+        # That made a local lookup take several seconds despite sub-millisecond
+        # vector ranking.
+        candidates: list[RetrievalCandidate] = []
+        for uid, clip_score, metadata, bbox_score in ranked_metadata:
+            if max_candidates is not None and len(candidates) >= max_candidates:
+                break
+            if metadata.deferred_loading:
+                candidates.append(
+                    RetrievalCandidate(
+                        uid=uid,
+                        mesh=None,
+                        metadata=metadata,
+                        clip_score=clip_score,
+                        bbox_score=bbox_score,
+                    )
+                )
+                continue
+            try:
+                mesh = self._load_mesh(metadata)
+            except Exception as e:
+                console_logger.warning(f"Failed to load mesh {uid}: {e}", exc_info=True)
+                continue
+
+            candidates.append(
+                RetrievalCandidate(
+                    uid=uid,
+                    mesh=mesh,
+                    metadata=metadata,
+                    clip_score=clip_score,
+                    bbox_score=bbox_score,
+                )
             )
 
         if not candidates:
             console_logger.warning("No valid candidates found after mesh loading")
             return []
-
-        # Sort by bbox_score (lower is better).
-        candidates.sort(key=lambda c: c.bbox_score)
-
-        # Limit results if requested.
-        if max_candidates is not None and len(candidates) > max_candidates:
-            candidates = candidates[:max_candidates]
 
         console_logger.info(
             f"Returning {len(candidates)} candidates (sorted by bbox_score)"

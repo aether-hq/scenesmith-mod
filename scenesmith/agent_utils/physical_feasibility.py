@@ -1605,6 +1605,79 @@ def apply_physical_feasibility_postprocessing(
     Returns:
         Tuple of (processed_scene, projection_success, removed_ids).
     """
+    # Furniture placement is already a valid deterministic checkpoint. Preserve
+    # it transactionally: a closed room-shell collision mesh can make Drake
+    # interpret the whole room interior as solid and "resolve" every object by
+    # ejecting it through a wall or the floor. Those invalid results must never
+    # replace the last valid layout.
+    original_furniture_transforms: dict[UniqueID, RigidTransform] = {}
+    if not weld_furniture:
+        original_furniture_transforms = {
+            obj.object_id: RigidTransform(
+                obj.transform.rotation(), obj.transform.translation().copy()
+            )
+            for obj in scene.objects.values()
+            if obj.object_type == ObjectType.FURNITURE
+        }
+
+    def restore_ejected_furniture(operation: str) -> int:
+        if not original_furniture_transforms:
+            return 0
+        floor_bounds = (
+            scene.room_geometry.floor.compute_world_bounds()
+            if scene.room_geometry is not None
+            and scene.room_geometry.floor is not None
+            else None
+        )
+        if floor_bounds is None:
+            return 0
+        floor_min, floor_max = floor_bounds
+        floor_z = float(floor_max[2])
+        ceiling_z = floor_z + float(scene.room_geometry.wall_height)
+        restored = 0
+        for object_id, original_transform in original_furniture_transforms.items():
+            obj = scene.get_object(object_id)
+            if obj is None:
+                continue
+            world_bounds = obj.compute_world_bounds()
+            if world_bounds is None:
+                continue
+            bounds_min, bounds_max = world_bounds
+            object_height = max(float(bounds_max[2] - bounds_min[2]), 0.1)
+            position = obj.transform.translation()
+            original_position = original_transform.translation()
+            excessive_drop = (
+                float(original_position[2] - position[2])
+                > max(0.5, object_height)
+            )
+            outside_vertical = (
+                float(position[2]) < floor_z - max(0.25, object_height * 0.5)
+                or float(bounds_min[2]) > ceiling_z + 0.25
+            )
+            outside_horizontal = (
+                float(position[0]) < float(floor_min[0]) - 0.25
+                or float(position[0]) > float(floor_max[0]) + 0.25
+                or float(position[1]) < float(floor_min[1]) - 0.25
+                or float(position[1]) > float(floor_max[1]) + 0.25
+            )
+            if not (excessive_drop or outside_vertical or outside_horizontal):
+                continue
+            obj.transform = RigidTransform(
+                original_transform.rotation(), original_transform.translation().copy()
+            )
+            restored += 1
+            console_logger.error(
+                "%s ejected furniture %s to (%.3f, %.3f, %.3f); restored its "
+                "last valid deterministic pose",
+                operation,
+                object_id,
+                position[0],
+                position[1],
+                position[2],
+            )
+        return restored
+
+    projection_success = True
     # Stage 1: Projection.
     if projection_enabled:
         scene, projection_success = apply_non_penetration_projection(
@@ -1644,9 +1717,18 @@ def apply_physical_feasibility_postprocessing(
                 "Projection failed (furniture welded, skipping floor fallback)"
             )
 
+    projection_restored = restore_ejected_furniture("Projection")
+    if projection_restored:
+        projection_success = False
+        console_logger.error(
+            "Rejected invalid projection output for %d furniture item(s); "
+            "skipping forward simulation for this checkpoint",
+            projection_restored,
+        )
+
     # Stage 2: Simulation (runs regardless of projection result).
     removed_ids: list[UniqueID] = []
-    if simulation_enabled:
+    if simulation_enabled and not projection_restored:
         scene, removed_ids = apply_forward_simulation(
             scene=scene,
             simulation_time_s=simulation_time_s,
@@ -1662,7 +1744,15 @@ def apply_physical_feasibility_postprocessing(
             fallen_manipuland_z_displacement=fallen_manipuland_z_displacement,
         )
 
-    return scene, True, removed_ids
+    simulation_restored = restore_ejected_furniture("Simulation")
+    if simulation_restored:
+        projection_success = False
+        console_logger.error(
+            "Rejected invalid simulation output for %d furniture item(s)",
+            simulation_restored,
+        )
+
+    return scene, projection_success, removed_ids
 
 
 def apply_per_furniture_postprocessing(

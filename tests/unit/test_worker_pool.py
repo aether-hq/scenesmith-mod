@@ -1,146 +1,78 @@
 """Unit tests for GPU worker pool."""
 
-import subprocess
+import os
+import threading
+import time
 import unittest
 
-from unittest.mock import MagicMock, patch
+from pathlib import Path
+from queue import Queue as ThreadQueue
 
 from scenesmith.agent_utils.geometry_generation_server.dataclasses import (
     GeometryGenerationServerRequest,
 )
+from scenesmith.agent_utils.geometry_generation_server.execution_provider import (
+    CudaGeometryExecutionProvider,
+    GeometryWorkerTarget,
+)
 from scenesmith.agent_utils.geometry_generation_server.gpu_worker import (
     ShutdownRequest,
     WorkerReady,
+    WorkerStartupFailed,
     WorkRequest,
     WorkResult,
 )
 from scenesmith.agent_utils.geometry_generation_server.worker_pool import (
+    GeometryWorkerPool,
     GPUWorkerPool,
     PoolStats,
 )
 
 
-class TestGPUDetection(unittest.TestCase):
-    """Test GPU detection logic."""
+class _PortableProvider:
+    key = "portable-test"
 
-    @patch.dict("os.environ", {}, clear=True)
-    @patch(
-        "scenesmith.agent_utils.geometry_generation_server.worker_pool.subprocess.run"
-    )
-    def test_detect_gpu_ids_multiple_gpus(self, mock_run):
-        """Test detection of multiple GPUs via nvidia-smi."""
-        mock_run.return_value = MagicMock(
-            returncode=0,
-            stdout="0\n1\n2\n3\n",
+    def targets(self):
+        return (
+            GeometryWorkerTarget(
+                worker_id="worker-0",
+                provider=self.key,
+                device_id=None,
+                label="portable/test",
+                environment=(),
+            ),
         )
 
-        gpu_ids = GPUWorkerPool._detect_gpu_ids()
+    def process_start_method(self) -> str:
+        return "spawn"
 
-        self.assertEqual(gpu_ids, [0, 1, 2, 3])
-        mock_run.assert_called_once()
-        call_args = mock_run.call_args
-        self.assertIn("nvidia-smi", call_args[0][0])
 
-    @patch.dict("os.environ", {}, clear=True)
-    @patch(
-        "scenesmith.agent_utils.geometry_generation_server.worker_pool.subprocess.run"
-    )
-    def test_detect_gpu_ids_single_gpu(self, mock_run):
-        """Test detection of single GPU."""
-        mock_run.return_value = MagicMock(
-            returncode=0,
-            stdout="0\n",
+def _ready_worker(**kwargs) -> None:
+    worker_id = kwargs["execution_target"].worker_id
+    result_queue = kwargs["result_queue"]
+    work_queue = kwargs["work_queue"]
+    result_queue.put(WorkerReady(worker_id=worker_id))
+    while not isinstance(work_queue.get(), ShutdownRequest):
+        pass
+
+
+def _failed_worker(**kwargs) -> None:
+    target = kwargs["execution_target"]
+    kwargs["result_queue"].put(
+        WorkerStartupFailed(
+            worker_id=target.worker_id,
+            error="fixture preload failure",
         )
-
-        gpu_ids = GPUWorkerPool._detect_gpu_ids()
-
-        self.assertEqual(gpu_ids, [0])
-
-    @patch.dict("os.environ", {}, clear=True)
-    @patch(
-        "scenesmith.agent_utils.geometry_generation_server.worker_pool.subprocess.run"
     )
-    def test_detect_gpu_ids_nvidia_smi_fails(self, mock_run):
-        """Test fallback when nvidia-smi fails."""
-        mock_run.return_value = MagicMock(returncode=1, stdout="")
 
-        gpu_ids = GPUWorkerPool._detect_gpu_ids()
 
-        # Should fall back to GPU 0.
-        self.assertEqual(gpu_ids, [0])
-
-    @patch.dict("os.environ", {}, clear=True)
-    @patch(
-        "scenesmith.agent_utils.geometry_generation_server.worker_pool.subprocess.run"
-    )
-    def test_detect_gpu_ids_command_not_found(self, mock_run):
-        """Test fallback when nvidia-smi is not installed."""
-        mock_run.side_effect = FileNotFoundError("nvidia-smi not found")
-
-        gpu_ids = GPUWorkerPool._detect_gpu_ids()
-
-        # Should fall back to GPU 0.
-        self.assertEqual(gpu_ids, [0])
-
-    @patch.dict("os.environ", {}, clear=True)
-    @patch(
-        "scenesmith.agent_utils.geometry_generation_server.worker_pool.subprocess.run"
-    )
-    def test_detect_gpu_ids_timeout(self, mock_run):
-        """Test fallback when nvidia-smi times out."""
-        mock_run.side_effect = subprocess.TimeoutExpired("nvidia-smi", 5)
-
-        gpu_ids = GPUWorkerPool._detect_gpu_ids()
-
-        # Should fall back to GPU 0.
-        self.assertEqual(gpu_ids, [0])
-
-    @patch.dict("os.environ", {}, clear=True)
-    @patch(
-        "scenesmith.agent_utils.geometry_generation_server.worker_pool.subprocess.run"
-    )
-    def test_detect_gpu_ids_empty_output(self, mock_run):
-        """Test handling of empty nvidia-smi output."""
-        mock_run.return_value = MagicMock(returncode=0, stdout="")
-
-        gpu_ids = GPUWorkerPool._detect_gpu_ids()
-
-        # Empty output should fall back to GPU 0.
-        self.assertEqual(gpu_ids, [0])
-
-    @patch.dict("os.environ", {"CUDA_VISIBLE_DEVICES": "1,2,3,4,5,6,7"})
-    def test_detect_gpu_ids_respects_cuda_visible_devices(self):
-        """Test that CUDA_VISIBLE_DEVICES is respected."""
-        gpu_ids = GPUWorkerPool._detect_gpu_ids()
-
-        self.assertEqual(gpu_ids, [1, 2, 3, 4, 5, 6, 7])
-
-    @patch.dict("os.environ", {"CUDA_VISIBLE_DEVICES": "3"})
-    def test_detect_gpu_ids_single_cuda_visible_device(self):
-        """Test single GPU in CUDA_VISIBLE_DEVICES."""
-        gpu_ids = GPUWorkerPool._detect_gpu_ids()
-
-        self.assertEqual(gpu_ids, [3])
-
-    @patch.dict("os.environ", {"CUDA_VISIBLE_DEVICES": "  2 , 5 , 7  "})
-    def test_detect_gpu_ids_handles_whitespace(self):
-        """Test that whitespace in CUDA_VISIBLE_DEVICES is handled."""
-        gpu_ids = GPUWorkerPool._detect_gpu_ids()
-
-        self.assertEqual(gpu_ids, [2, 5, 7])
-
-    @patch.dict("os.environ", {"CUDA_VISIBLE_DEVICES": ""})
-    @patch(
-        "scenesmith.agent_utils.geometry_generation_server.worker_pool.subprocess.run"
-    )
-    def test_detect_gpu_ids_empty_cuda_visible_devices(self, mock_run):
-        """Test empty CUDA_VISIBLE_DEVICES falls back to nvidia-smi."""
-        mock_run.return_value = MagicMock(returncode=0, stdout="0\n1\n")
-
-        gpu_ids = GPUWorkerPool._detect_gpu_ids()
-
-        self.assertEqual(gpu_ids, [0, 1])
-        mock_run.assert_called_once()
+def _crashing_worker(**kwargs) -> None:
+    target = kwargs["execution_target"]
+    result_queue = kwargs["result_queue"]
+    work_queue = kwargs["work_queue"]
+    result_queue.put(WorkerReady(worker_id=target.worker_id))
+    work_queue.get()
+    os._exit(17)
 
 
 class TestPoolStats(unittest.TestCase):
@@ -292,13 +224,144 @@ class TestWorkerReady(unittest.TestCase):
         self.assertNotIsInstance(work_result, WorkerReady)
 
 
+class TestWorkerLifecycle(unittest.TestCase):
+    def test_start_waits_until_every_worker_is_ready(self) -> None:
+        pool = GeometryWorkerPool(
+            execution_provider=_PortableProvider(),
+            preload_pipeline=False,
+            worker_entrypoint=_ready_worker,
+            startup_timeout_s=5.0,
+        )
+
+        pool.start()
+        try:
+            self.assertTrue(pool.is_ready())
+            self.assertEqual(pool.startup_diagnostics()["status"], "ready")
+        finally:
+            pool.stop()
+
+    def test_startup_failure_is_reported_and_pool_is_stopped(self) -> None:
+        pool = GeometryWorkerPool(
+            execution_provider=_PortableProvider(),
+            preload_pipeline=False,
+            worker_entrypoint=_failed_worker,
+            startup_timeout_s=5.0,
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "fixture preload failure"):
+            pool.start()
+
+        self.assertFalse(pool.is_running())
+        self.assertEqual(pool.startup_diagnostics()["status"], "failed")
+
+    def test_request_backend_cannot_override_resolved_runtime(self) -> None:
+        pool = GeometryWorkerPool(
+            backend="sam3d",
+            sam3d_config={"provider": "mlx"},
+            execution_provider=_PortableProvider(),
+            preload_pipeline=False,
+        )
+        request = GeometryGenerationServerRequest(
+            image_path="/test/image.png",
+            output_dir="/test/output",
+            prompt="test",
+            backend="hunyuan3d",
+        )
+
+        with self.assertRaisesRegex(ValueError, "server runtime"):
+            pool.validate_request(request)
+
+    def test_request_provider_cannot_override_resolved_runtime(self) -> None:
+        pool = GeometryWorkerPool(
+            backend="sam3d",
+            sam3d_config={"provider": "mlx"},
+            execution_provider=_PortableProvider(),
+            preload_pipeline=False,
+        )
+        request = GeometryGenerationServerRequest(
+            image_path="/test/image.png",
+            output_dir="/test/output",
+            prompt="test",
+            backend="sam3d",
+            sam3d_config={"provider": "cuda"},
+        )
+
+        with self.assertRaisesRegex(ValueError, "provider"):
+            pool.validate_request(request)
+
+    def test_equivalent_relative_and_absolute_runtime_paths_are_accepted(self) -> None:
+        relative_checkpoint = "external/Sam3D-Objects-MLX/checkpoints/hf"
+        pool = GeometryWorkerPool(
+            backend="sam3d",
+            sam3d_config={
+                "provider": "auto",
+                "mlx_checkpoint_dir": str(Path(relative_checkpoint).resolve()),
+                "mlx_steps": 12,
+            },
+            execution_provider=_PortableProvider(),
+            preload_pipeline=False,
+        )
+        request = GeometryGenerationServerRequest(
+            image_path="/test/image.png",
+            output_dir="/test/output",
+            prompt="test",
+            backend="sam3d",
+            sam3d_config={
+                "provider": "auto",
+                "mlx_checkpoint_dir": relative_checkpoint,
+                "mlx_steps": 12,
+                "mode": "foreground",
+            },
+        )
+
+        pool.validate_request(request)
+
+    def test_worker_crash_completes_inflight_request_with_error(self) -> None:
+        pool = GeometryWorkerPool(
+            execution_provider=_PortableProvider(),
+            preload_pipeline=False,
+            worker_entrypoint=_crashing_worker,
+            startup_timeout_s=5.0,
+            restart_limit=0,
+            health_check_interval_s=0.05,
+        )
+        completed = threading.Event()
+        result_holder = []
+
+        def callback(index, result):
+            result_holder.append((index, result))
+            completed.set()
+
+        pool.start()
+        try:
+            pool.submit_request(
+                GeometryGenerationServerRequest(
+                    image_path="/test/image.png",
+                    output_dir="/test/output",
+                    prompt="test",
+                ),
+                callback,
+                request_index=3,
+                received_timestamp=time.time(),
+            )
+            self.assertTrue(completed.wait(timeout=3.0))
+            self.assertEqual(result_holder[0][0], 3)
+            self.assertEqual(result_holder[0][1][0], "error")
+            self.assertIn("exited", result_holder[0][1][1])
+        finally:
+            pool.stop()
+
+
 class TestWorkerPoolInitialization(unittest.TestCase):
     """Test GPUWorkerPool initialization (without starting)."""
 
-    @patch.object(GPUWorkerPool, "_detect_gpu_ids", return_value=[0, 1, 2, 3])
-    def test_pool_initialization_defaults(self, mock_detect):
+    def test_pool_initialization_defaults(self):
         """Test pool initialization with default parameters."""
-        pool = GPUWorkerPool()
+        pool = GPUWorkerPool(
+            execution_provider=CudaGeometryExecutionProvider(
+                detector=lambda: (0, 1, 2, 3)
+            )
+        )
 
         self.assertEqual(pool.num_workers, 4)
         self.assertEqual(pool._use_mini, False)
@@ -307,17 +370,23 @@ class TestWorkerPoolInitialization(unittest.TestCase):
         self.assertTrue(pool._preload_pipeline)
         # Verify multiprocessing context is created.
         self.assertIsNotNone(pool._mp_ctx)
+        # Worker availability is an in-process thread handoff. Keeping it out
+        # of multiprocessing.Queue avoids a macOS spawn/feeder deadlock.
+        self.assertIsInstance(pool._available_workers, ThreadQueue)
 
-    @patch.object(GPUWorkerPool, "_detect_gpu_ids", return_value=[0, 1])
-    def test_pool_initialization_custom_params(self, mock_detect):
+    def test_pool_initialization_custom_params(self):
         """Test pool initialization with custom parameters."""
-        sam3d_config = {"sam3_checkpoint": "/path/to/sam3.pt"}
+        sam3d_config = {
+            "provider": "cuda",
+            "sam3_checkpoint": "/path/to/sam3.pt",
+        }
 
         pool = GPUWorkerPool(
             use_mini=True,
             backend="sam3d",
             sam3d_config=sam3d_config,
             preload_pipeline=False,
+            execution_provider=CudaGeometryExecutionProvider(detector=lambda: (0, 1)),
         )
 
         self.assertEqual(pool.num_workers, 2)
@@ -326,10 +395,11 @@ class TestWorkerPoolInitialization(unittest.TestCase):
         self.assertEqual(pool._sam3d_config, sam3d_config)
         self.assertFalse(pool._preload_pipeline)
 
-    @patch.object(GPUWorkerPool, "_detect_gpu_ids", return_value=[0])
-    def test_pool_stats_before_start(self, mock_detect):
+    def test_pool_stats_before_start(self):
         """Test getting stats before pool is started."""
-        pool = GPUWorkerPool()
+        pool = GPUWorkerPool(
+            execution_provider=CudaGeometryExecutionProvider(detector=lambda: (0,))
+        )
 
         stats = pool.get_stats()
 

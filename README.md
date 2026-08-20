@@ -38,6 +38,13 @@ multilevel geometry, arbitrary polygon rooms and holes, sloped surfaces,
 stairs/ramps/ladders, platforms, heightfields, caverns, embedded natural
 passages, capability-aware topology, and surface-native object placement.
 
+These capabilities extend SceneSmith's existing five-agent pipeline; they do
+not define a separate cave generator. The floor-plan agent should choose simple
+room primitives, semantic natural-environment primitives, or a mixture, compile
+one structural scene contract, and then continue through the furniture,
+wall-mounted, ceiling-mounted, and manipuland agents. Rectangular rooms are the
+simplest supported geometry, not a separate mode.
+
 The runnable [underground prison escape example](examples/prison_escape/README.md)
 shows a real wall breach leading into a 70 m irregular descending tunnel, with
 ceiling fixtures mounted from compiled overhead-surface queries:
@@ -50,7 +57,9 @@ To inspect the generalized results interactively, launch the
 [semantic scene gallery](examples/semantic_gallery/README.md). It automatically
 compiles every retained held-out scene and provides mouse-look fly controls for
 the branching passage network and dragon-scale cavern, including formations and
-hero geometry.
+hero geometry. The gallery validates the structural compiler; it is not by
+itself evidence that all five agents have run on those scenes. That end-to-end
+integration is tracked explicitly in the implementation status.
 
 See the [general-geometry overview](docs/geometry-extension/README.md),
 [ranked capability/test matrix](docs/geometry-extension/GEOMETRY-CAPABILITY-MATRIX.md),
@@ -119,6 +128,12 @@ uv sync
 the same project metadata. Structural polygon compilation requires
 `shapely>=2.1.2`; run project commands with `uv run ...` or activate `.venv` so
 they do not accidentally use a bare system Python.
+
+The lock supports Linux x86-64 and Apple Silicon hosts. Compute, Blender, and
+geometry generation are selected through injectable providers rather than
+hard-coded CUDA checks. See [Hardware provider architecture](docs/HARDWARE_PROVIDERS.md)
+for the support matrix, configuration, external geometry service, and verification
+commands.
 
 To install without dev dependencies:
 ```sh
@@ -224,8 +239,24 @@ Set the following environment variables. These are required for both local and
 Docker usage (Docker Compose forwards them from the host).
 
 ```sh
-# Required: OpenAI API key for GPT-5 agents and default image generation
+# Default upstream mode: OpenAI API key for GPT agents and image generation
 export OPENAI_API_KEY="your-openai-key"
+
+# Local subscription mode: use an existing `codex login` ChatGPT session.
+# This routes SceneSmith tool calls through read-only `codex exec` turns and
+# does not consume OPENAI_API_KEY credits.
+export SCENESMITH_LLM_PROVIDER="codex-cli"
+export SCENESMITH_LLM_MODEL="gpt-5.6-sol"
+
+# Claude subscription mode: use an existing `claude auth login` session.
+# No ANTHROPIC_API_KEY is used by this mode.
+export SCENESMITH_LLM_PROVIDER="claude-cli"
+export SCENESMITH_LLM_MODEL="sonnet"
+
+# Anthropic API mode (Anthropic API billing is separate from Claude web plans):
+# export SCENESMITH_LLM_PROVIDER="anthropic"
+# export SCENESMITH_LLM_MODEL="claude-sonnet-4-6"
+# export ANTHROPIC_API_KEY="your-anthropic-api-key"
 
 # Optional: Google API key for Gemini image generation backend
 # Only required if using image_generation.backend: "gemini" in config
@@ -235,6 +266,15 @@ export GOOGLE_API_KEY="your-google-key"
 # Allows traces to appear on a different account than is used for billing
 export OPENAI_TRACING_KEY="your-tracing-key"
 ```
+
+The `claude-cli` and `codex-cli` facades implement the Chat Completions subset
+used by the OpenAI Agents SDK, including multimodal inputs and structured
+function calls. Each removes API keys from its child process so the cached
+subscription login is used deliberately. Since neither CLI mode nor Claude API
+mode supplies SceneSmith's reference-image generator, federated `all` runs
+omit the generated SAM3D fallback unless
+`SCENESMITH_ENABLE_GENERATED_FALLBACK=1` is explicitly configured with a funded
+image provider.
 
 ---
 
@@ -413,6 +453,27 @@ For asset retrieval using the ObjectThor subset of Objaverse:
    asset_manager:
      general_asset_source: "objaverse"  # Use Objaverse retrieval
    ```
+
+### Poly Haven and Federated Catalog Setup
+
+Set Composer maintains a verified 2K Poly Haven mirror and a SceneSmith-compatible
+semantic index for its authored CC0 models:
+
+```sh
+cd ../setcomposer
+npm run assets:polyhaven  # resumable download plus semantic index
+# Or, when the asset mirror already exists:
+npm run setup:assets
+```
+
+The index is written to `data/polyhaven/preprocessed/` and uses the same
+ViT-L/14 embedding space and generic retrieval protocol as ObjectThor. It keeps
+the original mesh path, Poly Haven ID, author metadata, and `CC0-1.0` license.
+
+Select `general_asset_source: "polyhaven"` to use it alone, or
+`general_asset_source: "all"` for the per-object fallback chain Poly Haven →
+HSSD → ObjectThor → generated geometry. The articulated router strategy remains
+independent and is tried for jointed assets such as cabinets and drawers.
 
 ### Articulated Object Datasets
 
@@ -595,11 +656,11 @@ Set `floor_plan_agent.mode="house"` for house scenes and `floor_plan_agent.mode=
 
 Note that you will need >=24GB of GPU memory for Hunyuan3D asset generation and >=32GB for SAM3D asset generation. The material and articulated retrieval servers require additional GPU memory when enabled. Hence, we recommend >=45GB of GPU memory to run the full pipeline as documented in the research paper. All code was tested with an L40S GPU.
 
-### Multi-GPU Support
+### Provider and Multi-GPU Support
 
-The geometry generation server automatically detects and uses all available GPUs,
-spawning one worker process per GPU for parallel asset generation. This significantly
-speeds up image-to-3D asset generation and thus scene generation.
+The geometry generation server resolves an execution provider. CUDA creates one
+worker per visible device, while SAM3D/MLX creates one isolated Metal worker on
+Apple Silicon. The worker pool itself is provider-neutral.
 
 To control which GPUs are used, set `CUDA_VISIBLE_DEVICES`:
 
@@ -614,14 +675,23 @@ CUDA_VISIBLE_DEVICES=0 python main.py +name=my_experiment
 python main.py +name=my_experiment
 ```
 
+On Apple Silicon, select SAM3D with `provider: auto` or `mlx`; on CPU-only hosts,
+use installed retrieval datasets or configure the `external` geometry service
+provider. See [Hardware provider architecture](docs/HARDWARE_PROVIDERS.md).
+
 ### Pipeline Stage Control
 
 The scene generation pipeline has five stages that run in order:
-1. **floor_plan** - Generate room geometry (walls, floor)
-2. **furniture** - Place furniture in the room
-3. **wall_mounted** - Place wall-mounted objects (mirrors, artwork, shelves, clocks)
-4. **ceiling_mounted** - Place ceiling fixtures (chandeliers, pendant lights, ceiling fans)
-5. **manipuland** - Place small objects on furniture surfaces
+1. **floor_plan** - Author and compile the structural scene: conventional rooms,
+   multilevel geometry, semantic natural environments, or combinations
+2. **furniture** - Place furniture/assets on structural support surfaces
+3. **wall_mounted** - Place objects on structural attachment surfaces
+4. **ceiling_mounted** - Place fixtures on structural overhead surfaces
+5. **manipuland** - Place small objects using the shared support/collision contract
+
+All supported geometry belongs in this pipeline. A cave does not select a
+separate generation path, and later agents must not silently fall back to
+rectangular room assumptions when semantic structural surfaces are available.
 
 Use `pipeline.start_stage` and `pipeline.stop_stage` to control which stages run:
 

@@ -5,7 +5,11 @@ import tempfile
 import unittest
 
 from pathlib import Path
+from types import SimpleNamespace
 
+import numpy as np
+
+from scenesmith.ceiling_agents.tools.ceiling_tools import CeilingTools
 from scenesmith.agent_utils.structural_compiler import (
     CompiledStructure,
     compile_polygon_space,
@@ -114,6 +118,31 @@ class TestStructuralSurfaceIndex(unittest.TestCase):
         self.assertAlmostEqual(
             sum(a * b for a, b in zip(pose.tangent_x, pose.normal)), 0.0
         )
+
+    def test_ceiling_tool_excludes_the_floor_underside_from_mount_candidates(self) -> None:
+        compiled = compile_polygon_space(
+            structure_id="fixture_room",
+            footprint=Footprint2D.rectangle(4, 3).centered_on_bounds(),
+            wall_height=3.2,
+        )
+        index = StructuralSurfaceIndex(compiled.surfaces)
+        floor = SimpleNamespace(
+            compute_world_bounds=lambda: (
+                np.array([-2.0, -1.5, -0.1]),
+                np.array([2.0, 1.5, 0.0]),
+            )
+        )
+        tools = CeilingTools.__new__(CeilingTools)
+        tools.scene = SimpleNamespace(
+            room_geometry=SimpleNamespace(floor=floor)
+        )
+        tools.ceiling_height = 3.2
+        tools._get_structural_surface_index = lambda: index
+
+        transform = tools._ceiling_transform(0.0, 0.0, 0.0)
+
+        assert transform is not None
+        self.assertAlmostEqual(transform.translation()[2], 3.2)
 
     def test_agent_clearance_detects_low_overhead_and_narrow_edge(self) -> None:
         compiled = compile_polygon_space(

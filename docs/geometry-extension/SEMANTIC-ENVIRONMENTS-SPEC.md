@@ -1,8 +1,8 @@
 # Semantic Environments Specification
 
-Status: active implementation contract (E0–E3 hardening complete; later phases partial)
+Status: active implementation contract (compiler core implemented; unified agent-pipeline integration incomplete)
 
-Date: 2026-08-13
+Date: 2026-08-14
 
 Related documents:
 
@@ -30,6 +30,60 @@ The system is hybrid:
 The target is not a collection of cave, terrain, and destruction demos. A
 single representation and compiler pipeline must support held-out combinations
 without scenario-specific code.
+
+### 1.1 One SceneSmith pipeline
+
+SceneSmith has one production generation pipeline:
+
+```text
+prompt
+  -> floor-plan agent
+  -> structural compilation
+  -> furniture agent
+  -> wall-mounted agent
+  -> ceiling-mounted agent
+  -> manipuland agent
+  -> combined simulation and render exports
+```
+
+The semantic environment model is the structural vocabulary and compiler used
+inside that pipeline when a prompt requires caves, tunnels, exteriors, damage,
+or mixed constructed/natural geometry. It is not an alternative "semantic
+cave path," and the existing agents remain the production implementation to be
+improved. A rectangular room is simply the least complex structural recipe.
+
+The floor-plan agent chooses and combines appropriate primitives. The compiled
+scene contract then supplies every later agent with visual and collision
+geometry, topology, support surfaces, attachment surfaces, overhead surfaces,
+openings, provenance, and diagnostics. Geological formation primitives add
+structural detail; they do not replace agent-authored lights, furniture,
+wall-mounted assets, manipulands, or generated hero assets.
+
+SetComposer and other product frontends must invoke this same pipeline. They
+must not select a separate cave endpoint or skip furnishing stages merely
+because the structural recipe contains a semantic environment.
+
+### 1.2 End-to-end integration requirements
+
+Semantic geometry is production-integrated only when all of the following are
+true:
+
+1. the normal floor-plan agent can author and repair the semantic recipe;
+2. the normal runtime compiles it before room furnishing and publishes one
+   authenticated `DerivedSceneContract`;
+3. furniture placement uses its support, clearance, and collision queries;
+4. wall-mounted placement uses arbitrary attachment surfaces rather than only
+   cardinal room walls;
+5. ceiling-mounted placement uses arbitrary overhead surfaces and openings;
+6. manipuland placement and physics consume the same support/collision data;
+7. final Blender, GLB, Drake, and scene-state outputs contain both structure and
+   all later-agent assets; and
+8. conventional room scenes retain their existing full-fidelity output through
+   the same code path.
+
+Compiler-only tests, the prison generator, and the semantic gallery prove the
+structural subsystem. They are necessary evidence, but do not satisfy this
+end-to-end integration contract on their own.
 
 ## 2. Primary use cases
 
@@ -87,6 +141,16 @@ cavern proves compact authoring at the intended encounter scale. Stable
 large-scene chunking/LOD, advanced formation policies, exterior seams, layered
 substrate, and structural damage operations remain unimplemented; this
 specification continues to define that remaining delta.
+
+The current floor-plan tool can store an atomic `semantic_environment` inside
+`HouseLayout`, and the deterministic compiler/derived contract can compile it
+when called directly. However, the normal stateful floor-plan runtime does not
+yet invoke that semantic compilation step before export and downstream room
+generation. Surface-aware support exists in parts of the furniture and ceiling
+tooling, while full arbitrary-surface wall mounting and shared-contract
+manipuland/physics consumption remain integration work. Therefore the semantic
+compiler is implemented, but the five-agent end-to-end requirement in section
+1.2 is not yet complete.
 
 ## 4. Architectural model
 

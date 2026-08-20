@@ -6,10 +6,30 @@ import unittest
 
 from pathlib import Path
 
-from examples.prison_escape.generate_scene import generate_scene
+from examples.prison_escape.generate_scene import generate_scene, rebuild_scene
 
 
 class TestPrisonEscapeExample(unittest.TestCase):
+    def test_clean_rebuild_is_atomic_and_records_compiler_provenance(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            output_dir = Path(temporary_directory) / "generated"
+            output_dir.mkdir()
+            (output_dir / "stale.obj").write_text("old")
+
+            manifest = rebuild_scene(output_dir)
+
+            self.assertFalse((output_dir / "stale.obj").exists())
+            self.assertEqual(
+                json.loads((output_dir / "manifest.json").read_text()),
+                manifest,
+            )
+            self.assertEqual(manifest["build"]["status"], "compiled")
+            self.assertTrue(manifest["build"]["rebuilt_from_recipe"])
+            self.assertEqual(manifest["build"]["provider"], "semantic-compiler/cpu")
+            self.assertEqual(len(manifest["build"]["source_sha256"]), 64)
+            source = Path(__file__).parents[2] / manifest["build"]["source_path"]
+            self.assertTrue(source.is_file())
+
     def test_generates_long_lit_clear_escape_tunnel(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             output_dir = Path(temporary_directory)

@@ -114,7 +114,25 @@ class TriangleMesh:
 
         lines = [f"o {object_name}"]
         lines.extend(f"v {x:.12g} {y:.12g} {z:.12g}" for x, y, z in self.vertices)
-        lines.extend(f"f {a + 1} {b + 1} {c + 1}" for a, b, c in self.triangles)
+        accumulated = [[0.0, 0.0, 0.0] for _ in self.vertices]
+        for triangle_index, triangle in enumerate(self.triangles):
+            normal = self.triangle_normal(triangle_index)
+            for vertex_index in triangle:
+                for axis in range(3):
+                    accumulated[vertex_index][axis] += normal[axis]
+        vertex_normals = [
+            (
+                _normalize(tuple(normal))
+                if any(abs(value) > GEOMETRY_TOLERANCE for value in normal)
+                else (0.0, 0.0, 1.0)
+            )
+            for normal in accumulated
+        ]
+        lines.extend(f"vn {x:.12g} {y:.12g} {z:.12g}" for x, y, z in vertex_normals)
+        lines.extend(
+            f"f {a + 1}//{a + 1} {b + 1}//{b + 1} {c + 1}//{c + 1}"
+            for a, b, c in self.triangles
+        )
         return "\n".join(lines) + "\n"
 
 
@@ -2146,7 +2164,7 @@ def write_compiled_structure(
     compiler_version: str = "structural-compiler-v1",
     compile_options: Mapping[str, object] | None = None,
 ) -> CompiledStructurePaths:
-    """Write OBJ, static SDF, and semantic-surface sidecar files.
+    """Write OBJ, weldable SDF, and semantic-surface sidecar files.
 
     Collision boxes are kept analytic for stairs.  Structures without analytic
     primitives (currently ramps) use the closed collision triangle mesh.
@@ -2178,7 +2196,11 @@ def write_compiled_structure(
 
     sdf = ET.Element("sdf", {"version": "1.12"})
     model = ET.SubElement(sdf, "model", {"name": model_name or compiled.structure_id})
-    ET.SubElement(model, "static").text = "true"
+    # HouseLayout places structural models by welding them to a room or house
+    # frame. An SDF-static model is already welded to world by Drake, so adding
+    # the authored weld produces a duplicate-joint failure and loses multi-room
+    # transforms. Keep the model non-static; the directive supplies immobility.
+    ET.SubElement(model, "static").text = "false"
     link = ET.SubElement(model, "link", {"name": link_name})
     visual = ET.SubElement(link, "visual", {"name": "structure_visual"})
     _add_mesh_geometry(visual, mesh_name)

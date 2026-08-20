@@ -53,8 +53,8 @@ class HssdRetrievalClient:
     def retrieve_objects(
         self,
         retrieval_requests: list[HssdRetrievalServerRequest],
-        max_retries: int = 3,
-        timeout_s: int = 3600,
+        max_retries: int = 1,
+        timeout_s: float | None = None,
     ) -> Iterator[tuple[int, HssdRetrievalServerResponse]]:
         """Send batch HSSD retrieval requests and yield results as they complete.
 
@@ -66,9 +66,10 @@ class HssdRetrievalClient:
         Args:
             retrieval_requests: List of HSSD retrieval requests to process as a
                 batch.
-            max_retries: Maximum number of retries for transient failures.
-            timeout_s: Timeout in seconds for the entire batch. Should scale with
-                batch size and expected server queue depth.
+            max_retries: Legacy name for the maximum number of attempts. The
+                default is one attempt, so local retrieval is never retried.
+            timeout_s: Hard local batch deadline. Defaults to two seconds and can
+                be configured with SCENESMITH_ASSET_RETRIEVAL_TIMEOUT_SECONDS.
 
         Yields:
             Tuple of (index, response) where index corresponds to the request's
@@ -83,6 +84,17 @@ class HssdRetrievalClient:
         """
         if not retrieval_requests:
             raise ValueError("Requests list cannot be empty")
+
+        if timeout_s is None:
+            from scenesmith.agent_utils.retrieval_policy import (
+                local_retrieval_timeout_seconds,
+            )
+
+            timeout_s = local_retrieval_timeout_seconds()
+        if max_retries < 1:
+            raise ValueError("max_retries must allow at least one attempt")
+
+        batch_started = time.monotonic()
 
         for attempt in range(max_retries):
             try:
@@ -99,7 +111,7 @@ class HssdRetrievalClient:
                     f"{self.base_url}/retrieve_objects",
                     json=request_data,
                     stream=True,
-                    timeout=(10, timeout_s),  # 10s connect, timeout_s read.
+                    timeout=(min(1.0, timeout_s), timeout_s),
                 )
                 http_response.raise_for_status()
 
@@ -134,7 +146,12 @@ class HssdRetrievalClient:
                                 f"Invalid JSON in streaming response: {e}"
                             ) from e
 
-                console_logger.debug("Batch request completed successfully")
+                elapsed = time.monotonic() - batch_started
+                console_logger.info(
+                    "HSSD local retrieval completed in %.3fs (%d request(s))",
+                    elapsed,
+                    len(retrieval_requests),
+                )
                 return  # Success, exit retry loop
 
             except requests.exceptions.ConnectionError as e:
@@ -178,8 +195,15 @@ class HssdRetrievalClient:
                 ) from e
 
             except requests.exceptions.Timeout as e:
-                console_logger.error("Batch HSSD retrieval request timed out")
-                raise TimeoutError("Batch HSSD retrieval request timed out") from e
+                elapsed = time.monotonic() - batch_started
+                console_logger.error(
+                    "HSSD local retrieval exceeded %.3fs after %.3fs; failing batch",
+                    timeout_s,
+                    elapsed,
+                )
+                raise TimeoutError(
+                    f"HSSD local retrieval exceeded {timeout_s:g}s"
+                ) from e
 
     def health_check(self) -> bool:
         """Check if the HSSD retrieval server is healthy and responsive.

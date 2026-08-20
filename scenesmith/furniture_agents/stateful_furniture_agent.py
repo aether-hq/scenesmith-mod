@@ -10,13 +10,11 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from agents import Agent, FunctionTool, Runner, RunResult
+from agents import Agent, FunctionTool
 from omegaconf import DictConfig
 
-from scenesmith.agent_utils.base_stateful_agent import (
-    BaseStatefulAgent,
-    log_agent_usage,
-)
+from scenesmith.agent_utils.base_stateful_agent import BaseStatefulAgent
+from scenesmith.agent_utils.blender.process_provider import RenderAllocation
 from scenesmith.agent_utils.placement_noise import PlacementNoiseMode
 from scenesmith.agent_utils.reachability import (
     compute_reachability,
@@ -25,7 +23,6 @@ from scenesmith.agent_utils.reachability import (
 from scenesmith.agent_utils.room import AgentType, RoomScene
 from scenesmith.agent_utils.scoring import (
     FurnitureCritiqueWithScores,
-    log_agent_response,
 )
 from scenesmith.agent_utils.workflow_tools import WorkflowTools
 from scenesmith.furniture_agents.base_furniture_agent import BaseFurnitureAgent
@@ -59,7 +56,7 @@ class StatefulFurnitureAgent(BaseStatefulAgent, BaseFurnitureAgent):
         materials_server_host: str = "127.0.0.1",
         materials_server_port: int = 7008,
         num_workers: int = 1,
-        render_gpu_id: int | None = None,
+        render_allocation: RenderAllocation | None = None,
     ):
         # Initialize base agent (sessions, checkpoint state, prompt registry).
         BaseStatefulAgent.__init__(
@@ -85,7 +82,7 @@ class StatefulFurnitureAgent(BaseStatefulAgent, BaseFurnitureAgent):
             materials_server_host=materials_server_host,
             materials_server_port=materials_server_port,
             num_workers=num_workers,
-            render_gpu_id=render_gpu_id,
+            render_allocation=render_allocation,
         )
 
         # Create persistent agent sessions using base class method.
@@ -264,6 +261,8 @@ class StatefulFurnitureAgent(BaseStatefulAgent, BaseFurnitureAgent):
         Args:
             scene: RoomScene to add furniture to (mutated in place)
         """
+        self._reset_workflow_budget()
+
         # Store everything as instance variables for closure access.
         self.scene = scene
 
@@ -291,24 +290,24 @@ class StatefulFurnitureAgent(BaseStatefulAgent, BaseFurnitureAgent):
         )
 
         # Run the furniture placement workflow.
-        result: RunResult = await Runner.run(
-            starting_agent=self.planner,
-            input=runner_instruction,
-            max_turns=self.cfg.agents.planner_agent.max_turns,
-            run_config=self._create_run_config(),
+        result = await self._run_planner_with_partial_recovery(
+            runner_instruction=runner_instruction,
+            agent_name="PLANNER (FURNITURE)",
+            state_hash=self.scene.content_hash,
         )
-        log_agent_usage(result=result, agent_name="PLANNER (FURNITURE)")
-
-        if result.final_output:
-            log_agent_response(
-                response=result.final_output, agent_name="PLANNER (FURNITURE)"
-            )
 
         # Compute final critique and scores for completed scene.
         # Check if scene changed since last checkpoint to avoid redundant critique.
         current_scene_hash = self.scene.content_hash()
 
         if (
+            self.cfg.max_critique_rounds <= 0
+            or self._workflow_limit_reached
+            or self._critique_calls >= int(self.cfg.max_critique_rounds)
+        ):
+            console_logger.info("Final critique skipped: critique budget unavailable")
+            self.final_render_dir = self.rendering_manager.last_render_dir
+        elif (
             self.checkpoint_scene_hash is not None
             and current_scene_hash == self.checkpoint_scene_hash
         ):
@@ -320,7 +319,7 @@ class StatefulFurnitureAgent(BaseStatefulAgent, BaseFurnitureAgent):
                 "Scene changed since last critique, computing final critique"
             )
             # Pass update_checkpoint=False to preserve N-1 checkpoint for reset check.
-            await self._request_critique_impl(update_checkpoint=False)
+            await self._request_critique_bounded(update_checkpoint=False)
 
         # Validate final scene and save scores.
         await self._finalize_scene_and_scores()

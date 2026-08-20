@@ -1,6 +1,6 @@
 # Geometry Extension Implementation Status
 
-Updated: 2026-08-13
+Updated: 2026-08-14
 
 Baseline: upstream SceneSmith `67cc408fd38334b4a926efef45e284302ed5055b`.
 
@@ -8,6 +8,8 @@ This is an evidence ledger, not a claim that the full capability matrix is
 finished. `IMPLEMENTED` means the deterministic semantic/compiler path exists
 and has focused tests. `INTEGRATED` additionally means a normal SceneSmith
 runtime/export path consumes it. `PARTIAL` names the remaining seam explicitly.
+In particular, direct compiler, example, or gallery use is `IMPLEMENTED`, not
+five-agent runtime integration.
 
 ## Current verified slice
 
@@ -22,7 +24,7 @@ runtime/export path consumes it. `PARTIAL` names the remaining seam explicitly.
 | Footprint holes/courtyards/atria | INTEGRATED | area/void collision and surface-query tests |
 | Independent floor/ceiling slab openings | INTEGRATED | stair opening and solid-roof cross-feature tests |
 | Planar sloped floors and ceilings | INTEGRATED | analytic normals, mesh and placement tests |
-| Boundary-local rectangular portals | INTEGRATED | wall visual/collision cutout, legacy opening adapter, validation tests |
+| Boundary-local rectangular portals | INTEGRATED | wall visual/collision cutout, rectangular compatibility adapter, validation tests |
 | Straight stairs | INTEGRATED | mesh, analytic step collision, treads, SDF, house export |
 | L stairs with landing | INTEGRATED | multisegment compiler and dispatch tests |
 | U/switchback stairs with landing | INTEGRATED | direction/landing validation and compiler tests |
@@ -46,21 +48,22 @@ runtime/export path consumes it. `PARTIAL` names the remaining seam explicitly.
 | Embedded cavern passage/shaft | INTEGRATED | semantic centerline + clearance envelope over imported/room shell; no duplicate model |
 | Text-agent structural authoring | INTEGRATED | atomic `set_structural_layout` tool and prompt routing |
 | Typed invalid/unsupported diagnostics | INTEGRATED | footprint, reference, connector, mesh, portal tests |
-| Semantic chamber/passage graph model | INTEGRATED | canonical JSON/hash, atomic `set_structural_layout`, HouseLayout checkpoint/export integration |
-| Variable-profile passage compiler | INTEGRATED | ellipse/keyhole/slot/arched profiles, variable cross-sections, open boundaries, surface roles |
-| Branch and chamber void union | INTEGRATED | deterministic implicit union; watertight Y-junction, chamber join, provenance and metamorphic tests |
-| Ellipsoid/superellipsoid cavern generation | INTEGRATED | rotated analytic chamber fields compile to visual/collision/surface products |
-| Passage graph topology adapter | INTEGRATED | branches/cycles/dead ends plus bound passage edge → `ConnectorSpec` derivation |
+| Semantic chamber/passage graph model | PARTIAL | canonical JSON/hash, atomic `set_structural_layout`, and HouseLayout serialization exist; normal runtime compilation is not wired |
+| Variable-profile passage compiler | IMPLEMENTED | ellipse/keyhole/slot/arched profiles, variable cross-sections, open boundaries, surface roles |
+| Branch and chamber void union | IMPLEMENTED | deterministic implicit union; watertight Y-junction, chamber join, provenance and metamorphic tests |
+| Ellipsoid/superellipsoid cavern generation | IMPLEMENTED | rotated analytic chamber fields compile to visual/collision/surface products |
+| Passage graph topology adapter | IMPLEMENTED | branches/cycles/dead ends plus bound passage edge → `ConnectorSpec` derivation |
 | Generic/LLM-authorability guardrails | IMPLEMENTED | rename/order/translation/subdivision invariance, source sentinel, strict unknown-field rejection |
-| Natural sky/exterior apertures | INTEGRATED | typed chamber openings compile as real non-watertight apertures with exposure/provenance metadata |
-| Seeded geological detail fields | INTEGRATED | versioned deterministic sampler, inward-oriented formations, full-envelope route/opening/hero masks, typed exhaustion diagnostic, collision policy, and HouseLayout export |
-| Semantic hero geological features | INTEGRATED | stable authored anchors compile independently with collision policy and field exclusion |
-| Unified derived semantic scene contract | INTEGRATED | one `HouseLayout.derive_scene_contract` call derives authenticated products, physical-gated topology/openings, collision queries, and blocked-route evidence |
-| Semantic hard invariants | INTEGRATED | safe globally unique authored/derived IDs, strict JSON scalar types, bounded work, declared-aperture manifold audits, outward closed formation meshes, and atomic content-addressed artifact bundles |
+| Natural sky/exterior apertures | IMPLEMENTED | typed chamber openings compile as real non-watertight apertures with exposure/provenance metadata |
+| Seeded geological detail fields | IMPLEMENTED | versioned deterministic sampler, inward-oriented formations, full-envelope route/opening/hero masks, typed exhaustion diagnostic, collision policy, and HouseLayout export |
+| Semantic hero geological features | IMPLEMENTED | stable authored anchors compile independently with collision policy and field exclusion |
+| Unified derived semantic scene contract | IMPLEMENTED | one `HouseLayout.derive_scene_contract` call derives authenticated products, physical-gated topology/openings, collision queries, and blocked-route evidence; normal runtime does not yet call it |
+| Semantic hard invariants | IMPLEMENTED | safe globally unique authored/derived IDs, strict JSON scalar types, bounded work, declared-aperture manifold audits, outward closed formation meshes, and atomic content-addressed artifact bundles |
 | Generated genericity suite | IMPLEMENTED | deterministic families cover 1–50 chamber/graph sizes, compiled graph degree 1–5, primitive cross-products, translation, rotation, scale, resolution, and cross-process hash-seed determinism |
 | Dragon-scale single cavern | IMPLEMENTED | an actual held-out LLM recipe compiles a 160×100×60 m chamber, approach, real sky aperture, 24 protected coarse formations, and a full-collision hero spire |
 | Linux Drake/render gates | CI GATED | generated content-addressed SDF is parsed with collision in Drake and the tunnel shell must produce a nonblank Blender render on Ubuntu CI |
 | Held-out LLM authoring evidence | INITIAL EVIDENCE | two retained Claude Sonnet 5 trials pass deterministic requirement oracles; aggregate evidence passes after-repair but not before-repair threshold, and remains below the repeated-corpus sample requirement |
+| Normal five-agent semantic scene generation | NOT INTEGRATED | floor-plan tool can store the recipe, but the stateful runner does not derive the semantic contract before furnishing/export; arbitrary-surface consumption remains incomplete across wall, ceiling, and manipuland stages |
 | Stable large-scene chunking and advanced formation policies | NOT IMPLEMENTED | bounded chunk manifests/LOD, paired columns, clustering, spawn/sightline masks, cave-mouth terrain seams, and imported hero composition remain planned |
 | Exterior terrain/environment seams | NOT IMPLEMENTED | existing heightfields are a foundation, not a complete exterior system |
 | Layered substrate and destruction operations | NOT IMPLEMENTED | breach/collapse/fracture/burn/deform operation stack is specified only |
@@ -118,7 +121,7 @@ repeated prompt trials) also pass.
 | Curved walls/vaults/domes/arches | PARTIAL | circles have bounded tessellation and freeform meshes work; general curve source mapping and parametric vault/arch generators are not built |
 | Portal shape breadth | PARTIAL | rectangular cutouts work; true arched/nonrectangular apertures remain mesh-tier |
 | Headroom/agent-radius clearance | PARTIAL | local predicates and connector centerline sampling are integrated; simulator swept-volume confirmation remains |
-| Cavern/tunnel generation | INTEGRATED | authored chamber/passages, real natural apertures, seeded details, and hero primitives compile automatically; loft/vaulted/mesh chamber shapes, roughness, and stable chunking remain |
+| Cavern/tunnel generation | PARTIAL | authored chamber/passages, real natural apertures, seeded details, and hero primitives compile directly; automatic five-agent runtime integration plus loft/vaulted/mesh chamber shapes, roughness, and stable chunking remain |
 | Elevator/lift | UNSUPPORTED | semantic elevator type fails explicitly; static shaft/landing and dynamic-car compilers remain |
 | Shaft connector | PARTIAL | an imported shell may embody a climb-gated shaft; no standalone shaft compiler exists |
 | Natural passage connector | INTEGRATED | passage graphs generate the physical shell and derive embedded connector topology/clearance data |
@@ -135,11 +138,14 @@ collision geometry, then Blender renders the generated semantic shell under
 
 ## Next implementation order
 
-1. add stable large-scene chunk manifests/LOD plus loft/vaulted chamber forms;
-2. extend detail fields with paired columns, clustering, spawn/sightline masks,
+1. integrate the derived semantic scene contract into the normal stateful
+   floor-plan runtime and all five agent stages, with full-fidelity room and
+   mixed cave/constructed end-to-end regressions;
+2. add stable large-scene chunk manifests/LOD plus loft/vaulted chamber forms;
+3. extend detail fields with paired columns, clustering, spawn/sightline masks,
    cave-mouth terrain seams, and imported hero composition;
-3. add exterior terrain, layered substrate, and reproducible damage operations;
-4. expand the retained LLM authorability evidence from the initial two trials
+4. add exterior terrain, layered substrate, and reproducible damage operations;
+5. expand the retained LLM authorability evidence from the initial two trials
    to the specification's repeated statistical corpus;
-5. monitor the supported-host Drake/Blender gates and add more canonical
+6. monitor the supported-host Drake/Blender gates and add more canonical
    semantic scenes as exterior and destruction primitives land.

@@ -5,6 +5,7 @@ import unittest
 import xml.etree.ElementTree as ET
 
 from pathlib import Path
+from unittest.mock import patch
 
 import numpy as np
 
@@ -621,6 +622,66 @@ class TestApplyPhysicalFeasibilityPostprocessing(PhysicalFeasibilityTestCase):
             self.assertTrue(
                 np.allclose(box1_after.transform.translation(), initial_pos)
             )
+
+    def test_ejected_projection_is_restored_and_simulation_is_skipped(self) -> None:
+        """A closed room collider cannot replace the valid placement checkpoint."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            scene = self._create_non_overlapping_boxes_scene(Path(tmp_dir))
+            scene.room_geometry.wall_height = 3.0
+            scene.room_geometry.floor = SceneObject(
+                object_id=UniqueID("floor"),
+                object_type=ObjectType.FLOOR,
+                name="floor",
+                description="Test floor",
+                transform=RigidTransform(),
+                bbox_min=np.array([-5.0, -5.0, -0.1]),
+                bbox_max=np.array([5.0, 5.0, 0.0]),
+                immutable=True,
+            )
+            for obj in scene.objects.values():
+                obj.bbox_min = np.array([-0.25, -0.25, -0.25])
+                obj.bbox_max = np.array([0.25, 0.25, 0.25])
+
+            original = {
+                object_id: obj.transform.translation().copy()
+                for object_id, obj in scene.objects.items()
+            }
+
+            def eject_furniture(*, scene, **_kwargs):
+                for obj in scene.objects.values():
+                    obj.transform = RigidTransform(p=[0.0, 0.0, -20.0])
+                return scene, True
+
+            with (
+                patch(
+                    "scenesmith.agent_utils.physical_feasibility."
+                    "apply_non_penetration_projection",
+                    side_effect=eject_furniture,
+                ),
+                patch(
+                    "scenesmith.agent_utils.physical_feasibility."
+                    "apply_forward_simulation"
+                ) as simulation,
+            ):
+                processed, success, removed = (
+                    apply_physical_feasibility_postprocessing(
+                        scene=scene,
+                        weld_furniture=False,
+                        projection_enabled=True,
+                        simulation_enabled=True,
+                    )
+                )
+
+            self.assertFalse(success)
+            self.assertEqual(removed, [])
+            simulation.assert_not_called()
+            for object_id, position in original.items():
+                self.assertTrue(
+                    np.allclose(
+                        processed.get_object(object_id).transform.translation(),
+                        position,
+                    )
+                )
 
     def test_disabled_simulation(self) -> None:
         """Test that disabled simulation skips simulation stage."""

@@ -1,15 +1,5 @@
 from __future__ import annotations
 
-# Configure CUDA environment BEFORE any CUDA-dependent imports.
-# This is required for nvdiffrast JIT compilation used by SAM 3D Objects.
-# Must be called before importing torch to ensure environment is set up.
-from scenesmith.agent_utils.geometry_generation_server.cuda_env_setup import (
-    ensure_cuda_env,
-)
-
-ensure_cuda_env()
-
-# Now safe to import CUDA-dependent code.
 import gc
 import logging
 import threading
@@ -24,6 +14,7 @@ import torch
 from PIL import Image
 from scipy import ndimage
 
+from scenesmith.agent_utils.execution_providers import release_torch_cache
 from scenesmith.agent_utils.mesh_utils import load_mesh_as_trimesh
 
 console_logger = logging.getLogger(__name__)
@@ -198,10 +189,9 @@ class SAM3DPipelineManager:
         cls._sam3_model = None
         cls._sam3d_pipeline = None
 
-        # Force garbage collection and clear CUDA cache.
+        # Force garbage collection and release the selected provider cache.
         gc.collect()
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
+        release_torch_cache("cuda", torch_module=torch)
 
     @classmethod
     def _pre_init_nvdiffrast(cls) -> None:

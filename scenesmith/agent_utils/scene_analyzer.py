@@ -43,6 +43,61 @@ class FurnitureSelection:
     """IDs of nearby furniture for context (e.g., chairs around a table)."""
 
 
+_MANIPULAND_SURFACE_RULES: tuple[tuple[tuple[str, ...], str, int], ...] = (
+    (
+        ("medical bed", "med bed", "hospital bed", "treatment bed"),
+        "one pillow",
+        100,
+    ),
+    (("nightstand", "bedside table"), "reading light, book, personal item", 90),
+    (("desk", "workstation"), "task light, notebook, compact work accessories", 85),
+    (
+        ("dining table", "coffee table", "side table", "table"),
+        "a sparse set of context-appropriate tabletop objects",
+        80,
+    ),
+    (
+        ("counter", "worktop", "island"),
+        "a sparse set of functional counter objects",
+        75,
+    ),
+    (
+        ("shelf", "bookcase", "cabinet", "dresser", "console"),
+        "a few context-appropriate display or storage objects",
+        70,
+    ),
+    (("bench",), "one or two context-appropriate loose objects", 50),
+)
+
+_MANIPULAND_SURFACE_EXCLUSIONS = (
+    "chair",
+    "stool",
+    "sofa",
+    "couch",
+    "lamp",
+    "light",
+    "monitor",
+    "screen",
+    "television",
+    "plant",
+    "door",
+    "window",
+    "painting",
+    "mirror",
+)
+
+
+def deterministic_manipuland_assignment(obj: Any) -> tuple[str, int] | None:
+    """Return a stable small-object assignment for a likely support surface."""
+    searchable = f"{getattr(obj, 'name', '')} {getattr(obj, 'description', '')}".lower()
+    if any(keyword in searchable for keyword in _MANIPULAND_SURFACE_EXCLUSIONS):
+        return None
+    for keywords, suggested_items, priority in _MANIPULAND_SURFACE_RULES:
+        if any(keyword in searchable for keyword in keywords):
+            return suggested_items, priority
+    return None
+
+
 def _compute_aabb_edge_distance(
     bounds_a: tuple[np.ndarray, np.ndarray],
     bounds_b: tuple[np.ndarray, np.ndarray],
@@ -285,7 +340,11 @@ class SceneAnalyzer:
         Returns:
             List of FurnitureSelection objects with assignment context.
         """
-        console_logger.info("Analyzing furniture for manipuland placement (VLM-based)")
+        selection_cfg = getattr(self.cfg, "furniture_selection", None)
+        selection_mode = getattr(selection_cfg, "mode", "deterministic")
+        console_logger.info(
+            "Analyzing furniture for manipuland placement (mode=%s)", selection_mode
+        )
 
         # Filter to furniture and wall-mounted objects (shelves, racks, etc.).
         # Wall-mounted objects can have support surfaces for manipulands.
@@ -308,6 +367,43 @@ class SceneAnalyzer:
         if not furniture_objects:
             console_logger.info("No furniture found in scene")
             return []
+
+        if selection_mode == "deterministic":
+            candidates = []
+            for obj in furniture_objects:
+                if obj.object_type == ObjectType.FLOOR:
+                    continue
+                assignment = deterministic_manipuland_assignment(obj)
+                if assignment is None:
+                    continue
+                suggested_items, priority = assignment
+                candidates.append((priority, str(obj.object_id), obj, suggested_items))
+            candidates.sort(key=lambda item: (-item[0], item[1]))
+            max_furniture = int(getattr(selection_cfg, "max_furniture", 3))
+            scene_style = scene.text_description or "context-appropriate room"
+            result = [
+                FurnitureSelection(
+                    furniture_id=obj.object_id,
+                    suggested_items=suggested_items,
+                    prompt_constraints="No additional object was explicitly required",
+                    style_notes=(
+                        "Sparse, functional placement derived from the room prompt: "
+                        f"{scene_style[:240]}"
+                    ),
+                )
+                for _, _, obj, suggested_items in candidates[:max_furniture]
+            ]
+            console_logger.info(
+                "Deterministically selected %d support surfaces: %s",
+                len(result),
+                [str(item.furniture_id) for item in result],
+            )
+            return result
+
+        if selection_mode != "vision":
+            raise ValueError(
+                f"Unsupported furniture_selection.mode: {selection_mode!r}"
+            )
 
         # Build furniture list for VLM reference.
         furniture_list = "\n".join(
@@ -451,6 +547,26 @@ class SceneAnalyzer:
         if not all_candidates:
             console_logger.info("No nearby furniture candidates found")
             return {}
+
+        selection_mode = getattr(cfg_context, "selection_mode", "deterministic")
+        if selection_mode == "deterministic":
+            max_selected = int(getattr(cfg_context, "max_selected_candidates", 4))
+            context_map = {
+                UniqueID(furniture_id): [
+                    UniqueID(candidate["furniture_id"])
+                    for candidate in candidates[:max_selected]
+                ]
+                for furniture_id, candidates in all_candidates.items()
+            }
+            console_logger.info(
+                "Deterministically selected context furniture for %d surfaces",
+                len(context_map),
+            )
+            return context_map
+        if selection_mode != "vision":
+            raise ValueError(
+                f"Unsupported context_furniture.selection_mode: {selection_mode!r}"
+            )
 
         # Format for VLM prompt.
         furniture_with_candidates = self._format_candidates_for_prompt(

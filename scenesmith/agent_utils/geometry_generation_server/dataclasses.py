@@ -6,11 +6,21 @@ HTTP API contract and use primitive types for JSON serialization.
 """
 
 import json
+import math
 
 from dataclasses import asdict, dataclass
+from pathlib import Path
+from typing import Any
+
+_MAX_PATH_CHARS = 4096
+_MAX_PROMPT_CHARS = 8192
+_MAX_SCENE_ID_CHARS = 256
+_MAX_CONFIG_BYTES = 64 * 1024
+_MAX_CONFIG_DEPTH = 12
+_MAX_CONFIG_ITEMS = 512
 
 
-@dataclass
+@dataclass(frozen=True)
 class GeometryGenerationServerRequest:
     """Request payload for geometry generation server.
 
@@ -40,8 +50,9 @@ class GeometryGenerationServerRequest:
 
     sam3d_config: dict | None = None
     """Configuration for SAM3D backend. Required if backend="sam3d". Should contain:
-    - sam3_checkpoint (str): Path to SAM3 checkpoint
-    - sam3d_checkpoint (str): Path to SAM 3D Objects checkpoint
+    - provider (str): "auto", "mlx", or "cuda"
+    - sam3_checkpoint / sam3d_checkpoint: CUDA provider checkpoints
+    - mlx_repo_path / mlx_python_path / mlx_checkpoint_dir: MLX runtime paths
     - mode (str): Segmentation mode ("foreground" or "object_description")
     - object_description (str | None): Object description (if mode="object_description")
     - threshold (float): Confidence threshold for mask generation
@@ -57,7 +68,49 @@ class GeometryGenerationServerRequest:
     separate client.
     """
 
-    def to_dict(self) -> dict[str, str]:
+    def __post_init__(self) -> None:
+        _validate_string("image_path", self.image_path, max_chars=_MAX_PATH_CHARS)
+        _validate_string("output_dir", self.output_dir, max_chars=_MAX_PATH_CHARS)
+        _validate_string("prompt", self.prompt, max_chars=_MAX_PROMPT_CHARS)
+        for name, value in (
+            ("debug_folder", self.debug_folder),
+            ("output_filename", self.output_filename),
+            ("scene_id", self.scene_id),
+        ):
+            if value is not None:
+                limit = _MAX_SCENE_ID_CHARS if name == "scene_id" else _MAX_PATH_CHARS
+                _validate_string(name, value, max_chars=limit)
+        if (
+            self.output_filename is not None
+            and Path(self.output_filename).name != self.output_filename
+        ):
+            raise ValueError("output_filename must be a safe basename")
+        if type(self.backend) is not str or self.backend not in {"hunyuan3d", "sam3d"}:
+            raise ValueError("backend must be 'hunyuan3d' or 'sam3d'")
+        if self.sam3d_config is not None:
+            if type(self.sam3d_config) is not dict:
+                raise TypeError("sam3d_config must be a JSON object")
+            item_count = [0]
+            _validate_json_value(
+                self.sam3d_config,
+                path="sam3d_config",
+                depth=0,
+                item_count=item_count,
+            )
+            try:
+                encoded = json.dumps(
+                    self.sam3d_config,
+                    allow_nan=False,
+                    separators=(",", ":"),
+                ).encode("utf-8")
+            except (TypeError, ValueError) as exc:
+                raise ValueError(
+                    "sam3d_config must contain finite JSON values"
+                ) from exc
+            if len(encoded) > _MAX_CONFIG_BYTES:
+                raise ValueError("sam3d_config exceeds its byte budget")
+
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for JSON serialization.
 
         Returns:
@@ -74,7 +127,7 @@ class GeometryGenerationServerRequest:
         return json.dumps(self.to_dict())
 
 
-@dataclass
+@dataclass(frozen=True)
 class GeometryGenerationServerResponse:
     """Response payload from geometry generation server.
 
@@ -85,8 +138,11 @@ class GeometryGenerationServerResponse:
     geometry_path: str
     """Absolute path to the generated 3D geometry file (GLB format)."""
 
+    def __post_init__(self) -> None:
+        _validate_string("geometry_path", self.geometry_path, max_chars=_MAX_PATH_CHARS)
 
-@dataclass
+
+@dataclass(frozen=True)
 class GeometryGenerationError:
     """Error information for a failed geometry generation request.
 
@@ -101,8 +157,14 @@ class GeometryGenerationError:
     error_message: str
     """Description of what went wrong during geometry generation."""
 
+    def __post_init__(self) -> None:
+        _validate_result_index(self.index)
+        _validate_string(
+            "error_message", self.error_message, max_chars=_MAX_PROMPT_CHARS
+        )
 
-@dataclass
+
+@dataclass(frozen=True)
 class StreamedResult:
     """Single result in a streaming batch response.
 
@@ -122,6 +184,28 @@ class StreamedResult:
     error: str | None = None
     """Error message for failed requests."""
 
+    def __post_init__(self) -> None:
+        _validate_result_index(self.index)
+        if type(self.status) is not str or self.status not in {"success", "error"}:
+            raise ValueError("status must be 'success' or 'error'")
+        if self.status == "success":
+            if type(self.data) is not dict:
+                raise ValueError("success result must contain object data")
+            if self.error is not None:
+                raise ValueError("success result must not contain an error message")
+            _validate_json_value(
+                self.data,
+                path="data",
+                depth=0,
+                item_count=[0],
+            )
+        else:
+            if self.data is not None:
+                raise ValueError("error result must not contain success data")
+            if self.error is None:
+                raise ValueError("error result must contain an error message")
+            _validate_string("error", self.error, max_chars=_MAX_PROMPT_CHARS)
+
     def to_dict(self) -> dict:
         """Convert to dictionary for JSON serialization."""
         return asdict(self)
@@ -129,3 +213,54 @@ class StreamedResult:
     def to_json(self) -> str:
         """Convert to JSON string for streaming response."""
         return json.dumps(self.to_dict())
+
+
+def _validate_string(name: str, value: Any, *, max_chars: int) -> None:
+    if type(value) is not str:
+        raise TypeError(f"{name} must be a string")
+    if not value or len(value) > max_chars:
+        raise ValueError(f"{name} must contain 1 to {max_chars} characters")
+
+
+def _validate_result_index(index: Any) -> None:
+    if type(index) is not int:
+        raise TypeError("index must be an integer")
+    if index < 0:
+        raise ValueError("index must be non-negative")
+
+
+def _validate_json_value(
+    value: Any, *, path: str, depth: int, item_count: list[int]
+) -> None:
+    if depth > _MAX_CONFIG_DEPTH:
+        raise ValueError(f"{path} exceeds the nesting budget")
+    item_count[0] += 1
+    if item_count[0] > _MAX_CONFIG_ITEMS:
+        raise ValueError("sam3d_config exceeds its item budget")
+    if value is None or type(value) in {str, bool, int}:
+        return
+    if type(value) is float:
+        if not math.isfinite(value):
+            raise ValueError(f"{path} must contain finite numeric values")
+        return
+    if type(value) is list:
+        for index, item in enumerate(value):
+            _validate_json_value(
+                item,
+                path=f"{path}[{index}]",
+                depth=depth + 1,
+                item_count=item_count,
+            )
+        return
+    if type(value) is dict:
+        for key, item in value.items():
+            if type(key) is not str:
+                raise TypeError(f"{path} keys must be strings")
+            _validate_json_value(
+                item,
+                path=f"{path}.{key}",
+                depth=depth + 1,
+                item_count=item_count,
+            )
+        return
+    raise TypeError(f"{path} contains a non-JSON value of type {type(value).__name__}")

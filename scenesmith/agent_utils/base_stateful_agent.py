@@ -12,7 +12,7 @@ import shutil
 
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import yaml
 
@@ -21,23 +21,34 @@ from agents import (
     FunctionTool,
     ModelSettings,
     RunConfig,
-    Runner,
     RunResult,
     SQLiteSession,
     function_tool,
 )
 from agents.memory.session import Session
+from agents.exceptions import MaxTurnsExceeded, ModelBehaviorError
 from omegaconf import DictConfig
 from openai import Timeout
 from openai.types.shared import Reasoning
 
 from scenesmith.agent_utils.action_logger import log_scene_action
+from scenesmith.agent_utils.agent_runtime import (
+    AgentWorkflowTimeout,
+    BoundedRunner as Runner,
+    agent_run_timeout_seconds,
+)
 from scenesmith.agent_utils.chat_completions_image_filter import (
     ChatCompletionsToolImageFilter,
     CompositeCallModelInputFilter,
 )
 from scenesmith.agent_utils.checkpoint_state import initialize_checkpoint_attributes
 from scenesmith.agent_utils.intra_turn_image_filter import IntraTurnImageFilter
+from scenesmith.agent_utils.llm_harness import (
+    LLMHarnessError,
+    LLMHarnessConfig,
+    agents_model_provider,
+    detect_capabilities,
+)
 from scenesmith.agent_utils.physics_tools import check_physics_violations
 from scenesmith.agent_utils.placement_noise import PlacementNoiseMode
 from scenesmith.agent_utils.room import AgentType
@@ -169,6 +180,140 @@ class BaseStatefulAgent(ABC):
         # Initialize checkpoint state (N-1 and N pattern for rollback).
         initialize_checkpoint_attributes(target=self)
 
+        # These limits are enforced in code. Prompt instructions are advisory and
+        # previously allowed planners to repeat the same expensive sub-workflow
+        # until the outer 30-minute deadline fired.
+        self._reset_workflow_budget()
+
+    def _reset_workflow_budget(self) -> None:
+        """Reset enforced counters for one independently composed stage/item."""
+        self._initial_design_calls = 0
+        self._critique_calls = 0
+        self._design_change_calls = 0
+        self._workflow_limit_reached = False
+
+    def _workflow_stop_message(self, phase: str, reason: Exception | str) -> str:
+        """Record a recoverable limit and tell the planner to finish immediately."""
+        self._workflow_limit_reached = True
+        message = (
+            f"{phase} stopped at its safety budget ({reason}). "
+            "Keep the current scene, do not call more design tools, and finish now."
+        )
+        console_logger.warning(message)
+        return message
+
+    async def _request_initial_design_bounded(self) -> str:
+        """Run at most one initial design and preserve mutations at a safety limit."""
+        if self._workflow_limit_reached:
+            return self._workflow_stop_message(
+                "Initial design", "the stage safety budget is already exhausted"
+            )
+        if self._initial_design_calls >= 1:
+            return (
+                "Initial design already ran. Do not request it again; finish the "
+                "workflow or use the remaining critique budget."
+            )
+        self._initial_design_calls += 1
+        try:
+            return await self._request_initial_design_impl()
+        except (
+            AgentWorkflowTimeout,
+            MaxTurnsExceeded,
+            ModelBehaviorError,
+            LLMHarnessError,
+        ) as exc:
+            return self._workflow_stop_message("Initial design", exc)
+
+    async def _request_critique_bounded(self, update_checkpoint: bool = True) -> str:
+        """Run a critic only while the configured critique budget remains."""
+        max_calls = max(0, int(self.cfg.max_critique_rounds))
+        if self._workflow_limit_reached:
+            return self._workflow_stop_message(
+                "Critique", "the stage safety budget is already exhausted"
+            )
+        if self._critique_calls >= max_calls:
+            return (
+                f"Critique budget exhausted ({max_calls}). Keep the current scene "
+                "and finish now."
+            )
+        self._critique_calls += 1
+        try:
+            return await self._request_critique_impl(
+                update_checkpoint=update_checkpoint
+            )
+        except (
+            AgentWorkflowTimeout,
+            MaxTurnsExceeded,
+            ModelBehaviorError,
+            LLMHarnessError,
+        ) as exc:
+            return self._workflow_stop_message("Critique", exc)
+
+    async def _request_design_change_bounded(self, instruction: str) -> str:
+        """Run no more revisions than configured critique rounds."""
+        max_calls = max(0, int(self.cfg.max_critique_rounds))
+        if self._workflow_limit_reached:
+            return self._workflow_stop_message(
+                "Design revision", "the stage safety budget is already exhausted"
+            )
+        if self._design_change_calls >= max_calls:
+            return (
+                f"Design revision budget exhausted ({max_calls}). Keep the current "
+                "scene and finish now."
+            )
+        self._design_change_calls += 1
+        try:
+            return await self._request_design_change_impl(instruction)
+        except (
+            AgentWorkflowTimeout,
+            MaxTurnsExceeded,
+            ModelBehaviorError,
+            LLMHarnessError,
+        ) as exc:
+            return self._workflow_stop_message("Design revision", exc)
+
+    async def _run_planner_with_partial_recovery(
+        self,
+        *,
+        runner_instruction: str,
+        agent_name: str,
+        state_hash: Callable[[], int],
+    ) -> RunResult | None:
+        """Run a planner with a hard stage deadline and retain useful work."""
+        starting_hash = state_hash()
+        try:
+            result: RunResult = await Runner.run(
+                starting_agent=self.planner,
+                input=runner_instruction,
+                max_turns=self.cfg.agents.planner_agent.max_turns,
+                run_config=self._create_run_config(),
+                timeout_seconds=agent_run_timeout_seconds(
+                    "planner",
+                    max_turns=self.cfg.agents.planner_agent.max_turns,
+                ),
+            )
+        except (
+            AgentWorkflowTimeout,
+            MaxTurnsExceeded,
+            ModelBehaviorError,
+            LLMHarnessError,
+        ) as exc:
+            self._workflow_limit_reached = True
+            if state_hash() == starting_hash:
+                raise
+            console_logger.warning(
+                "%s stopped at its safety budget (%s); preserving the changed "
+                "scene for stage validation",
+                agent_name,
+                exc,
+            )
+            return None
+
+        log_agent_usage(result=result, agent_name=agent_name)
+        if result.final_output:
+            log_agent_response(response=result.final_output, agent_name=agent_name)
+        return result
+
     def _get_model_settings(
         self,
         settings_key: str | None = None,
@@ -192,15 +337,20 @@ class BaseStatefulAgent(ABC):
         """
         kwargs: dict = {}
         extra_args: dict = {}
+        harness = LLMHarnessConfig.from_env(default_model=self.cfg.openai.model)
 
-        # Add timeout if configured (api_timeout is optional).
+        # Every provider receives the same bounded request deadline. Historical
+        # YAML values of 1800 seconds must never override the harness policy.
         if hasattr(self.cfg, "api_timeout"):
             timeout_cfg = self.cfg.api_timeout
+            request_timeout = harness.timeout_seconds + (
+                5 if harness.uses_cli_bridge else 0
+            )
             timeout = Timeout(
-                connect=timeout_cfg.connect,
-                read=timeout_cfg.read,
-                write=timeout_cfg.write,
-                pool=timeout_cfg.pool,
+                connect=min(float(timeout_cfg.connect), request_timeout),
+                read=request_timeout,
+                write=min(float(timeout_cfg.write), request_timeout),
+                pool=min(float(timeout_cfg.pool), request_timeout),
             )
             extra_args["timeout"] = timeout
 
@@ -213,7 +363,8 @@ class BaseStatefulAgent(ABC):
             kwargs["extra_args"] = extra_args
 
         # Add reasoning effort and verbosity if key is provided.
-        if settings_key:
+        capabilities = detect_capabilities(harness)
+        if settings_key and capabilities.native_reasoning_controls:
             reasoning_cfg = self.cfg.openai.reasoning_effort
             effort = getattr(reasoning_cfg, settings_key)
             kwargs["reasoning"] = Reasoning(effort=effort)
@@ -257,7 +408,12 @@ class BaseStatefulAgent(ABC):
                 prompt_enum=prompt_enum,
                 **prompt_kwargs,
             ),
-            model_settings=self._get_model_settings(settings_key="designer"),
+            # A designer exists to mutate the scene. Requiring a first tool call
+            # prevents provider-specific prose refusals from being accepted as a
+            # successful design; the SDK resets tool choice after that call.
+            model_settings=self._get_model_settings(
+                settings_key="designer", tool_choice="required"
+            ),
         )
 
     def _create_critic_agent(
@@ -393,9 +549,16 @@ class BaseStatefulAgent(ABC):
 
         input_filters.append(ChatCompletionsToolImageFilter())
 
-        return RunConfig(
-            call_model_input_filter=CompositeCallModelInputFilter(input_filters)
-        )
+        harness = LLMHarnessConfig.from_env(default_model=self.cfg.openai.model)
+        kwargs: dict[str, Any] = {
+            "call_model_input_filter": CompositeCallModelInputFilter(input_filters)
+        }
+        provider = agents_model_provider(harness)
+        # RunConfig's default provider is a sentinel-backed SDK provider. Passing
+        # explicit None replaces it and fails later at get_model().
+        if provider is not None:
+            kwargs["model_provider"] = provider
+        return RunConfig(**kwargs)
 
     def _should_reset_to_checkpoint(
         self,
@@ -684,7 +847,7 @@ class BaseStatefulAgent(ABC):
             Returns:
                 Designer's report of what was created and why.
             """
-            return await self._request_initial_design_impl()
+            return await self._request_initial_design_bounded()
 
         @function_tool
         async def request_critique() -> str:
@@ -696,7 +859,7 @@ class BaseStatefulAgent(ABC):
             Returns:
                 Critic's detailed evaluation with specific improvement suggestions.
             """
-            return await self._request_critique_impl()
+            return await self._request_critique_bounded()
 
         @function_tool
         async def request_design_change(instruction: str) -> str:
@@ -712,7 +875,7 @@ class BaseStatefulAgent(ABC):
             Returns:
                 Designer's report of what was changed.
             """
-            return await self._request_design_change_impl(instruction)
+            return await self._request_design_change_bounded(instruction)
 
         tools: list[FunctionTool] = [request_initial_design]
 
@@ -805,6 +968,10 @@ class BaseStatefulAgent(ABC):
             session=self.critic_session,
             max_turns=self.cfg.agents.critic_agent.max_turns,
             run_config=self._create_run_config(),
+            timeout_seconds=agent_run_timeout_seconds(
+                "critic",
+                max_turns=self.cfg.agents.critic_agent.max_turns,
+            ),
         )
         log_agent_usage(result=result, agent_name="CRITIC")
 
@@ -903,6 +1070,10 @@ class BaseStatefulAgent(ABC):
             session=self.designer_session,
             max_turns=self.cfg.agents.designer_agent.max_turns,
             run_config=self._create_run_config(),
+            timeout_seconds=agent_run_timeout_seconds(
+                "designer",
+                max_turns=self.cfg.agents.designer_agent.max_turns,
+            ),
         )
         log_agent_usage(result=result, agent_name="DESIGNER (CHANGE)")
 
@@ -993,13 +1164,22 @@ class BaseStatefulAgent(ABC):
         input_message = self._build_initial_design_input(instruction)
 
         # Designer runs with initial design instruction.
+        starting_hash = self.scene.content_hash()
         result = await Runner.run(
             starting_agent=self.designer,
             input=input_message,
             session=self.designer_session,
             max_turns=self.cfg.agents.designer_agent.max_turns,
             run_config=self._create_run_config(),
+            timeout_seconds=agent_run_timeout_seconds(
+                "designer",
+                max_turns=self.cfg.agents.designer_agent.max_turns,
+            ),
         )
+        if self.scene.content_hash() == starting_hash:
+            raise ModelBehaviorError(
+                "Initial designer returned without making a scene mutation"
+            )
         log_agent_usage(result=result, agent_name="DESIGNER (INITIAL)")
 
         if result.final_output:

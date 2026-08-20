@@ -5,6 +5,7 @@ intact (with images) while trimming older turns by removing images and
 optionally summarizing the text content.
 """
 
+import asyncio
 import hashlib
 import json
 import logging
@@ -19,9 +20,7 @@ from typing import Any
 from agents import SQLiteSession
 from agents.items import TResponseInputItem
 from omegaconf import DictConfig
-from openai import AsyncOpenAI
-from openai.types.shared import Reasoning
-
+from scenesmith.agent_utils.vlm_service import VLMService
 from scenesmith.prompts import prompt_registry
 from scenesmith.prompts.registry import SessionMemoryPrompts
 
@@ -377,13 +376,13 @@ class TurnTrimmingSession:
             cache_path = Path(tempfile.gettempdir()) / f"{self.session_id}_summaries.db"
 
         self._summary_cache = SummaryCache(cache_path)
-        self._openai_client: AsyncOpenAI | None = None
+        self._vlm_service: VLMService | None = None
 
-    def _get_openai_client(self) -> AsyncOpenAI:
-        """Get or create the OpenAI client for summarization."""
-        if self._openai_client is None:
-            self._openai_client = AsyncOpenAI()
-        return self._openai_client
+    def _get_vlm_service(self) -> VLMService:
+        """Get the common provider-neutral harness facade for summarization."""
+        if self._vlm_service is None:
+            self._vlm_service = VLMService()
+        return self._vlm_service
 
     async def _summarize_turn(self, turn: Turn, turn_number: int) -> str:
         """Summarize turn text content via LLM.
@@ -413,24 +412,25 @@ class TurnTrimmingSession:
             f"Summarizing turn {turn_number} with {self._summarization_model}"
         )
 
-        # Build reasoning parameter if thinking is enabled.
-        reasoning = None
-        if self._summarization_thinking and self._summarization_thinking != "none":
-            reasoning = Reasoning(effort=self._summarization_thinking)
-
         # Load summarization prompt from prompt registry.
         summarization_prompt = prompt_registry.get_prompt(
             prompt_enum=SessionMemoryPrompts.TURN_SUMMARIZATION
         )
 
         try:
-            response = await self._get_openai_client().responses.create(
+            effort = self._summarization_thinking or "low"
+            if effort == "none":
+                effort = "low"
+            summary = await asyncio.to_thread(
+                self._get_vlm_service().create_completion,
                 model=self._summarization_model,
-                instructions=summarization_prompt,
-                input=text,
-                reasoning=reasoning,
+                messages=[
+                    {"role": "system", "content": summarization_prompt},
+                    {"role": "user", "content": text},
+                ],
+                reasoning_effort=effort,
+                verbosity="low",
             )
-            summary = response.output_text or "[Summary generation failed]"
         except Exception as e:
             console_logger.error(f"Summarization failed: {e}")
             # Fallback: just strip images without summarizing.

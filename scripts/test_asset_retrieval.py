@@ -554,12 +554,19 @@ def main() -> None:
     source_map = None  # Only used for articulated sources.
     console_logger.info(f"\nLoading {args.source} data...")
     if args.source == "hssd":
-        # HSSD requires embeddings path (use default if not provided).
-        embeddings_path = args.embeddings_path or Path("data/hssd-preprocessed")
+        # HSSD uses the same defaults as the live retrieval server.
+        args.data_path = args.data_path or Path("data/hssd-models")
+        if not args.data_path.exists():
+            console_logger.error(
+                f"HSSD data path not found: {args.data_path}. "
+                "Provide --data-path or ensure data/hssd-models exists."
+            )
+            return
+        embeddings_path = args.embeddings_path or Path("data/preprocessed")
         if not embeddings_path.exists():
             console_logger.error(
                 f"HSSD preprocessed path not found: {embeddings_path}. "
-                "Provide --embeddings-path or ensure data/hssd-preprocessed exists."
+                "Provide --embeddings-path or ensure data/preprocessed exists."
             )
             return
         embeddings, object_ids, metadata = load_hssd_data(embeddings_path)

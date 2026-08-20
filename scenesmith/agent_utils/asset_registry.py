@@ -17,16 +17,23 @@ console_logger = logging.getLogger(__name__)
 class AssetRegistry:
     """Registry for tracking generated assets within a session (tracked in memory)."""
 
-    def __init__(self, auto_save_path: Path | None = None) -> None:
+    def __init__(
+        self,
+        auto_save_path: Path | None = None,
+        mirror_save_path: Path | None = None,
+    ) -> None:
         """Initialize empty registry.
 
         Args:
             auto_save_path: If provided, registry will auto-save to this path
                 after each registration. This ensures the registry is saved
                 incrementally, even if scene generation fails partway through.
+            mirror_save_path: Optional shared registry updated alongside the local
+                registry so generated assets can be reused in later scenes.
         """
         self._assets: dict[UniqueID, SceneObject] = {}
         self.auto_save_path = auto_save_path
+        self.mirror_save_path = mirror_save_path
         console_logger.info(
             f"Initialized AssetRegistry"
             f"{' with auto-save to ' + str(auto_save_path) if auto_save_path else ''}"
@@ -52,9 +59,7 @@ class AssetRegistry:
         console_logger.info(f"Registered asset {asset_id} ({asset.name})")
 
         # Auto-save if path is configured (fail-fast on errors).
-        if self.auto_save_path:
-            self.save_to_file(file_path=self.auto_save_path)
-            console_logger.debug(f"Auto-saved registry to {self.auto_save_path}")
+        self._save_configured_paths()
 
     def generate_unique_id(self, name: str) -> UniqueID:
         """Generate unique ID that doesn't conflict with registered assets.
@@ -82,6 +87,21 @@ class AssetRegistry:
         else:
             console_logger.debug(f"Asset {asset_id} not found in registry")
         return asset
+
+    def discard(self, asset_id: UniqueID, *, persist: bool = True) -> bool:
+        """Remove one invalid asset from this registry.
+
+        This is used to quarantine stale shared-cache entries whose catalog
+        ontology no longer matches the semantic request they were stored under.
+        """
+
+        asset = self._assets.pop(asset_id, None)
+        if asset is None:
+            return False
+        console_logger.warning("Quarantined cached asset %s (%s)", asset_id, asset.name)
+        if persist:
+            self._save_configured_paths()
+        return True
 
     def list_all(self) -> list[SceneObject]:
         """List all registered assets.
@@ -140,11 +160,23 @@ class AssetRegistry:
             )
 
             # Auto-save if path is configured.
-            if self.auto_save_path:
-                self.save_to_file(file_path=self.auto_save_path)
-                console_logger.debug(f"Auto-saved registry after rescale")
+            self._save_configured_paths()
 
         return updated_count
+
+    def _save_configured_paths(self) -> None:
+        """Persist the registry to its local and optional shared paths."""
+        paths = [self.auto_save_path, self.mirror_save_path]
+        saved: set[Path] = set()
+        for configured_path in paths:
+            if configured_path is None:
+                continue
+            resolved_path = configured_path.resolve()
+            if resolved_path in saved:
+                continue
+            self.save_to_file(file_path=configured_path)
+            saved.add(resolved_path)
+            console_logger.debug(f"Auto-saved registry to {configured_path}")
 
     def save_to_file(self, file_path: Path) -> None:
         """Save registry to JSON file for persistence.

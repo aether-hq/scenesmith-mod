@@ -71,6 +71,8 @@ rendering:
 asset_manager:
   # Asset source: "generated" (Hunyuan3D/SAM3D) or "hssd" (HSSD retrieval)
   general_asset_source: "generated"
+  # Optional cross-scene registry. Set Composer enables this for preview builds.
+  shared_registry_path: null
 
   # 3D generation backend (only used when general_asset_source="generated")
   backend: "sam3d"
@@ -82,6 +84,8 @@ asset_manager:
   router:
     # Enable LLM-based request analysis and validation
     enabled: true
+    # Requests from placement tools are already atomic, typed, and dimensioned.
+    deterministic_analysis: true
     # Number of concurrent item generation threads (overlaps I/O-bound work)
     parallel_workers: 10
     # Max retries for VLM analysis if parsing fails (e.g., invalid object_type)
@@ -94,7 +98,7 @@ asset_manager:
       # Articulated objects
       articulated:
         enabled: true
-        max_retries: 3
+        max_retries: 0
         use_lenient_validation: true  # Lenient validation for dataset objects
       # Thin covering: flat floor surfaces (rugs, yoga mats, runners).
       thin_covering:
@@ -112,6 +116,9 @@ asset_manager:
 
   # SAM3D backend configuration (only used when backend="sam3d")
   sam3d:
+    # Provider: "auto" selects MLX/Metal on Apple Silicon and CUDA elsewhere.
+    # SCENESMITH_SAM_PROVIDER can override this at deployment time.
+    provider: "auto"
     # Path to SAM3 model checkpoint
     sam3_checkpoint: "external/checkpoints/sam3.pt"
     # Path to SAM 3D Objects pipeline config
@@ -122,6 +129,16 @@ asset_manager:
     mode: "foreground"
     # Confidence threshold for mask generation (0.0-1.0)
     threshold: 0.5
+    # Apple Silicon provider (isolated environment and SAM 3D Objects weights).
+    mlx_repo_path: "external/Sam3D-Objects-MLX"
+    mlx_python_path: "external/Sam3D-Objects-MLX/.venv/bin/python"
+    mlx_checkpoint_dir: "external/Sam3D-Objects-MLX/checkpoints/hf"
+    mlx_steps: 12
+    mlx_seed: 42
+    mlx_simplify_ratio: 0.0
+    mlx_mask_color_threshold: 24.0
+    mlx_timeout_seconds: 7200
+    mlx_mps_high_watermark_ratio: 0.8  # bounded fraction of recommended MPS memory
 
   # HSSD retrieval configuration (only used when general_asset_source="hssd")
   hssd:
@@ -146,6 +163,26 @@ asset_manager:
       MANIPULAND: "small_objects"
       WALL_MOUNTED: "wall_objects"
       CEILING_MOUNTED: "ceiling_objects"
+
+  # CC0 authored models indexed from the local Poly Haven mirror.
+  polyhaven:
+    data_path: "data/polyhaven"
+    preprocessed_path: "data/polyhaven/preprocessed"
+    use_top_k: 8
+    use_lenient_validation: true
+    object_type_mapping:
+      FURNITURE: "large_objects"
+      MANIPULAND: "small_objects"
+      WALL_MOUNTED: "wall_objects"
+      CEILING_MOUNTED: "ceiling_objects"
+
+  # Unified global catalog used by general_asset_source=all. The service behind
+  # the polyhaven-compatible client contains Poly Haven, HSSD, and ObjectThor.
+  federated:
+    source_order: ["polyhaven", "generated"]
+    # The normalized catalog already applies metadata/quality reranking.
+    catalog_max_retries: 0
+    candidate_pool_size: 12
 
   # Articulated object retrieval configuration (pre-processed SDF assets)
   # Multiple data sources can be enabled/disabled independently
@@ -241,7 +278,7 @@ collision_geometry:
 max_turns: 1000
 
 # Maximum number of critique-and-improve rounds before stopping
-max_critique_rounds: 3
+max_critique_rounds: 1
 
 # Scene reset thresholds for detecting quality degradation
 # Reset is suggested when EITHER threshold is exceeded

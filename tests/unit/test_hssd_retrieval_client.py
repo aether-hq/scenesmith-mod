@@ -117,7 +117,7 @@ class TestHssdRetrievalClient(unittest.TestCase):
             "http://127.0.0.1:7001/retrieve_objects",
             json=[req.to_dict() for req in retrieval_requests],
             stream=True,
-            timeout=(10, 3600),
+            timeout=(1.0, 2.0),
         )
 
     @patch("requests.Session.post")
@@ -236,6 +236,19 @@ class TestHssdRetrievalClient(unittest.TestCase):
         self.assertEqual(results[0][1].results[0].mesh_path, "/tmp/hssd/desk1.glb")
         self.assertEqual(mock_post.call_count, 2)
         mock_sleep.assert_called_once_with(1)  # 2^0 = 1
+
+    @patch("requests.Session.post")
+    def test_default_policy_never_retries_and_logs_timeout(self, mock_post):
+        mock_post.side_effect = requests.exceptions.Timeout("slow local catalog")
+
+        with self.assertLogs(
+            "scenesmith.agent_utils.hssd_retrieval_server.client", level="ERROR"
+        ) as captured:
+            with self.assertRaisesRegex(TimeoutError, "exceeded 2s"):
+                list(self.client.retrieve_objects([self.test_request]))
+
+        self.assertEqual(mock_post.call_count, 1)
+        self.assertIn("failing batch", "\n".join(captured.output))
 
 
 if __name__ == "__main__":

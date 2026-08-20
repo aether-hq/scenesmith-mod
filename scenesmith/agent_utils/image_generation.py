@@ -204,6 +204,8 @@ class OpenAIImageGenerator(BaseImageGenerator):
                 )
             ]
             # Wait for all to complete and raise any exceptions.
+            # The image client owns request liveness. A fixed deadline for the
+            # complete batch falsely fails queued requests as batch size grows.
             for future in as_completed(futures):
                 future.result()
 
@@ -434,6 +436,8 @@ class GeminiImageGenerator(BaseImageGenerator):
                 )
             ]
             # Wait for all to complete and raise any exceptions.
+            # The image client owns request liveness. A fixed deadline for the
+            # complete batch falsely fails queued requests as batch size grows.
             for future in as_completed(futures):
                 future.result()
 

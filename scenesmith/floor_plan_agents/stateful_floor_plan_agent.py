@@ -18,16 +18,21 @@ import numpy as np
 import trimesh
 import yaml
 
-from agents import Agent, FunctionTool, Runner, RunResult
+from agents import Agent, FunctionTool
 from omegaconf import DictConfig
 from pydrake.all import RigidTransform, RollPitchYaw
 
 from scenesmith.agent_utils.action_logger import log_scene_action
+from scenesmith.agent_utils.agent_runtime import (
+    BoundedRunner as Runner,
+    agent_run_timeout_seconds,
+)
 from scenesmith.agent_utils.base_stateful_agent import (
     BaseStatefulAgent,
     log_agent_usage,
 )
 from scenesmith.agent_utils.blender import BlenderServer
+from scenesmith.agent_utils.blender.process_provider import RenderAllocation
 from scenesmith.agent_utils.clearance_zones import compute_openings_data
 from scenesmith.agent_utils.house import (
     HouseLayout,
@@ -54,6 +59,10 @@ from scenesmith.agent_utils.scoring import (
 from scenesmith.agent_utils.workflow_tools import WorkflowTools
 from scenesmith.floor_plan_agents.base_floor_plan_agent import BaseFloorPlanAgent
 from scenesmith.floor_plan_agents.tools.floor_plan_tools import FloorPlanTools
+from scenesmith.floor_plan_agents.tools.floor_plan_submission import (
+    normalize_floor_plan_submission,
+    synthesize_structural_layout,
+)
 from scenesmith.floor_plan_agents.tools.geometry_cache import (
     GeometryCache,
     floor_cache_key,
@@ -107,15 +116,14 @@ class StatefulFloorPlanAgent(BaseStatefulAgent, BaseFloorPlanAgent):
         self,
         cfg: DictConfig,
         logger: BaseLogger,
-        render_gpu_id: int | None = None,
+        render_allocation: RenderAllocation | None = None,
     ):
         """Initialize the floor plan agent.
 
         Args:
             cfg: Hydra configuration for the agent.
             logger: Logger for output and debugging.
-            render_gpu_id: GPU device ID for Blender rendering. When set, uses
-                bubblewrap to isolate the BlenderServer to this GPU.
+            render_allocation: Provider-owned Blender render slot.
         """
         BaseFloorPlanAgent.__init__(self, cfg=cfg, logger=logger)
         BaseStatefulAgent.__init__(self, cfg=cfg, logger=logger)
@@ -124,8 +132,9 @@ class StatefulFloorPlanAgent(BaseStatefulAgent, BaseFloorPlanAgent):
         console_logger.info("Starting BlenderServer for floor plan rendering")
         self.blender_server = BlenderServer(
             port_range=tuple(cfg.rendering.blender_server_port_range),
-            gpu_id=render_gpu_id,
+            render_allocation=render_allocation,
             log_file=logger.output_dir / "scene.log",
+            render_provider=str(cfg.rendering.get("provider", "auto")),
         )
         self.blender_server.start()
         self.blender_server.wait_until_ready()
@@ -189,10 +198,16 @@ class StatefulFloorPlanAgent(BaseStatefulAgent, BaseFloorPlanAgent):
             wall_height_max=self.cfg.wall_height.max,
             room_dim_min=self.cfg.min_floor_plan_dim_m,
             room_dim_max=self.cfg.max_floor_plan_dim_m,
+            checkpoint_callback=self._write_resumable_layout_checkpoint,
         )
 
-        vision_tools = self._get_vision_tools()
+        if self.cfg.max_critique_rounds <= 0:
+            # Production fast path: one model request produces design intent and
+            # local code executes the ordered primitives. Critique-enabled runs
+            # retain the granular toolbox for iterative editing.
+            return [floor_plan_tools.submit_floor_plan_tool]
 
+        vision_tools = self._get_vision_tools()
         workflow_tools = WorkflowTools()
 
         return (
@@ -240,12 +255,25 @@ class StatefulFloorPlanAgent(BaseStatefulAgent, BaseFloorPlanAgent):
         Returns:
             Configured designer agent.
         """
-        return super()._create_designer_agent(
+        one_shot = (
+            len(tools) == 1 and getattr(tools[0], "name", "") == "submit_floor_plan"
+        )
+        agent = super()._create_designer_agent(
             tools=tools,
-            prompt_enum=FloorPlanAgentPrompts.DESIGNER_AGENT,
+            prompt_enum=(
+                FloorPlanAgentPrompts.DESIGNER_ONE_SHOT_AGENT
+                if one_shot
+                else FloorPlanAgentPrompts.DESIGNER_AGENT
+            ),
             mode=self.mode,
             house_prompt=self.house_prompt,
         )
+        if one_shot:
+            # The tool result is already the validated stage result. Asking the
+            # model for a prose summary caused a redundant 32-second request and
+            # allowed it to claim completion before validation.
+            agent.tool_use_behavior = "stop_on_first_tool"
+        return agent
 
     def _create_critic_agent(self, tools: list[FunctionTool]) -> Agent:
         """Create the critic agent.
@@ -347,6 +375,11 @@ class StatefulFloorPlanAgent(BaseStatefulAgent, BaseFloorPlanAgent):
         """
         console_logger.info("Tool called: request_critique")
 
+        # Critiques can involve multiple long-running vision/model turns. Save a
+        # portable, geometry-complete layout before entering that boundary so a
+        # malformed model response or interruption can resume at furniture.
+        self._write_resumable_layout_checkpoint()
+
         # Get critique instruction.
         critique_instruction = self.prompt_registry.get_prompt(
             prompt_enum=FloorPlanAgentPrompts.CRITIC_RUNNER_INSTRUCTION,
@@ -360,6 +393,10 @@ class StatefulFloorPlanAgent(BaseStatefulAgent, BaseFloorPlanAgent):
             session=self.critic_session,
             max_turns=self.cfg.agents.critic_agent.max_turns,
             run_config=self._create_run_config(),
+            timeout_seconds=agent_run_timeout_seconds(
+                "critic",
+                max_turns=self.cfg.agents.critic_agent.max_turns,
+            ),
         )
         log_agent_usage(result=result, agent_name="CRITIC (FLOOR PLAN)")
         vision_tools = self._get_vision_tools()
@@ -416,6 +453,41 @@ class StatefulFloorPlanAgent(BaseStatefulAgent, BaseFloorPlanAgent):
         self.previous_scores = response
 
         return response.critique + score_change_msg
+
+    def _write_resumable_layout_checkpoint(self) -> bool:
+        """Atomically persist the latest structurally valid floor-plan state."""
+        if (
+            not self.layout.room_specs
+            or not self.layout.placement_valid
+            or not self.layout.connectivity_valid
+        ):
+            console_logger.info(
+                "Skipping floor-plan checkpoint because the layout is not yet valid"
+            )
+            return False
+        try:
+            self.layout.validate_structure()
+            self._generate_all_room_geometries(
+                output_dir=self.logger.output_dir / "floor_plans"
+            )
+            checkpoint_path = self.logger.output_dir / "house_layout.json"
+            pending_path = checkpoint_path.with_suffix(".json.pending")
+            with pending_path.open("w") as file:
+                json.dump(
+                    self.layout.to_dict(scene_dir=self.logger.output_dir),
+                    file,
+                    indent=2,
+                )
+            pending_path.replace(checkpoint_path)
+            console_logger.info(
+                "Saved resumable floor-plan checkpoint to %s", checkpoint_path
+            )
+            return True
+        except Exception as exc:
+            console_logger.warning(
+                "Could not save resumable floor-plan checkpoint: %s", exc
+            )
+            return False
 
     @log_scene_action
     def _perform_checkpoint_reset(self, checkpoint_state_dict: dict) -> None:
@@ -574,8 +646,16 @@ class StatefulFloorPlanAgent(BaseStatefulAgent, BaseFloorPlanAgent):
         console_logger.info("Tool called: request_initial_design")
 
         # Get instruction.
+        one_shot = (
+            len(self.designer.tools) == 1
+            and getattr(self.designer.tools[0], "name", "") == "submit_floor_plan"
+        )
         instruction = self.prompt_registry.get_prompt(
-            prompt_enum=FloorPlanAgentPrompts.DESIGNER_INITIAL_INSTRUCTION,
+            prompt_enum=(
+                FloorPlanAgentPrompts.DESIGNER_ONE_SHOT_INSTRUCTION
+                if one_shot
+                else FloorPlanAgentPrompts.DESIGNER_INITIAL_INSTRUCTION
+            ),
         )
 
         # Run designer.
@@ -585,6 +665,10 @@ class StatefulFloorPlanAgent(BaseStatefulAgent, BaseFloorPlanAgent):
             session=self.designer_session,
             max_turns=self.cfg.agents.designer_agent.max_turns,
             run_config=self._create_run_config(),
+            timeout_seconds=agent_run_timeout_seconds(
+                "designer",
+                max_turns=self.cfg.agents.designer_agent.max_turns,
+            ),
         )
         log_agent_usage(result=result, agent_name="DESIGNER (INITIAL FLOOR PLAN)")
 
@@ -619,6 +703,10 @@ class StatefulFloorPlanAgent(BaseStatefulAgent, BaseFloorPlanAgent):
             session=self.designer_session,
             max_turns=self.cfg.agents.designer_agent.max_turns,
             run_config=self._create_run_config(),
+            timeout_seconds=agent_run_timeout_seconds(
+                "designer",
+                max_turns=self.cfg.agents.designer_agent.max_turns,
+            ),
         )
         log_agent_usage(result=result, agent_name="DESIGNER (CHANGE FLOOR PLAN)")
 
@@ -642,6 +730,8 @@ class StatefulFloorPlanAgent(BaseStatefulAgent, BaseFloorPlanAgent):
         Returns:
             HouseLayout with designed layout and generated RoomGeometry.
         """
+        self._reset_workflow_budget()
+
         # Initialize state (wall_height has sensible default, agent can override).
         # Set house_dir early so materials resolver can use it.
         house_dir = output_dir.parent if output_dir else self.logger.output_dir
@@ -656,29 +746,52 @@ class StatefulFloorPlanAgent(BaseStatefulAgent, BaseFloorPlanAgent):
         designer_tools = self._create_designer_tools()
         self.designer = self._create_designer_agent(tools=designer_tools)
 
-        critic_tools = self._create_critic_tools()
-        self.critic = self._create_critic_agent(tools=critic_tools)
+        if self.cfg.max_critique_rounds <= 0:
+            deterministic_intent = normalize_floor_plan_submission(
+                {},
+                prompt=prompt,
+                mode=self.mode,
+                room_dim_min=self.cfg.min_floor_plan_dim_m,
+                room_dim_max=self.cfg.max_floor_plan_dim_m,
+                wall_height_min=self.cfg.wall_height.min,
+                wall_height_max=self.cfg.wall_height.max,
+            )
+            if (
+                deterministic_intent.structural is not None
+                and len(designer_tools) == 1
+                and getattr(designer_tools[0], "name", "") == "submit_floor_plan"
+            ):
+                # Explicit storeys, mezzanines, platforms, and stairs already
+                # have a checked local authoring path. Avoid spending a model
+                # turn asking it to restate that structural schema.
+                console_logger.info(
+                    "Using deterministic multi-level floor-plan authoring"
+                )
+                result = await designer_tools[0].on_invoke_tool(None, "{}")
+            else:
+                # There is no critic to coordinate, so a planner would only add a
+                # second serial LLM launch before requesting the same design.
+                result = await self._request_initial_design_impl()
+        else:
+            critic_tools = self._create_critic_tools()
+            self.critic = self._create_critic_agent(tools=critic_tools)
 
-        planner_tools = self._create_planner_tools()
-        self.planner = self._create_planner_agent(tools=planner_tools)
+            planner_tools = self._create_planner_tools()
+            self.planner = self._create_planner_agent(tools=planner_tools)
 
-        # Get runner instruction.
-        runner_instruction = self.prompt_registry.get_prompt(
-            prompt_enum=FloorPlanAgentPrompts.PLANNER_RUNNER_INSTRUCTION,
-        )
-
-        # Run the floor plan design workflow.
-        result: RunResult = await Runner.run(
-            starting_agent=self.planner,
-            input=runner_instruction,
-            max_turns=self.cfg.agents.planner_agent.max_turns,
-            run_config=self._create_run_config(),
-        )
-        log_agent_usage(result=result, agent_name="PLANNER (FLOOR PLAN)")
-
-        if result.final_output:
-            log_agent_response(
-                response=result.final_output, agent_name="PLANNER (FLOOR PLAN)"
+            runner_instruction = self.prompt_registry.get_prompt(
+                prompt_enum=FloorPlanAgentPrompts.PLANNER_RUNNER_INSTRUCTION,
+            )
+            result = await self._run_planner_with_partial_recovery(
+                runner_instruction=runner_instruction,
+                agent_name="PLANNER (FLOOR PLAN)",
+                state_hash=self.layout.content_hash,
+            )
+        if not self._write_resumable_layout_checkpoint():
+            raise RuntimeError(
+                "Floor-plan stage did not produce a structurally valid checkpoint; "
+                "the incomplete room was not exported. Resume the build to retry "
+                "the layout stage."
             )
 
         # Final critique.
@@ -686,6 +799,14 @@ class StatefulFloorPlanAgent(BaseStatefulAgent, BaseFloorPlanAgent):
         current_scene_hash = self.layout.content_hash()
 
         if (
+            self.cfg.max_critique_rounds <= 0
+            or self._workflow_limit_reached
+            or self._critique_calls >= int(self.cfg.max_critique_rounds)
+        ):
+            console_logger.info("Final critique skipped: critique budget unavailable")
+            vision_tools = self._get_vision_tools()
+            self.final_render_dir = vision_tools.last_render_dir
+        elif (
             self.checkpoint_scene_hash is not None
             and current_scene_hash == self.checkpoint_scene_hash
         ):
@@ -697,7 +818,7 @@ class StatefulFloorPlanAgent(BaseStatefulAgent, BaseFloorPlanAgent):
                 "Scene changed since last critique, computing final critique"
             )
             # Pass update_checkpoint=False to preserve N-1 checkpoint for reset check.
-            await self._request_critique_impl(update_checkpoint=False)
+            await self._request_critique_bounded(update_checkpoint=False)
 
         # Validate final scene against thresholds and potentially reset.
         await self._finalize_scene_and_scores()
@@ -724,6 +845,104 @@ class StatefulFloorPlanAgent(BaseStatefulAgent, BaseFloorPlanAgent):
             shutil.rmtree(self._geometry_cache.cache_dir, ignore_errors=True)
             self._geometry_cache = None
 
+        return self.layout
+
+    async def revise_house_layout(
+        self,
+        *,
+        existing_layout: HouseLayout,
+        feedback: str,
+        output_dir: Path,
+        locks: tuple[str, ...] = (),
+    ) -> HouseLayout:
+        """Branch a durable layout checkpoint and apply architectural feedback.
+
+        Explicit multi-level circulation has a deterministic implementation so
+        common mezzanine/stair revisions do not depend on a model restating a
+        fragile structural schema. Other architectural feedback reuses the
+        provider-neutral designer against the restored checkpoint.
+        """
+
+        self._reset_workflow_budget()
+        house_dir = output_dir.parent if output_dir else self.logger.output_dir
+        self.layout = existing_layout
+        self.layout.house_dir = house_dir
+        original_prompt = self.layout.house_prompt
+        revision_instruction = (
+            f"Original scene: {original_prompt}\n"
+            f"Revision request: {feedback}\n"
+            f"Preserve locks: {', '.join(locks) if locks else 'all unaffected properties'}."
+        )
+        self.layout.house_prompt = revision_instruction
+        self.house_prompt = revision_instruction
+        for room_spec in self.layout.room_specs:
+            room_spec.prompt = f"{room_spec.prompt}\nRevision request: {feedback}"
+
+        cache_dir = house_dir / ".geometry_cache"
+        self._geometry_cache = GeometryCache(cache_dir=cache_dir)
+        room_specs = [
+            {
+                "type": spec.room_id,
+                "width": spec.length,
+                "depth": spec.width,
+                "prompt": spec.prompt,
+            }
+            for spec in self.layout.room_specs
+        ]
+        existing_storey_height = (
+            self.layout.levels[0].nominal_height
+            if self.layout.levels
+            else self.layout.wall_height
+        )
+        structural = synthesize_structural_layout(
+            feedback,
+            room_specs,
+            min(existing_storey_height, self.cfg.wall_height.max),
+            max_total_height=self.cfg.wall_height.max,
+            level_count_hint=len(self.layout.levels),
+        )
+
+        if structural is not None:
+            total_height = max(
+                level["elevation"] + level["nominal_height"]
+                for level in structural["levels"]
+            )
+            self.layout.wall_height = total_height
+            tools = FloorPlanTools(
+                layout=self.layout,
+                mode=self.mode,
+                materials_config=self._create_materials_config(),
+                wall_height_min=self.cfg.wall_height.min,
+                wall_height_max=self.cfg.wall_height.max,
+                room_dim_min=self.cfg.min_floor_plan_dim_m,
+                room_dim_max=self.cfg.max_floor_plan_dim_m,
+            )
+            result = tools._set_structural_layout_impl(structural)
+            if not result.success:
+                raise RuntimeError(
+                    f"Deterministic architectural revision failed: {result.message}"
+                )
+            console_logger.info(
+                "Applied deterministic checkpoint revision: %s", result.message
+            )
+        else:
+            designer_tools = self._create_designer_tools()
+            self.designer = self._create_designer_agent(tools=designer_tools)
+            await self._request_design_change_impl(revision_instruction)
+
+        if not self._write_resumable_layout_checkpoint():
+            raise RuntimeError(
+                "Architectural revision did not produce a structurally valid "
+                "checkpoint; the prior version remains active."
+            )
+        self._generate_all_room_geometries(output_dir=output_dir)
+        layout_path = self.logger.output_dir / "house_layout.json"
+        with open(layout_path, "w") as file:
+            json.dump(self.layout.to_dict(), file, indent=2)
+        self._export_floor_plan(output_dir=output_dir)
+        if self._geometry_cache is not None:
+            shutil.rmtree(self._geometry_cache.cache_dir, ignore_errors=True)
+            self._geometry_cache = None
         return self.layout
 
     def _generate_all_room_geometries(self, output_dir: Path) -> None:
@@ -1317,6 +1536,7 @@ class StatefulFloorPlanAgent(BaseStatefulAgent, BaseFloorPlanAgent):
             or room_spec.ceiling_footprint is not None
             or room_spec.floor_profile != ElevationProfile()
             or room_spec.ceiling_profile is not None
+            or not room_spec.has_overhead_cover
             or abs(room_spec.yaw) > 1e-9
             or len(self.layout.levels) > 1
             or bool(self.layout.connectors)
@@ -1437,6 +1657,7 @@ class StatefulFloorPlanAgent(BaseStatefulAgent, BaseFloorPlanAgent):
             width=placed_room.depth,
             length=placed_room.width,
             wall_height=wall_height,
+            has_overhead_cover=room_spec.has_overhead_cover,
             wall_thickness=wall_thickness,
             openings=openings,
         )
@@ -1502,6 +1723,7 @@ class StatefulFloorPlanAgent(BaseStatefulAgent, BaseFloorPlanAgent):
                 heightfield.space_id == room_spec.room_id and heightfield.replaces_floor
                 for heightfield in self.layout.heightfields
             ),
+            include_ceiling=room_spec.has_overhead_cover,
             floor_profile=room_spec.floor_profile,
             ceiling_profile=room_spec.ceiling_profile,
             wall_height=wall_height,
@@ -1602,6 +1824,7 @@ class StatefulFloorPlanAgent(BaseStatefulAgent, BaseFloorPlanAgent):
             width=footprint_depth,
             length=footprint_width,
             wall_height=wall_height,
+            has_overhead_cover=room_spec.has_overhead_cover,
             wall_thickness=wall_thickness,
             openings=compute_openings_data(
                 placed_room=placed_room,

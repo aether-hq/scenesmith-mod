@@ -16,6 +16,7 @@ from scenesmith.agent_utils.asset_manager import (
     AssetManager,
     AssetPathConfig,
     FailedAsset,
+    _subscription_aware_worker_count,
 )
 from scenesmith.agent_utils.geometry_generation_server.dataclasses import (
     GeometryGenerationServerResponse,
@@ -27,6 +28,12 @@ from scenesmith.agent_utils.image_generation import (
 from scenesmith.agent_utils.mesh_physics_analyzer import MeshPhysicsAnalysis
 from scenesmith.agent_utils.room import AgentType, ObjectType, SceneObject
 from tests.unit.mock_utils import create_mock_logger
+
+
+def test_hssd_gltf_axes_are_converted_to_blender_import_frame():
+    assert AssetManager._gltf_axis_to_blender("+X") == "+X"
+    assert AssetManager._gltf_axis_to_blender("+Y") == "+Z"
+    assert AssetManager._gltf_axis_to_blender("-Z") == "+Y"
 
 
 def create_mock_cfg():
@@ -118,9 +125,20 @@ class TestAssetManager(unittest.TestCase):
         self.patcher_mesh_conversion.stop()
         self.patcher_geo_client.stop()
         self.patcher_image_gen.stop()
-
         if self.temp_dir.exists():
             shutil.rmtree(self.temp_dir)
+
+    def test_subscription_cli_analysis_uses_one_honest_worker(self):
+        with patch.dict(
+            "os.environ", {"SCENESMITH_LLM_PROVIDER": "claude-cli"}, clear=False
+        ):
+            self.assertEqual(_subscription_aware_worker_count(8, 5), 1)
+
+    def test_api_analysis_keeps_configured_parallelism(self):
+        with patch.dict(
+            "os.environ", {"SCENESMITH_LLM_PROVIDER": "anthropic"}, clear=False
+        ):
+            self.assertEqual(_subscription_aware_worker_count(3, 5), 3)
 
     def test_asset_generation_request_creation(self):
         """Test creating AssetGenerationRequest instances."""
@@ -137,6 +155,85 @@ class TestAssetManager(unittest.TestCase):
         self.assertEqual(request.object_type, ObjectType.FURNITURE)
         self.assertEqual(request.style_context, "Modern minimalist living room")
         self.assertEqual(request.operation_type, AssetOperationType.INITIAL)
+
+    def test_deterministic_router_preserves_structured_request(self):
+        item = AssetManager._build_deterministic_asset_item(
+            description="Sci-fi medical treatment bed",
+            short_name="treatment_bed",
+            dimensions=[2.1, 0.9, 0.8],
+            object_type=ObjectType.FURNITURE,
+        )
+
+        self.assertEqual(item.short_name, "treatment_bed")
+        self.assertEqual(item.dimensions, [2.1, 0.9, 0.8])
+        self.assertEqual(item.object_type, ObjectType.FURNITURE)
+        self.assertEqual(item.strategies, ["generated"])
+
+    def test_deterministic_router_selects_specialized_strategies(self):
+        cabinet = AssetManager._build_deterministic_asset_item(
+            description="Sterile storage cabinet with sealed doors",
+            short_name="storage_cabinet",
+            dimensions=[1.0, 0.5, 1.8],
+            object_type=ObjectType.FURNITURE,
+        )
+        poster = AssetManager._build_deterministic_asset_item(
+            description="Framed medical poster",
+            short_name="medical_poster",
+            dimensions=[0.8, 0.03, 1.1],
+            object_type=ObjectType.WALL_MOUNTED,
+        )
+
+        self.assertEqual(cabinet.strategies, ["articulated", "generated"])
+        self.assertEqual(poster.strategies, ["thin_covering", "generated"])
+        self.assertEqual(poster.thin_covering_type, "single_image")
+
+    def test_deterministic_analysis_skips_router_model_call(self):
+        self.asset_manager.cfg.asset_manager.router.deterministic_analysis = True
+        self.asset_manager.router = MagicMock()
+        request = AssetGenerationRequest(
+            object_descriptions=["Medical bed"],
+            short_names=["medical_bed"],
+            object_type=ObjectType.FURNITURE,
+            desired_dimensions=[[2.1, 0.9, 0.8]],
+        )
+        empty_result = AssetGenerationResult(successful_assets=[], failed_assets=[])
+
+        with patch.object(
+            self.asset_manager,
+            "_generate_items_with_validation",
+            return_value=empty_result,
+        ) as generate:
+            self.asset_manager._generate_assets_with_router(request)
+
+        self.asset_manager.router.analyze_request.assert_not_called()
+        routed_items = generate.call_args.kwargs["unique_items"]
+        self.assertEqual(list(routed_items), ["Medical bed"])
+
+    def test_catalog_axes_and_physics_are_deterministic(self):
+        physics = AssetManager._deterministic_catalog_physics(
+            description="Steel medical cabinet",
+            desired_dimensions=[1.0, 0.5, 1.8],
+            object_type=ObjectType.FURNITURE,
+            canonical_up="0,0,-1",
+            canonical_front="0,1,0",
+        )
+
+        self.assertEqual(physics.up_axis, "-Z")
+        self.assertEqual(physics.front_axis, "+Y")
+        self.assertEqual(physics.material, "metal")
+        self.assertEqual(physics.mass_kg, 54.0)
+
+    def test_missing_catalog_axes_use_scene_canonical_defaults(self):
+        physics = AssetManager._deterministic_catalog_physics(
+            description="Treatment bed",
+            desired_dimensions=[2.0, 1.0, 0.75],
+            object_type=ObjectType.FURNITURE,
+            canonical_up=None,
+            canonical_front=None,
+        )
+
+        self.assertEqual(physics.up_axis, "+Z")
+        self.assertEqual(physics.front_axis, "+Y")
 
     def test_create_scene_object(self):
         """Test creating SceneObject from asset paths."""
@@ -1093,7 +1190,7 @@ class TestAssetManagerDimensionControl(unittest.TestCase):
         # Verify scale_mesh_uniformly_to_dimensions was called.
         mock_scale_mesh.assert_called_once()
         call_args = mock_scale_mesh.call_args
-        self.assertEqual(call_args[1]["desired_dimensions"], [1.8, 0.9, 0.75])
+        self.assertEqual(call_args[1]["desired_dimensions"], [1.8, 0.75, 0.9])
 
 
 if __name__ == "__main__":

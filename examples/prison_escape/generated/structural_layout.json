@@ -821,7 +821,7 @@
     ],
     "schema_version": 1
   },
-  "semantic_environment_geometry_path": "structures/meshes/escape_tunnel_shell/aa70fc98bfa42462eca3e751643b4bf48aa6307d0dc22b982e1a16368d7aa080/escape_tunnel_shell.sdf",
+  "semantic_environment_geometry_path": "structures/meshes/escape_tunnel_shell/62cba137decc0a8128566055e2793309d40456bc2a03fb2ec08cd5e15362a722/escape_tunnel_shell.sdf",
   "semantic_environment_source_hash": "bb015ff258a2db0063f4e46173408bd3462356a25d4d803632342a9b3deeb62a",
   "structural_mesh_geometry_paths": {},
   "structural_meshes": [],

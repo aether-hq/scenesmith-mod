@@ -184,7 +184,7 @@ class TestGeometryGeneration(unittest.TestCase):
     """Test the geometry generation routing."""
 
     @patch(
-        "scenesmith.agent_utils.geometry_generation_server.geometry_generation.generate_with_sam3d"
+        "scenesmith.agent_utils.geometry_generation_server.geometry_generation.generate_with_sam_provider"
     )
     def test_backend_routing_sam3d(self, mock_sam3d):
         """Test that backend routing correctly calls SAM3D backend."""
@@ -213,16 +213,12 @@ class TestGeometryGeneration(unittest.TestCase):
                 sam3d_config=sam3d_config,
             )
 
-            # Verify SAM3D backend was called with correct parameters.
+            # Verify routing stays behind the provider facade.
             mock_sam3d.assert_called_once()
             call_kwargs = mock_sam3d.call_args[1]
-            self.assertEqual(
-                call_kwargs["sam3_checkpoint"], sam3d_config["sam3_checkpoint"]
-            )
-            self.assertEqual(
-                call_kwargs["sam3d_checkpoint"], sam3d_config["sam3d_checkpoint"]
-            )
-            self.assertEqual(call_kwargs["mode"], sam3d_config["mode"])
+            self.assertEqual(call_kwargs["image_path"], image_path)
+            self.assertEqual(call_kwargs["output_path"], output_path)
+            self.assertIs(call_kwargs["config"], sam3d_config)
 
     def test_backend_routing_sam3d_without_config_raises_error(self):
         """Test that SAM3D backend without config raises error."""

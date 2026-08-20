@@ -12,6 +12,7 @@ The scene is deterministic and uses SceneSmith's semantic environment model:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
 import xml.etree.ElementTree as ET
@@ -20,6 +21,10 @@ from pathlib import Path
 from typing import Iterable, Sequence
 
 from scenesmith.agent_utils.house import HouseLayout, PlacedRoom, RoomSpec
+from scenesmith.agent_utils.atomic_output import rebuild_directory_atomically
+from scenesmith.agent_utils.semantic_environment_compiler import (
+    SEMANTIC_ENVIRONMENT_COMPILER_VERSION,
+)
 from scenesmith.agent_utils.semantic_environments import (
     Bounds3D,
     EnvironmentKind,
@@ -590,6 +595,18 @@ def generate_scene(output_dir: Path) -> dict:
     manifest = {
         "name": "The Long Way Out",
         "description": "Underground prison room with a dug breach into a long lit escape tunnel",
+        "build": {
+            "status": "compiled",
+            "rebuilt_from_recipe": True,
+            "source_path": Path(__file__).resolve().relative_to(
+                Path(__file__).resolve().parents[2]
+            ).as_posix(),
+            "source_sha256": hashlib.sha256(
+                Path(__file__).read_bytes()
+            ).hexdigest(),
+            "provider": "semantic-compiler/cpu",
+            "compiler_version": SEMANTIC_ENVIRONMENT_COMPILER_VERSION,
+        },
         "architecture": {
             "mesh_path": str(
                 room_paths["prison_block"].with_suffix(".obj").relative_to(output_dir)
@@ -635,6 +652,12 @@ def generate_scene(output_dir: Path) -> dict:
     return manifest
 
 
+def rebuild_scene(output_dir: Path) -> dict:
+    """Generate the demo in a fresh tree and publish it atomically."""
+
+    return rebuild_directory_atomically(output_dir, generate_scene)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -644,7 +667,7 @@ def main() -> None:
         help="output directory (default: examples/prison_escape/generated)",
     )
     args = parser.parse_args()
-    manifest = generate_scene(args.output_dir)
+    manifest = rebuild_scene(args.output_dir)
     print(json.dumps(manifest, indent=2))
 
 

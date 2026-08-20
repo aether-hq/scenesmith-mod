@@ -92,6 +92,24 @@ class ObjaverseRetrievalResult:
     category: str
     """Object category (e.g., 'large_objects', 'small_objects')."""
 
+    asset_source: str = "objaverse"
+    """Catalog provenance label (for example objaverse or polyhaven)."""
+
+    license: str | None = None
+    """Source asset license identifier, when known."""
+
+    source_id: str | None = None
+    ontology_path: str | None = None
+    placement_classes: tuple[str, ...] = ()
+    canonical_up: str | None = None
+    canonical_front: str | None = None
+    support_zones: tuple[dict, ...] = ()
+    clearance_zones: tuple[dict, ...] = ()
+    quality_score: float = 0.5
+    thumbnail: str | None = None
+    semantic_metadata: str | None = None
+    """Joined source metadata used for deterministic cache validation."""
+
     def to_dict(self) -> dict:
         """Convert to dictionary for JSON serialization."""
         return asdict(self)
@@ -114,6 +132,18 @@ class ObjaverseRetrievalResult:
             similarity_score=data["similarity_score"],
             size=tuple(data["size"]),
             category=data["category"],
+            asset_source=data.get("asset_source", "objaverse"),
+            license=data.get("license"),
+            source_id=data.get("source_id"),
+            ontology_path=data.get("ontology_path"),
+            placement_classes=tuple(data.get("placement_classes", [])),
+            canonical_up=data.get("canonical_up"),
+            canonical_front=data.get("canonical_front"),
+            support_zones=tuple(data.get("support_zones", [])),
+            clearance_zones=tuple(data.get("clearance_zones", [])),
+            quality_score=float(data.get("quality_score", 0.5)),
+            thumbnail=data.get("thumbnail"),
+            semantic_metadata=data.get("semantic_metadata"),
         )
 
 

@@ -1,11 +1,10 @@
 """Geometry generation server lifecycle management.
 
 This module provides the GeometryGenerationServer class for managing the
-lifecycle of the geometry generation server. The server automatically
-detects and uses all available GPUs.
+lifecycle of a provider-backed geometry generation server.
 
-CRITICAL: This module must NOT import any CUDA-dependent code. The GPU workers
-handle all CUDA initialization to enable proper GPU isolation.
+CRITICAL: This module must not import accelerator runtimes. Workers apply their
+provider environment before importing model-specific implementations.
 """
 
 import logging
@@ -19,16 +18,15 @@ import requests
 
 from scenesmith.utils.network_utils import is_port_available
 
+from .artifact_store import ArtifactStore
+from .execution_provider import GeometryExecutionProvider
 from .server_app import GeometryGenerationApp
 
 console_logger = logging.getLogger(__name__)
 
 
 class GeometryGenerationServer:
-    """Manages the lifecycle of a geometry generation server with multi-GPU support.
-
-    The server automatically detects all available GPUs and spawns one worker
-    process per GPU. Use CUDA_VISIBLE_DEVICES to control which GPUs are used.
+    """Manage a local provider-backed geometry generation service.
 
     This class is designed for programmatic usage within experiments or
     applications. For standalone usage (e.g., testing, debugging, or
@@ -64,14 +62,9 @@ class GeometryGenerationServer:
         >>> # ... use server via GeometryGenerationClient ...
         >>> server.stop()
 
-    Multi-GPU:
-        Multi-GPU mode is automatically enabled when multiple GPUs are detected.
-        The server spawns one worker process per visible GPU.
-
-        To control which GPUs are used:
-        >>> # Use only GPUs 0 and 1
-        >>> os.environ["CUDA_VISIBLE_DEVICES"] = "0,1"
-        >>> server = GeometryGenerationServer(...)
+    Provider selection is explicit or derived from the model configuration.
+    CUDA uses one worker per visible device; MLX uses one Metal worker. Custom
+    providers can be injected for tests or downstream runtimes.
     """
 
     def __init__(
@@ -83,6 +76,9 @@ class GeometryGenerationServer:
         backend: str = "hunyuan3d",
         sam3d_config: dict | None = None,
         log_file: Path | None = None,
+        execution_provider: GeometryExecutionProvider | None = None,
+        artifact_root: Path | None = None,
+        auth_token: str | None = None,
     ) -> None:
         """Initialize the geometry generation server manager.
 
@@ -102,6 +98,7 @@ class GeometryGenerationServer:
             sam3d_config: Configuration for SAM3D backend. Required if backend="sam3d".
                 Should contain sam3_checkpoint and sam3d_checkpoint paths.
             log_file: Optional path to log file for worker logging (e.g., experiment.log).
+            execution_provider: Optional injected local worker provider.
 
         Raises:
             ValueError: If the specified port is not available or if backend="sam3d"
@@ -123,6 +120,18 @@ class GeometryGenerationServer:
         self._backend = backend
         self._sam3d_config = sam3d_config
         self._log_file = log_file
+        self._execution_provider = execution_provider
+        self._artifact_store = ArtifactStore(artifact_root) if artifact_root else None
+        self._auth_token = auth_token
+        if host not in {"127.0.0.1", "localhost", "::1"}:
+            if self._artifact_store is None:
+                raise ValueError(
+                    "Non-loopback geometry servers require artifact transport"
+                )
+            if not auth_token:
+                raise ValueError(
+                    "Non-loopback geometry servers require an authentication token"
+                )
         self._app: GeometryGenerationApp | None = None
         self._server_thread: Thread | None = None
         self._running = False
@@ -137,7 +146,7 @@ class GeometryGenerationServer:
     def start(self) -> None:
         """Start the geometry generation server.
 
-        This spawns GPU worker processes (one per available GPU) and starts
+        This spawns provider-backed worker processes and starts
         the Flask HTTP server. Worker processes preload the pipeline if
         preload_pipeline=True was specified.
 
@@ -160,16 +169,19 @@ class GeometryGenerationServer:
                 sam3d_config=self._sam3d_config,
                 preload_pipeline=self._preload_pipeline,
                 log_file=self._log_file,
+                execution_provider=self._execution_provider,
+                artifact_store=self._artifact_store,
+                auth_token=self._auth_token,
             )
 
             # Start the worker pool and coordinator thread.
-            # This spawns GPU workers and preloads pipelines if enabled.
+            # This spawns provider workers and preloads pipelines if enabled.
             self._app.start_processing()
 
             # Start Flask server in a separate thread.
             self._server_thread = Thread(
                 target=self._run_server,
-                daemon=False,  # Not daemon so we can shut down cleanly.
+                daemon=True,  # A failed shutdown must not strand SceneSmith.
             )
             self._server_thread.start()
 
@@ -207,7 +219,13 @@ class GeometryGenerationServer:
         # Trigger Flask server shutdown via shutdown endpoint.
         try:
             response = requests.post(
-                f"http://{self._host}:{self._port}/shutdown", timeout=2
+                f"http://{self._host}:{self._port}/shutdown",
+                headers=(
+                    {"Authorization": f"Bearer {self._auth_token}"}
+                    if self._auth_token
+                    else None
+                ),
+                timeout=2,
             )
             if response.status_code == 200:
                 console_logger.debug("Shutdown endpoint called successfully")

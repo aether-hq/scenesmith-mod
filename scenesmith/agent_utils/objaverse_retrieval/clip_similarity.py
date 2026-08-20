@@ -6,21 +6,68 @@ pre-computed embeddings.
 """
 
 import logging
+import re
+import time
 
 import numpy as np
 import open_clip
 import torch
 
+from scenesmith.agent_utils.execution_providers import (
+    release_torch_cache,
+    resolve_torch_device,
+)
 from scenesmith.agent_utils.objaverse_retrieval.data_loader import (
     ObjaversePreprocessedData,
 )
+from scenesmith.agent_utils.provider_model_cache import ProviderModelCache
 
 console_logger = logging.getLogger(__name__)
 
-# Cache OpenCLIP model for Objaverse (ViT-L/14, 768-dim).
-_cached_model = None
-_cached_tokenizer = None
-_device = None
+_LEXICAL_STOP_WORDS = {
+    "a",
+    "an",
+    "and",
+    "for",
+    "of",
+    "the",
+    "with",
+}
+
+
+def _catalog_tokens(value: str) -> set[str]:
+    normalized = value.lower().replace("armchair", "arm chair")
+    return {
+        token
+        for token in re.findall(r"[a-z]+", normalized)
+        if token not in _LEXICAL_STOP_WORDS
+    }
+
+
+def _load_objaverse_clip_model(device: str):
+    model_name = "ViT-L-14"
+    pretrained = "laion2b_s32b_b82k"
+    model, _, _ = open_clip.create_model_and_transforms(
+        model_name, pretrained=pretrained, device=device
+    )
+    tokenizer = open_clip.get_tokenizer(model_name)
+    console_logger.info(
+        "Loaded Objaverse CLIP model: %s (%s) on %s",
+        model_name,
+        pretrained,
+        device,
+    )
+    return model, tokenizer
+
+
+def _release_objaverse_clip_model(device: str, _value) -> None:
+    release_torch_cache(device, torch_module=torch)
+
+
+_objaverse_clip_cache = ProviderModelCache(
+    loader=_load_objaverse_clip_model,
+    releaser=_release_objaverse_clip_model,
+)
 
 
 def _get_objaverse_clip_model(device: str | None = None):
@@ -35,41 +82,25 @@ def _get_objaverse_clip_model(device: str | None = None):
     and poor retrieval results, even if dimensions match.
 
     Args:
-        device: Target device (e.g., "cuda:0", "cuda:1", "cpu"). If None, uses
-            "cuda" if available, else "cpu".
+        device: Target device or provider (for example ``cuda:0``, ``mps``,
+            ``cpu``, or ``auto``). If None, uses the shared provider policy.
 
     Returns:
         Tuple of (model, tokenizer, device_str).
     """
-    global _cached_model, _cached_tokenizer, _device
+    target_device = _resolve_objaverse_clip_device(device)
+    with _objaverse_clip_cache.use(target_device) as cached:
+        return *cached, target_device
 
-    # Determine target device.
-    if device is not None:
-        target_device = device
-    elif _device is not None:
-        target_device = _device
-    else:
-        target_device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    # Load or reload model if needed.
-    if _cached_model is None or _device != target_device:
-        # ObjectThor uses ViT-L/14 with laion2b_s32b_b82k weights (768-dim).
-        # This MUST match the model used to compute the pre-computed embeddings.
-        # See: https://github.com/allenai/Holodeck
-        model_name = "ViT-L-14"
-        pretrained = "laion2b_s32b_b82k"
-        _device = target_device
+def _resolve_objaverse_clip_device(device: str | None) -> str:
+    if device is None and _objaverse_clip_cache.current_key is not None:
+        return _objaverse_clip_cache.current_key
+    return resolve_torch_device(requested=device or "auto", torch_module=torch)
 
-        _cached_model, _, _ = open_clip.create_model_and_transforms(
-            model_name, pretrained=pretrained, device=_device
-        )
-        _cached_tokenizer = open_clip.get_tokenizer(model_name)
 
-        console_logger.info(
-            f"Loaded Objaverse CLIP model: {model_name} ({pretrained}) on {_device}"
-        )
-
-    return _cached_model, _cached_tokenizer, _device
+def reset_objaverse_clip_model_cache() -> None:
+    _objaverse_clip_cache.reset()
 
 
 def get_objaverse_text_embedding(text: str, device: str | None = None) -> np.ndarray:
@@ -85,18 +116,48 @@ def get_objaverse_text_embedding(text: str, device: str | None = None) -> np.nda
     Returns:
         Text embedding as NumPy array (768 dimensions), normalized.
     """
-    model, tokenizer, device = _get_objaverse_clip_model(device=device)
+    return get_objaverse_text_embeddings([text], device=device)[0]
 
-    # Tokenize and encode text.
-    text_tokens = tokenizer([text]).to(device)
 
-    with torch.no_grad():
-        text_features = model.encode_text(text_tokens)
-        # Normalize for cosine similarity.
-        text_features = text_features / text_features.norm(dim=-1, keepdim=True)
+def warm_objaverse_text_encoder(device: str | None = None) -> None:
+    """Load and execute Objaverse's distinct ViT-L/14 text encoder once."""
+    started_at = time.monotonic()
+    embedding = get_objaverse_text_embedding(
+        "retrieval service warmup", device=device
+    )
+    if embedding.shape != (768,):
+        raise RuntimeError(
+            f"Unexpected Objaverse CLIP warmup embedding shape: {embedding.shape}"
+        )
+    console_logger.info(
+        "Objaverse CLIP text encoder warmed in %.3fs",
+        time.monotonic() - started_at,
+    )
 
-    embedding = text_features.cpu().numpy()[0]
-    return embedding
+
+def get_objaverse_text_embeddings(
+    texts: list[str], device: str | None = None, batch_size: int = 64
+) -> np.ndarray:
+    """Embed catalog metadata in the same normalized space used for queries."""
+    if not texts:
+        return np.empty((0, 768), dtype=np.float32)
+    if batch_size < 1:
+        raise ValueError("batch_size must be positive")
+
+    target_device = _resolve_objaverse_clip_device(device)
+    batches: list[np.ndarray] = []
+    with _objaverse_clip_cache.use(target_device) as (model, tokenizer):
+        for offset in range(0, len(texts), batch_size):
+            text_tokens = tokenizer(texts[offset : offset + batch_size]).to(
+                target_device
+            )
+            with torch.no_grad():
+                text_features = model.encode_text(text_tokens)
+                text_features = text_features / text_features.norm(
+                    dim=-1, keepdim=True
+                )
+            batches.append(text_features.cpu().numpy().astype(np.float32))
+    return np.concatenate(batches, axis=0)
 
 
 def filter_meshes_by_category(
@@ -203,9 +264,64 @@ def get_top_k_similar_meshes(
         indices=mesh_indices,
     )
 
-    sorted_items = sorted(similarities.items(), key=lambda x: x[1], reverse=True)
+    # The normalized catalog supplies names, descriptions, aliases, tags, and
+    # ontology paths. A bounded lexical boost corrects common CLIP near-neighbor
+    # errors without replacing the semantic embedding signal.
+    query_tokens = _catalog_tokens(text_description)
+    for mesh_idx in mesh_indices:
+        uid = preprocessed_data.embedding_index[mesh_idx]
+        metadata = preprocessed_data.get_metadata(uid)
+        if metadata is None:
+            continue
+        catalog_tokens = _catalog_tokens(
+            " ".join(
+                [
+                    metadata.name,
+                    metadata.description or "",
+                    *metadata.aliases,
+                    *metadata.tags,
+                    metadata.ontology_path or "",
+                ]
+            )
+        )
+        denominator = min(len(query_tokens), len(catalog_tokens))
+        if denominator:
+            overlap = len(query_tokens & catalog_tokens) / denominator
+            similarities[mesh_idx] += 0.12 * overlap
 
-    top_k_items = sorted_items[:top_k]
+    source_groups: dict[str, list[tuple[int, float]]] = {}
+    for mesh_idx, similarity in similarities.items():
+        uid = preprocessed_data.embedding_index[mesh_idx]
+        metadata = preprocessed_data.get_metadata(uid)
+        source = metadata.asset_source if metadata is not None else "unknown"
+        source_groups.setdefault(source, []).append((mesh_idx, similarity))
+
+    if len(source_groups) == 1:
+        top_k_items = sorted(
+            similarities.items(), key=lambda item: item[1], reverse=True
+        )[:top_k]
+    else:
+        # Raw CLIP score distributions differ by source modality (some indexes
+        # contain rendered-image embeddings, others curated text). Normalize by
+        # rank within each source before merging so one modality cannot drown out
+        # every other catalog. Keep a wide per-source pool, then globally rerank.
+        normalized: list[tuple[int, float]] = []
+        per_source_pool = max(top_k, 12)
+        for items in source_groups.values():
+            ranked = sorted(items, key=lambda item: item[1], reverse=True)[
+                :per_source_pool
+            ]
+            denominator = max(len(ranked) - 1, 1)
+            for rank, (mesh_idx, _raw_similarity) in enumerate(ranked):
+                normalized.append((mesh_idx, 1.0 - rank / denominator))
+        top_k_items = sorted(
+            normalized,
+            key=lambda item: (
+                item[1],
+                preprocessed_data.embedding_index[item[0]],
+            ),
+            reverse=True,
+        )[:top_k]
 
     results = []
     for mesh_idx, similarity in top_k_items:

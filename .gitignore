@@ -11,3 +11,10 @@ debug_furniture_agent
 .pytest_cache/
 .vscode/
 .mcp.json
+
+# Local downloads, generated previews, and macOS archive metadata.
+__MACOSX/
+output/
+examples/rendered_samples/
+external/stable-virtual-camera/
+examples/prison_escape/generated/structures/meshes/escape_tunnel_shell/[0-9a-f]*/

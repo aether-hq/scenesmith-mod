@@ -14,6 +14,7 @@ from examples.semantic_gallery.generate_gallery import (
     discover_control_paths,
     discover_trial_paths,
     generate_gallery,
+    rebuild_gallery,
 )
 from examples.semantic_gallery.serve_gallery import manifest_asset_paths
 from scenesmith.agent_utils.semantic_environments import SemanticEnvironmentSpec
@@ -178,6 +179,45 @@ class TestSemanticGallery(unittest.TestCase):
             self.assertEqual(
                 visual["scene_asset"]["sha256"],
                 "90dad0948e638aa07c400ae2ea6d34cceb3ba259d59ea1656043691435d02f1d",
+            )
+
+    def test_clean_rebuild_publishes_source_and_provider_provenance(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            output = Path(temporary_directory) / "generated"
+            output.mkdir()
+            (output / "stale.obj").write_text("must disappear")
+
+            manifest = rebuild_gallery(
+                output,
+                trial_directory=TRIAL_DIRECTORY,
+                control_directory=CONTROL_DIRECTORY,
+            )
+
+            self.assertFalse((output / "stale.obj").exists())
+            self.assertEqual(
+                json.loads((output / "manifest.json").read_text()),
+                manifest,
+            )
+            for scene in manifest["scenes"]:
+                with self.subTest(scene=scene["id"]):
+                    build = scene["build"]
+                    self.assertTrue((REPOSITORY_ROOT / build["source_path"]).is_file())
+                    self.assertEqual(len(build["source_sha256"]), 64)
+                    self.assertTrue(build["provider"])
+                    self.assertTrue(build["compiler_version"])
+            visual = next(
+                scene
+                for scene in manifest["scenes"]
+                if scene["id"] == "original_scenesmith_bar"
+            )
+            self.assertFalse(visual["build"]["rebuilt_from_recipe"])
+            self.assertEqual(visual["build"]["status"], "reference_only")
+            self.assertTrue(
+                all(
+                    scene["build"]["rebuilt_from_recipe"]
+                    for scene in manifest["scenes"]
+                    if scene["id"] != "original_scenesmith_bar"
+                )
             )
 
     def test_server_manifest_preflight_resolves_all_gallery_assets(self) -> None:

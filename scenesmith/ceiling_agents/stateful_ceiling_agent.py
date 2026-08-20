@@ -14,18 +14,15 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from agents import Agent, FunctionTool, Runner
-from agents.run import RunResult
+from agents import Agent, FunctionTool
 from agents.tracing import custom_span
 from omegaconf import DictConfig
 
-from scenesmith.agent_utils.base_stateful_agent import (
-    BaseStatefulAgent,
-    log_agent_usage,
-)
+from scenesmith.agent_utils.base_stateful_agent import BaseStatefulAgent
+from scenesmith.agent_utils.blender.process_provider import RenderAllocation
 from scenesmith.agent_utils.placement_noise import PlacementNoiseMode
 from scenesmith.agent_utils.room import AgentType, RoomScene
-from scenesmith.agent_utils.scoring import CeilingCritiqueWithScores, log_agent_response
+from scenesmith.agent_utils.scoring import CeilingCritiqueWithScores
 from scenesmith.agent_utils.workflow_tools import WorkflowTools
 from scenesmith.ceiling_agents.base_ceiling_agent import BaseCeilingAgent
 from scenesmith.ceiling_agents.tools.ceiling_tools import CeilingTools
@@ -68,7 +65,7 @@ class StatefulCeilingAgent(BaseStatefulAgent, BaseCeilingAgent):
         materials_server_host: str = "127.0.0.1",
         materials_server_port: int = 7008,
         num_workers: int = 1,
-        render_gpu_id: int | None = None,
+        render_allocation: RenderAllocation | None = None,
     ):
         """Initialize stateful ceiling agent.
 
@@ -85,8 +82,7 @@ class StatefulCeilingAgent(BaseStatefulAgent, BaseCeilingAgent):
             materials_server_host: Host for materials retrieval server.
             materials_server_port: Port for materials retrieval server.
             num_workers: Number of parallel workers.
-            render_gpu_id: GPU device ID for Blender rendering. When set, uses
-                bubblewrap to isolate the BlenderServer to this GPU.
+            render_allocation: Provider-owned Blender render slot.
         """
         # Initialize base stateful placement agent (sessions, checkpoint state).
         BaseStatefulAgent.__init__(
@@ -114,7 +110,7 @@ class StatefulCeilingAgent(BaseStatefulAgent, BaseCeilingAgent):
             materials_server_host=materials_server_host,
             materials_server_port=materials_server_port,
             num_workers=num_workers,
-            render_gpu_id=render_gpu_id,
+            render_allocation=render_allocation,
         )
 
         # Initialize pending images for image injection during critique.
@@ -358,30 +354,32 @@ class StatefulCeilingAgent(BaseStatefulAgent, BaseCeilingAgent):
 
     async def _run_ceiling_workflow(self) -> None:
         """Execute the multi-agent workflow for ceiling decoration."""
+        self._reset_workflow_budget()
+
         # Get runner instruction for planner to start workflow.
         planner_runner_prompt = CeilingAgentPrompts.STATEFUL_PLANNER_RUNNER_INSTRUCTION
         runner_instruction = self.prompt_registry.get_prompt(
             prompt_enum=planner_runner_prompt,
         )
 
-        result: RunResult = await Runner.run(
-            starting_agent=self.planner,
-            input=runner_instruction,
-            max_turns=self.cfg.agents.planner_agent.max_turns,
-            run_config=self._create_run_config(),
+        result = await self._run_planner_with_partial_recovery(
+            runner_instruction=runner_instruction,
+            agent_name="PLANNER (CEILING)",
+            state_hash=self.scene.content_hash,
         )
-        log_agent_usage(result=result, agent_name="PLANNER (CEILING)")
-
-        if result.final_output:
-            log_agent_response(
-                response=result.final_output, agent_name="PLANNER (CEILING)"
-            )
 
         # Compute final critique and scores.
         # Check if scene changed since last checkpoint to avoid redundant critique.
         current_scene_hash = self.scene.content_hash()
 
         if (
+            self.cfg.max_critique_rounds <= 0
+            or self._workflow_limit_reached
+            or self._critique_calls >= int(self.cfg.max_critique_rounds)
+        ):
+            console_logger.info("Final critique skipped: critique budget unavailable")
+            self.final_render_dir = self.rendering_manager.last_render_dir
+        elif (
             self.checkpoint_scene_hash is not None
             and current_scene_hash == self.checkpoint_scene_hash
         ):
@@ -392,7 +390,7 @@ class StatefulCeilingAgent(BaseStatefulAgent, BaseCeilingAgent):
             console_logger.info(
                 "Scene changed since last critique, computing final critique"
             )
-            await self._request_critique_impl(update_checkpoint=False)
+            await self._request_critique_bounded(update_checkpoint=False)
 
         # Validate final scene and save scores.
         await self._finalize_scene_and_scores()

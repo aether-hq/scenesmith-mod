@@ -1,3 +1,4 @@
+import math
 import unittest
 
 from unittest.mock import MagicMock, patch
@@ -11,6 +12,7 @@ from scenesmith.agent_utils.geometry_generation_server.dataclasses import (
     GeometryGenerationError,
     GeometryGenerationServerRequest,
     GeometryGenerationServerResponse,
+    StreamedResult,
 )
 
 
@@ -32,6 +34,45 @@ class TestGeometryGenerationClient(unittest.TestCase):
         """Test client initialization."""
         self.assertEqual(self.client.base_url, "http://127.0.0.1:7000")
         self.assertIsNotNone(self.client.session)
+
+    def test_request_contract_rejects_json_type_coercion(self):
+        with self.assertRaisesRegex(TypeError, "prompt"):
+            GeometryGenerationServerRequest(
+                image_path="/test/image.png",
+                output_dir="/test/output",
+                prompt=123,
+            )
+
+    def test_request_contract_rejects_nonfinite_nested_values(self):
+        with self.assertRaisesRegex(ValueError, "finite"):
+            GeometryGenerationServerRequest(
+                image_path="/test/image.png",
+                output_dir="/test/output",
+                prompt="chair",
+                backend="sam3d",
+                sam3d_config={"threshold": math.nan},
+            )
+
+    def test_request_contract_rejects_unsafe_output_filename(self):
+        with self.assertRaisesRegex(ValueError, "output_filename"):
+            GeometryGenerationServerRequest(
+                image_path="/test/image.png",
+                output_dir="/test/output",
+                prompt="chair",
+                output_filename="../chair.glb",
+            )
+
+    def test_response_contracts_reject_coercive_or_inconsistent_json(self):
+        with self.assertRaisesRegex(TypeError, "geometry_path"):
+            GeometryGenerationServerResponse(geometry_path=42)
+        with self.assertRaisesRegex(TypeError, "index"):
+            GeometryGenerationError(index=True, error_message="failed")
+        with self.assertRaisesRegex(ValueError, "status"):
+            StreamedResult(index=0, status="done", data={})
+        with self.assertRaisesRegex(ValueError, "success.*data"):
+            StreamedResult(index=0, status="success", data=None)
+        with self.assertRaisesRegex(ValueError, "error.*message"):
+            StreamedResult(index=0, status="error", error=None)
 
     @patch("requests.Session.get")
     def test_health_check_success(self, mock_get):
@@ -113,7 +154,7 @@ class TestGeometryGenerationClient(unittest.TestCase):
             "http://127.0.0.1:7000/generate_geometries",
             json=[req.to_dict() for req in geometry_requests],
             stream=True,
-            timeout=(10, 3600),
+            timeout=(1.0, 30.0),
         )
 
     @patch("requests.Session.post")

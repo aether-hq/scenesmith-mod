@@ -5,19 +5,19 @@ This module implements manipuland placement using persistent agents that work
 per-furniture, with fresh contexts for each furniture surface to bound token usage.
 """
 
+import json
 import logging
 import math
+import re
 
 from pathlib import Path
 from typing import Any
 
-from agents import Agent, FunctionTool, Runner, RunResult, custom_span
+from agents import Agent, FunctionTool, custom_span
 from omegaconf import DictConfig
 
-from scenesmith.agent_utils.base_stateful_agent import (
-    BaseStatefulAgent,
-    log_agent_usage,
-)
+from scenesmith.agent_utils.base_stateful_agent import BaseStatefulAgent
+from scenesmith.agent_utils.blender.process_provider import RenderAllocation
 from scenesmith.agent_utils.physical_feasibility import (
     apply_per_furniture_postprocessing,
 )
@@ -26,7 +26,9 @@ from scenesmith.agent_utils.rendering_manager import RenderingManager
 from scenesmith.agent_utils.room import (
     AgentType,
     ObjectType,
+    PlacementInfo,
     RoomScene,
+    SceneObject,
     SupportSurface,
     UniqueID,
     extract_and_propagate_support_surfaces,
@@ -34,7 +36,6 @@ from scenesmith.agent_utils.room import (
 from scenesmith.agent_utils.scene_analyzer import FurnitureSelection, SceneAnalyzer
 from scenesmith.agent_utils.scoring import (
     ManipulandCritiqueWithScores,
-    log_agent_response,
 )
 from scenesmith.agent_utils.support_surface_extraction import (
     SupportSurfaceExtractionConfig,
@@ -77,7 +78,7 @@ class StatefulManipulandAgent(BaseStatefulAgent, BaseManipulandAgent):
         materials_server_host: str = "127.0.0.1",
         materials_server_port: int = 7008,
         num_workers: int = 1,
-        render_gpu_id: int | None = None,
+        render_allocation: RenderAllocation | None = None,
     ):
         # Initialize base agent (sessions, checkpoint state, prompt registry).
         BaseStatefulAgent.__init__(
@@ -103,7 +104,7 @@ class StatefulManipulandAgent(BaseStatefulAgent, BaseManipulandAgent):
             materials_server_host=materials_server_host,
             materials_server_port=materials_server_port,
             num_workers=num_workers,
-            render_gpu_id=render_gpu_id,
+            render_allocation=render_allocation,
         )
 
         # Initialize pending images for image injection during critique.
@@ -314,11 +315,48 @@ class StatefulManipulandAgent(BaseStatefulAgent, BaseManipulandAgent):
         )
         workflow_tools = WorkflowTools()
 
-        return [
+        tools = [
             *vision_tools.tools.values(),
             *self.manipuland_tools.tools.values(),
             *workflow_tools.tools.values(),
         ]
+        # These two reads are deterministic and are injected into the initial
+        # instruction below. Removing them saves a model turn and prevents CLI
+        # models from confusing SceneSmith function tools with Claude Code's own
+        # disabled filesystem tools.
+        core_tools = {
+            "generate_manipuland_assets",
+            "place_manipuland_on_surface",
+            "move_manipuland",
+            "remove_manipuland",
+            "check_physics",
+        }
+        filtered = [tool for tool in tools if tool.name in core_tools]
+        console_logger.info(
+            "Manipuland designer tool surface reduced from %d to %d: %s",
+            len(tools),
+            len(filtered),
+            sorted(tool.name for tool in filtered),
+        )
+        return filtered
+
+    def _build_initial_design_input(self, instruction: str) -> str | list[dict]:
+        """Inject deterministic local state before the first designer turn."""
+        scene_state = self.manipuland_tools._get_current_scene_state_impl()
+        available_assets = self.manipuland_tools._list_available_assets_impl()
+        enriched = (
+            f"{instruction}\n\n"
+            "<PRELOADED_CURRENT_SCENE_STATE>\n"
+            f"{scene_state}\n"
+            "</PRELOADED_CURRENT_SCENE_STATE>\n\n"
+            "<PRELOADED_AVAILABLE_ASSETS>\n"
+            f"{available_assets}\n"
+            "</PRELOADED_AVAILABLE_ASSETS>\n\n"
+            "The two read-only results above were computed locally and are current. "
+            "Do not ask for them again. Your first response must call one of the "
+            "available SceneSmith mutation tools."
+        )
+        return super()._build_initial_design_input(enriched)
 
     def _create_designer_agent(
         self, tools: list[FunctionTool], furniture_description: str
@@ -620,6 +658,35 @@ class StatefulManipulandAgent(BaseStatefulAgent, BaseManipulandAgent):
         Args:
             furniture_id: ID of furniture being populated.
         """
+        self._reset_workflow_budget()
+
+        # With critique disabled the planner has no decision to make: its only
+        # useful action is request_initial_design(). Calling another model just
+        # to dispatch that action doubles latency and creates an extra failure
+        # boundary. Run the designer directly and retain a deterministic local
+        # fallback when the provider misses its deadline.
+        if self.cfg.max_critique_rounds <= 0:
+            starting_hash = self.scene.content_hash()
+            await self._request_initial_design_bounded()
+            if self.scene.content_hash() == starting_hash:
+                placed = self._place_cached_assets_deterministically()
+                if placed:
+                    console_logger.warning(
+                        "Designer made no mutation; deterministic fallback placed %d "
+                        "cached manipuland(s)",
+                        placed,
+                    )
+                else:
+                    console_logger.warning(
+                        "Designer made no mutation and no cached manipuland could be "
+                        "placed deterministically"
+                    )
+            await self._finalize_scene_and_scores()
+            console_logger.info(
+                "Completed direct manipuland placement for furniture %s", furniture_id
+            )
+            return
+
         # Get runner instruction for planner to start workflow.
         planner_runner_prompt = (
             ManipulandAgentPrompts.MANIPULAND_PLANNER_RUNNER_INSTRUCTION
@@ -628,24 +695,24 @@ class StatefulManipulandAgent(BaseStatefulAgent, BaseManipulandAgent):
             prompt_enum=planner_runner_prompt,
         )
 
-        result: RunResult = await Runner.run(
-            starting_agent=self.planner,
-            input=runner_instruction,
-            max_turns=self.cfg.agents.planner_agent.max_turns,
-            run_config=self._create_run_config(),
+        result = await self._run_planner_with_partial_recovery(
+            runner_instruction=runner_instruction,
+            agent_name="PLANNER (MANIPULAND)",
+            state_hash=self.scene.content_hash,
         )
-        log_agent_usage(result=result, agent_name="PLANNER (MANIPULAND)")
-
-        if result.final_output:
-            log_agent_response(
-                response=result.final_output, agent_name="PLANNER (MANIPULAND)"
-            )
 
         # Compute final critique and scores for completed furniture.
         # Check if scene changed since last checkpoint to avoid redundant critique.
         current_scene_hash = self.scene.content_hash()
 
         if (
+            self.cfg.max_critique_rounds <= 0
+            or self._workflow_limit_reached
+            or self._critique_calls >= int(self.cfg.max_critique_rounds)
+        ):
+            console_logger.info("Final critique skipped: critique budget unavailable")
+            self.final_render_dir = self.rendering_manager.last_render_dir
+        elif (
             self.checkpoint_scene_hash is not None
             and current_scene_hash == self.checkpoint_scene_hash
         ):
@@ -657,7 +724,7 @@ class StatefulManipulandAgent(BaseStatefulAgent, BaseManipulandAgent):
                 "Scene changed since last critique, computing final critique"
             )
             # Pass update_checkpoint=False to preserve N-1 checkpoint for reset check.
-            await self._request_critique_impl(update_checkpoint=False)
+            await self._request_critique_bounded(update_checkpoint=False)
 
         # Validate final scene and save scores.
         await self._finalize_scene_and_scores()
@@ -665,6 +732,189 @@ class StatefulManipulandAgent(BaseStatefulAgent, BaseManipulandAgent):
         console_logger.info(
             f"Completed manipuland placement for furniture {furniture_id}"
         )
+
+    @staticmethod
+    def _semantic_tokens(value: str) -> set[str]:
+        """Return stable content tokens for cheap cached-asset matching."""
+        stop_words = {
+            "a",
+            "an",
+            "and",
+            "for",
+            "of",
+            "on",
+            "small",
+            "the",
+            "with",
+        }
+        return {
+            token
+            for token in re.findall(r"[a-z0-9]+", value.lower().replace("_", " "))
+            if token not in stop_words
+        }
+
+    def _place_cached_assets_deterministically(self) -> int:
+        """Place locally cached semantic matches on the current support surface.
+
+        This is deliberately a fallback, not another generative path. It is
+        network-free, uses the same validated placement primitive as the agent,
+        and keeps a useful checkpoint when any LLM provider is slow or malformed.
+        """
+        selection = self.current_furniture_selection
+        if selection is None or not self.manipuland_tools.support_surfaces:
+            return 0
+
+        suggestion_text = str(selection.suggested_items or "")
+        suggestion_tokens = self._semantic_tokens(suggestion_text)
+        assets = [
+            asset
+            for asset in self.asset_manager.list_available_assets()
+            if asset.object_type == ObjectType.MANIPULAND
+        ]
+
+        def relevance(asset: SceneObject) -> tuple[int, float, str]:
+            label = f"{asset.name} {asset.description}"
+            label_tokens = self._semantic_tokens(label)
+            normalized_name = asset.name.lower().replace("_", " ")
+            exact = int(normalized_name in suggestion_text.lower())
+            overlap = len(suggestion_tokens & label_tokens)
+            quality = float(asset.metadata.get("asset_quality_score", 0.0))
+            return (exact * 100 + overlap, quality, str(asset.object_id))
+
+        ranked = sorted(assets, key=relevance, reverse=True)
+        matched = [asset for asset in ranked if relevance(asset)[0] > 0][:3]
+        if not matched:
+            return 0
+
+        surfaces = sorted(
+            self.manipuland_tools.support_surfaces.values(),
+            key=lambda surface: (surface.area, str(surface.surface_id)),
+            reverse=True,
+        )
+        fractions_by_count = {
+            1: [0.0],
+            2: [-0.22, 0.22],
+            3: [-0.30, 0.0, 0.30],
+        }
+        fractions = fractions_by_count[len(matched)]
+        placed = 0
+
+        for index, asset in enumerate(matched):
+            for surface in surfaces:
+                minimum = surface.bounding_box_min
+                maximum = surface.bounding_box_max
+                center_x = float((minimum[0] + maximum[0]) / 2.0)
+                center_y = float((minimum[1] + maximum[1]) / 2.0)
+                span_x = float(maximum[0] - minimum[0])
+                span_y = float(maximum[1] - minimum[1])
+                offset = fractions[index]
+                if span_x >= span_y:
+                    primary = (center_x + offset * span_x, center_y)
+                else:
+                    primary = (center_x, center_y + offset * span_y)
+                # The first pose provides semantic spacing. Center and modest
+                # cross-axis offsets make the fallback resilient to non-rectangular
+                # support meshes while all bounds remain validated by the tool.
+                candidates = [
+                    primary,
+                    (center_x, center_y),
+                    (center_x + 0.12 * span_x, center_y - 0.12 * span_y),
+                    (center_x - 0.12 * span_x, center_y + 0.12 * span_y),
+                ]
+                for position_x, position_y in candidates:
+                    raw_result = self.manipuland_tools._place_manipuland_on_surface_impl(
+                        asset_id=str(asset.object_id),
+                        surface_id=str(surface.surface_id),
+                        position_x=position_x,
+                        position_z=position_y,
+                        rotation_degrees=0.0,
+                        _action_metadata={
+                            "furniture_id": str(self.current_furniture_id),
+                            "surface_id": str(surface.surface_id),
+                            "placement_method": "deterministic_llm_fallback",
+                        },
+                    )
+                    try:
+                        success = bool(json.loads(raw_result).get("success"))
+                    except (json.JSONDecodeError, AttributeError, TypeError):
+                        success = False
+                    if success:
+                        placed += 1
+                        break
+                if success:
+                    break
+
+        return placed
+
+    @staticmethod
+    def _furniture_template_key(furniture: SceneObject) -> tuple[str, float] | None:
+        """Identify interchangeable instances without an LLM call."""
+        if furniture.geometry_path is None:
+            return None
+        return (str(furniture.geometry_path.resolve()), round(furniture.scale_factor, 6))
+
+    def _clone_manipulands_between_identical_furniture(
+        self, source_id: UniqueID, target_id: UniqueID
+    ) -> int:
+        """Copy a composed surface arrangement into an identical asset frame.
+
+        Surface-relative rigid transforms are transferred exactly, so repeated
+        beds/tables/shelves do not require another planner/designer tool loop.
+        """
+        source = self.scene.get_object(source_id)
+        target = self.scene.get_object(target_id)
+        if source is None or target is None:
+            return 0
+        if len(source.support_surfaces) != len(target.support_surfaces):
+            return 0
+
+        surface_pairs = {
+            source_surface.surface_id: target_surface
+            for source_surface, target_surface in zip(
+                source.support_surfaces, target.support_surfaces, strict=True
+            )
+        }
+        originals = [
+            obj
+            for obj in list(self.scene.objects.values())
+            if obj.object_type == ObjectType.MANIPULAND
+            and obj.placement_info is not None
+            and obj.placement_info.parent_surface_id in surface_pairs
+        ]
+        for original in originals:
+            source_surface = next(
+                surface
+                for surface in source.support_surfaces
+                if surface.surface_id == original.placement_info.parent_surface_id
+            )
+            target_surface = surface_pairs[source_surface.surface_id]
+            relative_transform = source_surface.transform.inverse() @ original.transform
+            target_transform = target_surface.transform @ relative_transform
+            position_2d, rotation_2d = target_surface.from_world_pose(target_transform)
+            clone = SceneObject(
+                object_id=self.scene.generate_unique_id(original.name),
+                object_type=original.object_type,
+                name=original.name,
+                description=original.description,
+                transform=target_transform,
+                geometry_path=original.geometry_path,
+                sdf_path=original.sdf_path,
+                image_path=original.image_path,
+                support_surfaces=[],
+                placement_info=PlacementInfo(
+                    parent_surface_id=target_surface.surface_id,
+                    position_2d=position_2d,
+                    rotation_2d=rotation_2d,
+                    placement_method="template_transfer",
+                ),
+                metadata=original.metadata.copy(),
+                bbox_min=(original.bbox_min.copy() if original.bbox_min is not None else None),
+                bbox_max=(original.bbox_max.copy() if original.bbox_max is not None else None),
+                immutable=original.immutable,
+                scale_factor=original.scale_factor,
+            )
+            self.scene.add_object(clone)
+        return len(originals)
 
     def _get_final_scores_directory(self) -> Path:
         """Get the directory path for saving per-furniture manipuland placement state.
@@ -754,7 +1004,9 @@ class StatefulManipulandAgent(BaseStatefulAgent, BaseManipulandAgent):
                     selection.furniture_id, []
                 )
 
-        # Phase 2: Per-furniture loop.
+        # Phase 2: Per-furniture loop. Identical asset instances share one
+        # composed template in their canonical surface frame.
+        populated_templates: dict[tuple[str, float], UniqueID] = {}
         for furniture_selection in furniture_data:
             furniture_id = furniture_selection.furniture_id
             # Create custom span for this furniture's manipuland placement.
@@ -801,6 +1053,26 @@ class StatefulManipulandAgent(BaseStatefulAgent, BaseManipulandAgent):
                     )
                     continue
 
+                template_key = self._furniture_template_key(furniture)
+                template_source = (
+                    populated_templates.get(template_key)
+                    if template_key is not None
+                    else None
+                )
+                if template_source is not None:
+                    clone_count = self._clone_manipulands_between_identical_furniture(
+                        template_source, furniture_id
+                    )
+                    if clone_count:
+                        console_logger.info(
+                            "Transferred %d manipuland(s) from identical furniture "
+                            "%s to %s without another LLM workflow",
+                            clone_count,
+                            template_source,
+                            furniture_id,
+                        )
+                        continue
+
                 try:
                     # Set up per-furniture context.
                     self._setup_furniture_context(furniture_selection)
@@ -845,6 +1117,9 @@ class StatefulManipulandAgent(BaseStatefulAgent, BaseManipulandAgent):
                             config=self.cfg.per_furniture_postprocessing,
                             simulation_html_path=sim_html_path,
                         )
+
+                    if template_key is not None:
+                        populated_templates[template_key] = furniture_id
 
                 except Exception as e:
                     console_logger.error(

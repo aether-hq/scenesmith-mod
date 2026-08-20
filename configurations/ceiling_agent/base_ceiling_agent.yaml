@@ -59,10 +59,12 @@ rendering:
 # Asset manager configuration
 asset_manager:
   general_asset_source: "generated"
+  shared_registry_path: null
   backend: "sam3d"
 
   router:
     enabled: true
+    deterministic_analysis: true
     parallel_workers: 10
     # Max retries for VLM analysis if parsing fails (e.g., invalid object_type)
     analysis_max_retries: 3
@@ -72,7 +74,7 @@ asset_manager:
         max_retries: 2
       articulated:
         enabled: true
-        max_retries: 3
+        max_retries: 0
         use_lenient_validation: true
       # Thin covering not used for ceiling typically.
       thin_covering:
@@ -84,10 +86,20 @@ asset_manager:
           enabled: false  # AI generation disabled for ceiling agent
 
   sam3d:
+    provider: "auto"
     sam3_checkpoint: "external/checkpoints/sam3.pt"
     sam3d_checkpoint: "external/checkpoints/pipeline.yaml"
     mode: "foreground"
     threshold: 0.5
+    mlx_repo_path: "external/Sam3D-Objects-MLX"
+    mlx_python_path: "external/Sam3D-Objects-MLX/.venv/bin/python"
+    mlx_checkpoint_dir: "external/Sam3D-Objects-MLX/checkpoints/hf"
+    mlx_steps: 12
+    mlx_seed: 42
+    mlx_simplify_ratio: 0.0
+    mlx_mask_color_threshold: 24.0
+    mlx_timeout_seconds: 7200
+    mlx_mps_high_watermark_ratio: 0.8  # bounded fraction of recommended MPS memory
 
   hssd:
     data_path: "data/hssd-models"
@@ -110,6 +122,22 @@ asset_manager:
       MANIPULAND: "small_objects"
       WALL_MOUNTED: "wall_objects"
       CEILING_MOUNTED: "ceiling_objects"
+
+  polyhaven:
+    data_path: "data/polyhaven"
+    preprocessed_path: "data/polyhaven/preprocessed"
+    use_top_k: 8
+    use_lenient_validation: true
+    object_type_mapping:
+      FURNITURE: "large_objects"
+      MANIPULAND: "small_objects"
+      WALL_MOUNTED: "wall_objects"
+      CEILING_MOUNTED: "ceiling_objects"
+
+  federated:
+    source_order: ["polyhaven", "generated"]
+    catalog_max_retries: 0
+    candidate_pool_size: 12
 
   articulated:
     enable_self_collision_filtering: true

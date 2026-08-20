@@ -42,6 +42,20 @@ pipeline:
 geometry_generation_server:
   host: "127.0.0.1"
   port: 7005
+  provider: "local"  # local (owned by this run) or external (shared/remote)
+  scheme: "https"  # external services must use HTTPS unless loopback-only
+  auth_token_env: "SCENESMITH_GEOMETRY_TOKEN"  # token is read once at startup
+
+# Injectable local execution providers. Environment overrides:
+# SCENESMITH_COMPUTE_PROVIDER, SCENESMITH_RENDER_PROVIDER,
+# SCENESMITH_RENDER_PROCESS_PROVIDER, SCENESMITH_GEOMETRY_PROVIDER, and
+# SCENESMITH_GEOMETRY_SERVICE_PROVIDER.
+execution_providers:
+  compute: "auto"  # auto, cuda, mps, or cpu
+  policy: "balanced"  # balanced, performance, or cost
+  render: "auto"  # auto, optix, cuda, hip, oneapi, metal, or cpu
+  render_process: "auto"  # auto, shared, or nvidia-bwrap
+  geometry: "auto"  # auto, cuda, or mlx (depends on the selected model backend)
 
 # HSSD retrieval server settings
 hssd_retrieval_server:
@@ -57,6 +71,11 @@ articulated_retrieval_server:
 objaverse_retrieval_server:
   host: "127.0.0.1"
   port: 7009
+
+# Poly Haven generic catalog retrieval server settings
+polyhaven_retrieval_server:
+  host: "127.0.0.1"
+  port: 7010
 
 # Materials retrieval server settings
 materials_retrieval_server:

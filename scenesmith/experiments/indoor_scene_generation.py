@@ -4,6 +4,7 @@ import faulthandler
 import json
 import logging
 import os
+import platform
 import shutil
 import time
 import uuid
@@ -19,7 +20,24 @@ from omegaconf import DictConfig, OmegaConf
 from scenesmith.agent_utils.articulated_retrieval_server import (
     ArticulatedRetrievalServer,
 )
-from scenesmith.agent_utils.geometry_generation_server import GeometryGenerationServer
+from scenesmith.agent_utils.blender.process_provider import (
+    RenderAllocation,
+    render_allocations,
+)
+from scenesmith.agent_utils.execution_providers import (
+    HardwareInventory,
+    resolve_torch_device,
+)
+from scenesmith.agent_utils.geometry_generation_server.execution_provider import (
+    resolve_geometry_execution_provider,
+)
+from scenesmith.agent_utils.geometry_generation_server.sam_provider import (
+    sam_provider_config_from_mapping,
+)
+from scenesmith.agent_utils.geometry_generation_server.service_provider import (
+    GeometryService,
+    resolve_geometry_service_provider,
+)
 from scenesmith.agent_utils.house import HouseLayout, HouseScene, RoomGeometry
 from scenesmith.agent_utils.hssd_retrieval_server import HssdRetrievalServer
 from scenesmith.agent_utils.materials_retrieval_server import MaterialsRetrievalServer
@@ -71,84 +89,152 @@ STAGE_ASSET_DIRS = {
 }
 
 
-def _get_retrieval_gpu_device() -> str | None:
-    """Get GPU device for retrieval servers.
+def _asset_config_uses_generated_geometry(asset_config: dict) -> bool:
+    """Return whether an asset configuration can reach text-to-3D generation."""
 
-    If multiple GPUs available (as seen by PyTorch), returns the last
-    logical GPU index to avoid competing with Blender and geometry
-    generation (which use lower-indexed GPUs).
+    source = asset_config.get("general_asset_source")
+    if source == "generated":
+        return True
+    if source != "all":
+        return False
 
-    This respects CUDA_VISIBLE_DEVICES - PyTorch remaps physical GPUs
-    to logical indices 0, 1, 2, ... so we use the last logical index.
+    router = asset_config.get("router", {})
+    generated_strategy = router.get("strategies", {}).get("generated", {})
+    if not generated_strategy.get("enabled", True):
+        return False
+    source_order = asset_config.get("federated", {}).get(
+        "source_order", ["polyhaven", "hssd", "objaverse", "generated"]
+    )
+    return "generated" in source_order
+
+
+def _resolve_geometry_runtime_configuration(
+    config: dict | DictConfig,
+) -> tuple[str, dict | None]:
+    """Derive one authoritative geometry runtime shared by generated agents."""
+
+    config_dict = (
+        OmegaConf.to_container(config, resolve=True)
+        if isinstance(config, DictConfig)
+        else config
+    )
+    generated: list[tuple[str, dict]] = []
+    for agent_name in (
+        "furniture_agent",
+        "wall_agent",
+        "ceiling_agent",
+        "manipuland_agent",
+    ):
+        if agent_name not in config_dict:
+            continue
+        asset_config = config_dict[agent_name]["asset_manager"]
+        if _asset_config_uses_generated_geometry(asset_config):
+            generated.append((agent_name, asset_config))
+    if not generated:
+        raise ValueError("No generated asset agent requires a geometry runtime")
+    backends = {
+        str(asset_config.get("backend", "hunyuan3d")) for _, asset_config in generated
+    }
+    if len(backends) != 1:
+        details = ", ".join(
+            f"{agent}={asset.get('backend', 'hunyuan3d')}" for agent, asset in generated
+        )
+        raise ValueError(
+            "All generated asset agents must use the same geometry backend; " + details
+        )
+    backend = backends.pop()
+    if backend != "sam3d":
+        return backend, None
+    resolved_configs = [
+        (agent, sam_provider_config_from_mapping(asset.get("sam3d", {})))
+        for agent, asset in generated
+    ]
+    reference = resolved_configs[0][1]
+    for agent, resolved in resolved_configs[1:]:
+        if resolved != reference:
+            raise ValueError(
+                "All generated asset agents must use the same SAM3D runtime "
+                f"configuration; {resolved_configs[0][0]} and {agent} differ."
+            )
+    return backend, reference
+
+
+def _get_retrieval_compute_device(
+    *, requested: str = "auto", policy: str = "balanced"
+) -> str:
+    """Resolve a provider-backed Torch device for retrieval servers.
+
+    If CUDA is selected, the last logical device is reserved to reduce
+    contention with geometry generation. MPS and CPU are valid first-class
+    targets rather than implicit fallbacks.
+
+    Provider visibility and physical-to-logical device mapping are handled by
+    the shared execution-provider registry.
 
     Returns:
-        Device string like "cuda:7" or None if single GPU / detection fails.
-    """
-    try:
-        # Import torch inside function to avoid CUDA initialization before
-        # ProcessPoolExecutor forks workers (fork-after-CUDA causes corruption).
-        import torch
-
-        gpu_count = torch.cuda.device_count()
-        if gpu_count > 1:
-            # Use the last logical GPU for retrieval servers.
-            return f"cuda:{gpu_count - 1}"
-    except ImportError:
-        pass
-    return None
-
-
-class RenderGPUAllocator:
-    """Round-robin GPU allocator for distributing Blender rendering.
-
-    Assigns GPUs in round-robin order for BlenderServer instances. This enables
-    parallel scene generation without GPU memory exhaustion by spreading the
-    rendering load across multiple GPUs.
-
-    Thread-safe for concurrent allocation from multiple workers.
+        A concrete Torch device such as ``cuda:1``, ``mps``, or ``cpu``.
     """
 
-    def __init__(self) -> None:
-        self._gpus = self._detect_gpus()
+    # Import only after geometry workers have forked; importing Torch in the
+    # parent earlier can initialize an accelerator runtime inherited by workers.
+    import torch
+
+    inventory = HardwareInventory.detect(torch_module=torch)
+    return resolve_torch_device(
+        requested=requested,
+        policy=policy,
+        inventory=inventory,
+        device_preference="last",
+        torch_module=torch,
+        environ={},
+    )
+
+
+class RenderAllocationAllocator:
+    """Thread-safe round-robin allocator for provider-owned render slots."""
+
+    def __init__(
+        self,
+        requested_render_provider: str = "auto",
+        requested_process_provider: str = "auto",
+    ) -> None:
+        self._devices = self._detect_devices(
+            requested_render_provider,
+            requested_process_provider,
+        )
         self._counter = 0
         self._lock = Lock()
-        console_logger.info(f"RenderGPUAllocator initialized with GPUs: {self._gpus}")
+        console_logger.info(
+            "RenderAllocationAllocator initialized with isolation devices: %s",
+            self._devices,
+        )
 
-    def _detect_gpus(self) -> list[int]:
-        """Detect available GPU indices, respecting CUDA_VISIBLE_DEVICES."""
-        cuda_visible = os.environ.get("CUDA_VISIBLE_DEVICES")
-        if cuda_visible:
-            # Parse comma-separated GPU indices from CUDA_VISIBLE_DEVICES.
-            try:
-                return [int(x.strip()) for x in cuda_visible.split(",")]
-            except ValueError:
-                console_logger.warning(
-                    f"Failed to parse CUDA_VISIBLE_DEVICES='{cuda_visible}', "
-                    "falling back to device file detection"
-                )
+    @staticmethod
+    def _detect_devices(
+        requested_render_provider: str,
+        requested_process_provider: str,
+    ) -> list[RenderAllocation]:
+        """Return provider-owned render process slots."""
 
-        # Detect from /dev/nvidia* device files.
-        gpus = []
-        for i in range(16):
-            if Path(f"/dev/nvidia{i}").exists():
-                gpus.append(i)
-        return gpus if gpus else [0]  # Default to GPU 0 if none detected.
+        return list(
+            render_allocations(
+                requested_render_provider,
+                requested_process_provider=requested_process_provider,
+            )
+        )
 
-    def allocate(self) -> int:
-        """Get next GPU in round-robin order.
-
-        Returns:
-            GPU device index for BlenderServer.
-        """
+    def allocate(self) -> RenderAllocation:
+        """Get the next immutable render allocation."""
         with self._lock:
-            gpu = self._gpus[self._counter % len(self._gpus)]
+            device = self._devices[self._counter % len(self._devices)]
             self._counter += 1
-            return gpu
+            return device
 
     @property
-    def available_gpus(self) -> list[int]:
-        """Get list of available GPU indices."""
-        return self._gpus.copy()
+    def available_allocations(self) -> list[RenderAllocation]:
+        """Get a snapshot of all resolved render allocations."""
+
+        return self._devices.copy()
 
 
 def _reset_inherited_sdk_state() -> None:
@@ -471,7 +557,7 @@ def _generate_room(
     start_stage: str = "furniture",
     stop_stage: str = "manipuland",
     house_layout: HouseLayout | None = None,
-    render_gpu_id: int | None = None,
+    render_allocation: RenderAllocation | None = None,
 ) -> RoomScene:
     """Generate a single room with furniture, wall/ceiling objects, and manipulands.
 
@@ -505,8 +591,7 @@ def _generate_room(
         stop_stage: Stage to stop after ("furniture", "wall_mounted",
             "ceiling_mounted", or "manipuland").
         house_layout: Optional HouseLayout for door/window export in SceneEval.
-        render_gpu_id: GPU device ID for Blender rendering. When set, uses
-            bubblewrap to isolate the BlenderServer to this GPU.
+        render_allocation: Provider-owned Blender render slot.
 
     Returns:
         RoomScene with furniture, wall/ceiling objects, and (optionally) manipulands.
@@ -547,7 +632,7 @@ def _generate_room(
                     IndoorSceneGenerationExperiment.compatible_furniture_agents
                 ),
                 logger=logger,
-                render_gpu_id=render_gpu_id,
+                render_allocation=render_allocation,
             )
             try:
                 asyncio.run(furniture_agent.add_furniture(scene=scene))
@@ -679,7 +764,7 @@ def _generate_room(
                 house_layout=house_layout,
                 ceiling_height=room_geometry.wall_height,
                 wall_thickness=room_geometry.wall_thickness,
-                render_gpu_id=render_gpu_id,
+                render_allocation=render_allocation,
             )
             try:
                 asyncio.run(wall_agent.add_wall_objects(scene=scene))
@@ -738,7 +823,7 @@ def _generate_room(
                 ),
                 logger=logger,
                 ceiling_height=room_geometry.wall_height,
-                render_gpu_id=render_gpu_id,
+                render_allocation=render_allocation,
             )
             try:
                 asyncio.run(ceiling_agent.add_ceiling_objects(scene=scene))
@@ -799,7 +884,7 @@ def _generate_room(
                 IndoorSceneGenerationExperiment.compatible_manipuland_agents
             ),
             logger=logger,
-            render_gpu_id=render_gpu_id,
+            render_allocation=render_allocation,
         )
         asyncio.run(manipuland_agent.add_manipulands(scene=scene))
         end_time = time.time()
@@ -909,7 +994,7 @@ def _run_sequential_room_generation(
     cfg_dict: dict,
     start_stage: str,
     stop_stage: str,
-    render_gpu_id: int | None = None,
+    render_allocation: RenderAllocation | None = None,
 ) -> dict[str, RoomScene]:
     """Generate rooms sequentially (existing behavior).
 
@@ -919,8 +1004,7 @@ def _run_sequential_room_generation(
         cfg_dict: Configuration dictionary.
         start_stage: Stage to start from.
         stop_stage: Stage to stop after.
-        render_gpu_id: GPU device ID for Blender rendering. When set, uses
-            bubblewrap to isolate the BlenderServer to this GPU.
+        render_allocation: Provider-owned Blender render slot.
 
     Returns:
         Dictionary mapping room_id to RoomScene.
@@ -945,7 +1029,7 @@ def _run_sequential_room_generation(
                     start_stage=start_stage,
                     stop_stage=stop_stage,
                     house_layout=house_layout,
-                    render_gpu_id=render_gpu_id,
+                    render_allocation=render_allocation,
                 )
                 rooms[room_id] = room_scene
     return rooms
@@ -956,7 +1040,8 @@ def _generate_floor_plan_worker(
     scene_dir: str,
     cfg_dict: dict,
     experiment_run_id: str | None,
-    render_gpu_id: int | None = None,
+    render_allocation: RenderAllocation | None = None,
+    reset_sdk_state: bool = True,
 ) -> None:
     """Run floor plan generation in isolated subprocess.
 
@@ -969,11 +1054,12 @@ def _generate_floor_plan_worker(
         scene_dir: Path to scene output directory (as string).
         cfg_dict: Configuration dictionary.
         experiment_run_id: Unique ID for this experiment run.
-        render_gpu_id: GPU device ID for Blender rendering. When set, uses
-            bubblewrap to isolate the BlenderServer to this GPU.
+        render_allocation: Provider-owned Blender render slot.
     """
-    # Reset any SDK state inherited via fork (defense in depth).
-    _reset_inherited_sdk_state()
+    # Reset any SDK state inherited via fork (defense in depth). Layout-only
+    # runs execute this worker inline and must preserve the parent trace.
+    if reset_sdk_state:
+        _reset_inherited_sdk_state()
 
     faulthandler.enable()
 
@@ -998,15 +1084,51 @@ def _generate_floor_plan_worker(
                         IndoorSceneGenerationExperiment.compatible_floor_plan_agents
                     ),
                     logger=logger,
-                    render_gpu_id=render_gpu_id,
+                    render_allocation=render_allocation,
                 )
                 try:
-                    house_layout = asyncio.run(
-                        floor_plan_agent.generate_house_layout(
-                            prompt=prompt,
-                            output_dir=scene_path / "floor_plans",
-                        )
+                    revision_source = os.environ.get(
+                        "SCENESMITH_REVISION_SOURCE_LAYOUT"
                     )
+                    revision_feedback = os.environ.get("SCENESMITH_REVISION_FEEDBACK")
+                    if revision_source and revision_feedback:
+                        source_layout_path = Path(revision_source)
+                        if not source_layout_path.exists():
+                            raise FileNotFoundError(
+                                "Revision source layout does not exist: "
+                                f"{source_layout_path}"
+                            )
+                        with source_layout_path.open() as file:
+                            source_layout = HouseLayout.from_dict(
+                                json.load(file), house_dir=source_layout_path.parent
+                            )
+                        try:
+                            locks = tuple(
+                                str(value)
+                                for value in json.loads(
+                                    os.environ.get("SCENESMITH_REVISION_LOCKS", "[]")
+                                )
+                            )
+                        except (TypeError, json.JSONDecodeError):
+                            locks = ()
+                        console_logger.info(
+                            "Restoring floor-plan checkpoint for architectural revision"
+                        )
+                        house_layout = asyncio.run(
+                            floor_plan_agent.revise_house_layout(
+                                existing_layout=source_layout,
+                                feedback=revision_feedback,
+                                output_dir=scene_path / "floor_plans",
+                                locks=locks,
+                            )
+                        )
+                    else:
+                        house_layout = asyncio.run(
+                            floor_plan_agent.generate_house_layout(
+                                prompt=prompt,
+                                output_dir=scene_path / "floor_plans",
+                            )
+                        )
                 finally:
                     floor_plan_agent.cleanup()
 
@@ -1028,7 +1150,7 @@ def _generate_room_worker(
     scene_id: int,
     experiment_run_id: str | None = None,
     house_layout_dict: dict | None = None,
-    render_gpu_id: int | None = None,
+    render_allocation: RenderAllocation | None = None,
 ) -> dict:
     """Worker function for parallel room generation.
 
@@ -1049,8 +1171,7 @@ def _generate_room_worker(
         scene_id: Parent scene ID for trace correlation.
         experiment_run_id: Unique ID for this experiment run.
         house_layout_dict: Optional serialized HouseLayout for door/window export.
-        render_gpu_id: GPU device ID for Blender rendering. When set, uses
-            bubblewrap to isolate the BlenderServer to this GPU.
+        render_allocation: Provider-owned Blender render slot.
 
     Returns:
         Dict containing scene_state and metadata for reconstruction.
@@ -1108,7 +1229,7 @@ def _generate_room_worker(
                 start_stage=start_stage,
                 stop_stage=stop_stage,
                 house_layout=house_layout,
-                render_gpu_id=render_gpu_id,
+                render_allocation=render_allocation,
             )
 
         console_logger.info(f"Worker completed for room '{room_id}'")
@@ -1162,7 +1283,7 @@ def _run_parallel_room_generation(
     max_workers: int,
     scene_id: int,
     experiment_run_id: str | None = None,
-    render_gpu_id: int | None = None,
+    render_allocation: RenderAllocation | None = None,
 ) -> dict[str, RoomScene]:
     """Generate rooms in parallel with fault tolerance.
 
@@ -1178,8 +1299,7 @@ def _run_parallel_room_generation(
         max_workers: Maximum number of concurrent room processes.
         scene_id: Scene identifier for trace correlation.
         experiment_run_id: Unique ID for this experiment run.
-        render_gpu_id: GPU device ID for Blender rendering. When set, uses
-            bubblewrap to isolate the BlenderServer to this GPU.
+        render_allocation: Provider-owned Blender render slot.
 
     Returns:
         Dictionary mapping room_id to RoomScene.
@@ -1216,7 +1336,7 @@ def _run_parallel_room_generation(
             "scene_id": scene_id,
             "experiment_run_id": experiment_run_id,
             "house_layout_dict": house_layout.to_dict(scene_dir=output_dir),
-            "render_gpu_id": render_gpu_id,
+            "render_allocation": render_allocation,
         }
         tasks.append((room_id, _generate_room_worker, kwargs))
 
@@ -1267,11 +1387,23 @@ class IndoorSceneGenerationExperiment(BaseExperiment):
 
     def __init__(self, cfg: DictConfig):
         super().__init__(cfg=cfg)
-        self.geometry_server: GeometryGenerationServer | None = None
+        self.geometry_server: GeometryService | None = None
         self.hssd_server: HssdRetrievalServer | None = None
         self.objaverse_server: ObjaverseRetrievalServer | None = None
+        self.polyhaven_server: ObjaverseRetrievalServer | None = None
         self.articulated_server: ArticulatedRetrievalServer | None = None
         self.materials_server: MaterialsRetrievalServer | None = None
+        self._retrieval_device: str | None = None
+
+    def _resolve_retrieval_device(self) -> str:
+        """Resolve and cache the configured retrieval execution provider."""
+
+        if self._retrieval_device is None:
+            self._retrieval_device = _get_retrieval_compute_device(
+                requested=self.provider_selection.compute,
+                policy=self.provider_selection.policy,
+            )
+        return self._retrieval_device
 
     def __del__(self):
         """Ensure servers are stopped when experiment is destroyed."""
@@ -1290,6 +1422,24 @@ class IndoorSceneGenerationExperiment(BaseExperiment):
                 self.hssd_server.stop()
             except Exception as e:
                 console_logger.error(f"Failed to stop HSSD server in destructor: {e}")
+
+        if self.objaverse_server and self.objaverse_server.is_running():
+            console_logger.warning("Stopping Objaverse server in destructor")
+            try:
+                self.objaverse_server.stop()
+            except Exception as e:
+                console_logger.error(
+                    f"Failed to stop Objaverse server in destructor: {e}"
+                )
+
+        if self.polyhaven_server and self.polyhaven_server.is_running():
+            console_logger.warning("Stopping Poly Haven server in destructor")
+            try:
+                self.polyhaven_server.stop()
+            except Exception as e:
+                console_logger.error(
+                    f"Failed to stop Poly Haven server in destructor: {e}"
+                )
 
         if self.articulated_server and self.articulated_server.is_running():
             console_logger.warning("Stopping articulated server in destructor")
@@ -1311,43 +1461,66 @@ class IndoorSceneGenerationExperiment(BaseExperiment):
 
     def _start_geometry_server(self) -> None:
         """Start geometry generation server (if general_asset_source == 'generated')."""
-        # Only start if at least one agent uses generated strategy.
-        furniture_uses_generated = (
-            self.cfg.furniture_agent.asset_manager.general_asset_source == "generated"
-        )
-        manipuland_uses_generated = (
-            self.cfg.manipuland_agent.asset_manager.general_asset_source == "generated"
-        )
-
-        if not (furniture_uses_generated or manipuland_uses_generated):
+        # "all" can be catalog-only. Only allocate the expensive geometry
+        # runtime when at least one agent's federated hierarchy can actually
+        # fall through to generated geometry.
+        agent_configs = [
+            self.cfg.furniture_agent.asset_manager,
+            self.cfg.wall_agent.asset_manager,
+            self.cfg.ceiling_agent.asset_manager,
+            self.cfg.manipuland_agent.asset_manager,
+        ]
+        if not any(
+            _asset_config_uses_generated_geometry(
+                OmegaConf.to_container(asset_config, resolve=True)
+            )
+            for asset_config in agent_configs
+        ):
+            console_logger.info(
+                "Skipping geometry server; configured asset hierarchy is catalog-only"
+            )
             return
 
         # Get server configuration from experiment config.
         server_config = self.cfg.experiment.geometry_generation_server
 
-        # Determine backend - use furniture agent config (they should match).
-        backend = self.cfg.furniture_agent.asset_manager.get("backend", "hunyuan3d")
+        backend, sam3d_config = _resolve_geometry_runtime_configuration(self.cfg)
 
-        # Prepare SAM3D config if using SAM3D backend.
-        sam3d_config = None
-        if backend == "sam3d":
-            sam3d_cfg = self.cfg.furniture_agent.asset_manager.sam3d
-            sam3d_config = {
-                "sam3_checkpoint": str(sam3d_cfg.sam3_checkpoint),
-                "sam3d_checkpoint": str(sam3d_cfg.sam3d_checkpoint),
-            }
-
+        service_provider = resolve_geometry_service_provider(
+            self.provider_selection.geometry_service,
+            external_scheme=self.provider_selection.external_scheme,
+            external_auth_token=self.provider_selection.external_auth_token,
+            environ={},
+        )
+        execution_provider = None
+        if service_provider.key == "local":
+            execution_provider = resolve_geometry_execution_provider(
+                backend=str(backend),
+                sam3d_config=sam3d_config,
+                requested=self.provider_selection.geometry,
+                environ={},
+            )
+        provider_label = (
+            f"/{execution_provider.key}"
+            if execution_provider is not None
+            else "/remote-selected"
+        )
         console_logger.info(
-            f"Starting geometry generation server ({backend}) on "
-            f"{server_config.host}:{server_config.port}"
+            "Connecting to %s geometry service (%s%s) at %s:%s",
+            service_provider.key,
+            backend,
+            provider_label,
+            server_config.host,
+            server_config.port,
         )
 
-        self.geometry_server = GeometryGenerationServer(
+        self.geometry_server = service_provider.connect(
             host=server_config.host,
             port=server_config.port,
             backend=backend,
             sam3d_config=sam3d_config,
             log_file=self.output_dir / "experiment.log",
+            execution_provider=execution_provider,
         )
 
         self.geometry_server.start()
@@ -1391,11 +1564,11 @@ class IndoorSceneGenerationExperiment(BaseExperiment):
         # Get HSSD data configuration from asset manager config.
         hssd_config = self.cfg.furniture_agent.asset_manager.hssd
 
-        retrieval_device = _get_retrieval_gpu_device()
+        retrieval_device = self._resolve_retrieval_device()
         console_logger.info(
             f"Starting HSSD retrieval server on "
             f"{server_config.host}:{server_config.port} "
-            f"(CLIP device: {retrieval_device or 'default'})"
+            f"(CLIP device: {retrieval_device})"
         )
 
         self.hssd_server = HssdRetrievalServer(
@@ -1450,11 +1623,11 @@ class IndoorSceneGenerationExperiment(BaseExperiment):
         # Get Objaverse data configuration from asset manager config.
         objaverse_config = self.cfg.furniture_agent.asset_manager.objaverse
 
-        retrieval_device = _get_retrieval_gpu_device()
+        retrieval_device = self._resolve_retrieval_device()
         console_logger.info(
             f"Starting Objaverse retrieval server on "
             f"{server_config.host}:{server_config.port} "
-            f"(CLIP device: {retrieval_device or 'default'})"
+            f"(CLIP device: {retrieval_device})"
         )
 
         self.objaverse_server = ObjaverseRetrievalServer(
@@ -1479,6 +1652,67 @@ class IndoorSceneGenerationExperiment(BaseExperiment):
             self.objaverse_server.stop()
             console_logger.info("Objaverse retrieval server stopped")
             self.objaverse_server = None
+
+    def _start_polyhaven_server(self) -> None:
+        """Start the Poly Haven catalog server when selected directly or via all."""
+        sources = [
+            self.cfg.furniture_agent.asset_manager.general_asset_source,
+            self.cfg.manipuland_agent.asset_manager.general_asset_source,
+            self.cfg.wall_agent.asset_manager.general_asset_source,
+            self.cfg.ceiling_agent.asset_manager.general_asset_source,
+        ]
+        if not any(source in {"polyhaven", "all"} for source in sources):
+            return
+
+        server_config = self.cfg.experiment.polyhaven_retrieval_server
+        uses_global_catalog = any(source == "all" for source in sources)
+        catalog_config = self.cfg.furniture_agent.asset_manager.polyhaven
+        data_path = (
+            "data/global-assets"
+            if uses_global_catalog
+            else str(catalog_config.data_path)
+        )
+        preprocessed_path = (
+            "data/global-assets/preprocessed"
+            if uses_global_catalog
+            else str(catalog_config.preprocessed_path)
+        )
+        top_k = 50 if uses_global_catalog else catalog_config.use_top_k
+        # ViT-L text inference is ~50x faster on CPU than MPS on current Apple
+        # Silicon/PyTorch for these tiny one-string queries (about 0.1s vs 5s).
+        retrieval_device = (
+            "cpu" if uses_global_catalog else self._resolve_retrieval_device()
+        )
+        console_logger.info(
+            "Starting %s retrieval server on %s:%s (CLIP device: %s)",
+            "global asset catalog" if uses_global_catalog else "Poly Haven",
+            server_config.host,
+            server_config.port,
+            retrieval_device,
+        )
+        self.polyhaven_server = ObjaverseRetrievalServer(
+            host=server_config.host,
+            port=server_config.port,
+            preload_retriever=True,
+            objaverse_data_path=data_path,
+            objaverse_preprocessed_path=preprocessed_path,
+            objaverse_top_k=top_k,
+            clip_device=retrieval_device,
+        )
+        self.polyhaven_server.start()
+        self.polyhaven_server.wait_until_ready(timeout_s=60.0)
+        console_logger.info(
+            "%s retrieval server ready",
+            "Global asset catalog" if uses_global_catalog else "Poly Haven",
+        )
+
+    def _stop_polyhaven_server(self) -> None:
+        """Stop the Poly Haven catalog server."""
+        if self.polyhaven_server and self.polyhaven_server.is_running():
+            console_logger.info("Stopping Poly Haven retrieval server...")
+            self.polyhaven_server.stop()
+            console_logger.info("Poly Haven retrieval server stopped")
+            self.polyhaven_server = None
 
     def _start_articulated_server(self) -> None:
         """Start articulated retrieval server (if articulated strategy is enabled)."""
@@ -1510,11 +1744,11 @@ class IndoorSceneGenerationExperiment(BaseExperiment):
         # Get articulated data configuration from furniture agent config.
         articulated_config = self.cfg.furniture_agent.asset_manager.articulated
 
-        retrieval_device = _get_retrieval_gpu_device()
+        retrieval_device = self._resolve_retrieval_device()
         console_logger.info(
             f"Starting articulated retrieval server on "
             f"{server_config.host}:{server_config.port} "
-            f"(CLIP device: {retrieval_device or 'default'})"
+            f"(CLIP device: {retrieval_device})"
         )
 
         self.articulated_server = ArticulatedRetrievalServer(
@@ -1543,11 +1777,11 @@ class IndoorSceneGenerationExperiment(BaseExperiment):
         # Get server configuration from experiment config.
         server_config = self.cfg.experiment.materials_retrieval_server
 
-        retrieval_device = _get_retrieval_gpu_device()
+        retrieval_device = self._resolve_retrieval_device()
         console_logger.info(
             f"Starting materials retrieval server on "
             f"{server_config.host}:{server_config.port} "
-            f"(CLIP device: {retrieval_device or 'default'})"
+            f"(CLIP device: {retrieval_device})"
         )
 
         self.materials_server = MaterialsRetrievalServer(
@@ -1579,7 +1813,7 @@ class IndoorSceneGenerationExperiment(BaseExperiment):
         cfg_dict: dict,
         capture_logs: bool = False,
         experiment_run_id: str | None = None,
-        render_gpu_id: int | None = None,
+        render_allocation: RenderAllocation | None = None,
     ) -> None:
         """Generate a single scene (static method for parallel execution).
 
@@ -1594,8 +1828,7 @@ class IndoorSceneGenerationExperiment(BaseExperiment):
             cfg_dict: Configuration as dictionary.
             capture_logs: If True, suppress stdout and only write to file.
             experiment_run_id: Unique ID for this experiment run.
-            render_gpu_id: GPU device ID for Blender rendering. When set, uses
-                bubblewrap to isolate the BlenderServer to this GPU.
+            render_allocation: Provider-owned Blender render slot.
         """
         # Reset any SDK state inherited via fork (defense in depth).
         _reset_inherited_sdk_state()
@@ -1692,33 +1925,47 @@ class IndoorSceneGenerationExperiment(BaseExperiment):
                         # state (SQLiteSession locks, tracing threads). The subprocess
                         # saves results to disk and exits cleanly before we fork room
                         # workers.
-                        console_logger.info(
-                            "Generating house layout (in isolated subprocess)"
-                        )
+                        console_logger.info("Generating house layout")
                         layout_start_time = time.time()
 
-                        # Run floor plan generation in isolated subprocess.
-                        results = run_parallel_isolated(
-                            tasks=[
-                                (
-                                    "floor_plan",
-                                    _generate_floor_plan_worker,
-                                    {
-                                        "prompt": prompt,
-                                        "scene_dir": str(scene_dir),
-                                        "cfg_dict": cfg_dict,
-                                        "experiment_run_id": experiment_run_id,
-                                        "render_gpu_id": render_gpu_id,
-                                    },
-                                )
-                            ],
-                            max_workers=1,
-                        )
+                        floor_plan_kwargs = {
+                            "prompt": prompt,
+                            "scene_dir": str(scene_dir),
+                            "cfg_dict": cfg_dict,
+                            "experiment_run_id": experiment_run_id,
+                            "render_allocation": render_allocation,
+                        }
+                        if stop_stage == "floor_plan" or platform.system() == "Darwin":
+                            # macOS multiprocessing uses spawn, which re-imports the
+                            # Hydra/Blender application entrypoint and can terminate
+                            # before the floor-plan worker starts. Sequential room
+                            # generation does not need this isolation, so keep the
+                            # whole local Mac pipeline in the parent process.
+                            console_logger.info(
+                                "Running floor plan inline for this pipeline"
+                            )
+                            _generate_floor_plan_worker(
+                                **floor_plan_kwargs, reset_sdk_state=False
+                            )
+                        else:
+                            # Run floor plan generation in isolated subprocess.
+                            results = run_parallel_isolated(
+                                tasks=[
+                                    (
+                                        "floor_plan",
+                                        _generate_floor_plan_worker,
+                                        floor_plan_kwargs,
+                                    )
+                                ],
+                                max_workers=1,
+                            )
 
-                        # Check for failure.
-                        success, error = results["floor_plan"]
-                        if not success:
-                            raise RuntimeError(f"Floor plan generation failed: {error}")
+                            # Check for failure.
+                            success, error = results["floor_plan"]
+                            if not success:
+                                raise RuntimeError(
+                                    f"Floor plan generation failed: {error}"
+                                )
 
                         # Load result from disk (subprocess saved it).
                         house_layout_path = scene_dir / "house_layout.json"
@@ -1727,7 +1974,6 @@ class IndoorSceneGenerationExperiment(BaseExperiment):
                         house_layout = HouseLayout.from_dict(
                             house_layout_dict, house_dir=scene_dir
                         )
-
                         layout_end_time = time.time()
                         console_logger.info(
                             f"House layout generated in "
@@ -1750,6 +1996,30 @@ class IndoorSceneGenerationExperiment(BaseExperiment):
                         house_layout = HouseLayout.from_dict(
                             house_layout_dict, house_dir=scene_dir
                         )
+
+                    revision_feedback = os.environ.get("SCENESMITH_REVISION_FEEDBACK")
+                    if revision_feedback:
+                        console_logger.info(
+                            "Applying revision feedback from restored %s checkpoint",
+                            start_stage,
+                        )
+                        if (
+                            f"Revision request: {revision_feedback}"
+                            not in house_layout.house_prompt
+                        ):
+                            house_layout.house_prompt = (
+                                f"{house_layout.house_prompt}\n"
+                                f"Revision request: {revision_feedback}"
+                            )
+                        for room_spec in house_layout.room_specs:
+                            if (
+                                f"Revision request: {revision_feedback}"
+                                not in room_spec.prompt
+                            ):
+                                room_spec.prompt = (
+                                    f"{room_spec.prompt}\n"
+                                    f"Revision request: {revision_feedback}"
+                                )
 
                     # Check if we should stop after floor_plan stage.
                     if stop_stage == "floor_plan":
@@ -1789,7 +2059,7 @@ class IndoorSceneGenerationExperiment(BaseExperiment):
                             max_workers=max_parallel_rooms,
                             scene_id=scene_id,
                             experiment_run_id=experiment_run_id,
-                            render_gpu_id=render_gpu_id,
+                            render_allocation=render_allocation,
                         )
                     else:
                         rooms = _run_sequential_room_generation(
@@ -1798,7 +2068,7 @@ class IndoorSceneGenerationExperiment(BaseExperiment):
                             cfg_dict=cfg_dict,
                             start_stage=room_start_stage,
                             stop_stage=room_stop_stage,
-                            render_gpu_id=render_gpu_id,
+                            render_allocation=render_allocation,
                         )
 
                     # Build HouseScene from generated rooms.
@@ -1857,10 +2127,13 @@ class IndoorSceneGenerationExperiment(BaseExperiment):
         console_logger.info("Running scene generation serially in main thread")
 
         # GPU distribution is useful for parallel rooms within each scene.
-        gpu_allocator = RenderGPUAllocator()
+        allocation_allocator = RenderAllocationAllocator(
+            self.provider_selection.render,
+            self.provider_selection.render_process,
+        )
 
         for scene_id, prompt in prompts_with_ids:
-            render_gpu_id = gpu_allocator.allocate()
+            render_allocation = allocation_allocator.allocate()
             self._generate_single_scene(
                 prompt=prompt,
                 scene_id=scene_id,
@@ -1868,7 +2141,7 @@ class IndoorSceneGenerationExperiment(BaseExperiment):
                 cfg_dict=cfg_dict,
                 capture_logs=False,
                 experiment_run_id=experiment_run_id,
-                render_gpu_id=render_gpu_id,
+                render_allocation=render_allocation,
             )
             console_logger.info(f"Completed scene {scene_id:03d}")
 
@@ -1891,12 +2164,15 @@ class IndoorSceneGenerationExperiment(BaseExperiment):
         console_logger.info(f"Running in parallel with {num_workers} workers")
 
         # Create GPU allocator for distributing Blender rendering.
-        gpu_allocator = RenderGPUAllocator()
+        allocation_allocator = RenderAllocationAllocator(
+            self.provider_selection.render,
+            self.provider_selection.render_process,
+        )
 
         # Build task list.
         tasks: list[tuple[str, Callable, dict]] = []
         for scene_id, prompt in prompts_with_ids:
-            render_gpu_id = gpu_allocator.allocate()
+            render_allocation = allocation_allocator.allocate()
             task_id = f"scene_{scene_id:03d}"
             kwargs = {
                 "prompt": prompt,
@@ -1905,7 +2181,7 @@ class IndoorSceneGenerationExperiment(BaseExperiment):
                 "cfg_dict": cfg_dict,
                 "capture_logs": True,
                 "experiment_run_id": experiment_run_id,
-                "render_gpu_id": render_gpu_id,
+                "render_allocation": render_allocation,
             }
             tasks.append(
                 (
@@ -1914,7 +2190,12 @@ class IndoorSceneGenerationExperiment(BaseExperiment):
                     kwargs,
                 )
             )
-            console_logger.info(f"Queued {task_id} (GPU {render_gpu_id}): {prompt}")
+            console_logger.info(
+                "Queued %s on %s: %s",
+                task_id,
+                render_allocation.target_label,
+                prompt,
+            )
 
         # Run with fault tolerance - one crash doesn't affect others.
         results = run_parallel_isolated(tasks=tasks, max_workers=num_workers)
@@ -1975,14 +2256,35 @@ class IndoorSceneGenerationExperiment(BaseExperiment):
 
         # Convert config to dictionary for static method.
         cfg_dict = OmegaConf.to_container(self.cfg, resolve=True)
+        requires_room_asset_servers = stop_stage != "floor_plan"
+        floor_plan_uses_material_server = (
+            start_stage == "floor_plan"
+            and self.cfg.floor_plan_agent.materials.use_retrieval_server
+        )
 
         try:
-            # Start GPU servers (CUDA init happens here).
-            self._start_geometry_server()
-            self._start_hssd_server()
-            self._start_objaverse_server()
-            self._start_articulated_server()
-            self._start_materials_server()
+            # Floor-plan generation does not retrieve or generate room assets.
+            # Avoid initializing those later-stage services so a layout-only run
+            # can work without SAM3D checkpoints or optional asset datasets.
+            if requires_room_asset_servers:
+                self._start_geometry_server()
+                self._start_hssd_server()
+                self._start_objaverse_server()
+                self._start_polyhaven_server()
+                self._start_articulated_server()
+            else:
+                console_logger.info(
+                    "Skipping room asset services for floor-plan-only pipeline"
+                )
+
+            # Room agents use semantic material lookup. The floor-plan agent can
+            # instead use its two local defaults for a lightweight layout build.
+            if requires_room_asset_servers or floor_plan_uses_material_server:
+                self._start_materials_server()
+            else:
+                console_logger.info(
+                    "Using local default materials; retrieval server not required"
+                )
 
             if num_workers == 1:
                 self._run_serial_generation(
@@ -2011,6 +2313,7 @@ class IndoorSceneGenerationExperiment(BaseExperiment):
             # Stop GPU servers.
             self._stop_materials_server()
             self._stop_articulated_server()
+            self._stop_polyhaven_server()
             self._stop_objaverse_server()
             self._stop_hssd_server()
             self._stop_geometry_server()

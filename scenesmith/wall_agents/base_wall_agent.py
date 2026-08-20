@@ -13,6 +13,7 @@ from omegaconf import DictConfig
 
 from scenesmith.agent_utils.asset_manager import AssetManager
 from scenesmith.agent_utils.blender import BlenderServer
+from scenesmith.agent_utils.blender.process_provider import RenderAllocation
 from scenesmith.agent_utils.convex_decomposition_server import ConvexDecompositionServer
 from scenesmith.agent_utils.house import HouseLayout
 from scenesmith.agent_utils.rendering_manager import RenderingManager
@@ -56,7 +57,7 @@ class BaseWallAgent(ABC):
         materials_server_host: str = "127.0.0.1",
         materials_server_port: int = 7008,
         num_workers: int = 1,
-        render_gpu_id: int | None = None,
+        render_allocation: RenderAllocation | None = None,
     ):
         """Initialize base wall agent.
 
@@ -75,8 +76,7 @@ class BaseWallAgent(ABC):
             materials_server_host: Host for materials retrieval server.
             materials_server_port: Port for materials retrieval server.
             num_workers: Number of parallel workers (for OMP thread allocation).
-            render_gpu_id: GPU device ID for Blender rendering. When set, uses
-                bubblewrap to isolate the BlenderServer to this GPU.
+            render_allocation: Provider-owned Blender render slot.
         """
         self.cfg = cfg
         self.logger = logger
@@ -98,8 +98,9 @@ class BaseWallAgent(ABC):
                 port_range=tuple(cfg.rendering.blender_server_port_range),
                 server_startup_delay=cfg.rendering.server_startup_delay,
                 port_cleanup_delay=cfg.rendering.port_cleanup_delay,
-                gpu_id=render_gpu_id,
+                render_allocation=render_allocation,
                 log_file=logger.output_dir / "room.log",
+                render_provider=str(cfg.rendering.get("provider", "auto")),
             )
             self.blender_server.start()
             self.blender_server.wait_until_ready()

@@ -106,14 +106,14 @@ class TestScaleMeshToDimensions(unittest.TestCase):
         scaled_mesh = trimesh.load(output_path, force="mesh")
         scaled_dims = scaled_mesh.bounds[1] - scaled_mesh.bounds[0]
 
-        # Calculate expected uniform scale (average ratio).
+        # Calculate the largest uniform scale that fits every requested axis.
         # Original: [2.0, 1.0, 0.5]
         # Desired: [4.0, 3.0, 2.0]
         # Ratios: [2.0, 3.0, 4.0]
-        # Average ratio: 3.0
-        # Expected result: [6.0, 3.0, 1.5]
+        # Containing scale: 2.0
+        # Expected result: [4.0, 2.0, 1.0]
 
-        expected_dims = np.array([6.0, 3.0, 1.5])
+        expected_dims = np.array([4.0, 2.0, 1.0])
         np.testing.assert_allclose(
             scaled_dims,
             expected_dims,
@@ -131,8 +131,8 @@ class TestScaleMeshToDimensions(unittest.TestCase):
             err_msg="Proportions were not preserved",
         )
 
-    def test_uniform_scaling_scales_by_average_factor(self):
-        """Test that uniform scaling uses the average scale factor."""
+    def test_uniform_scaling_never_exceeds_requested_dimensions(self):
+        """Desired dimensions are a containing box, not three soft targets."""
         # Create a mesh.
         mesh = trimesh.creation.box(extents=[1.0, 1.0, 1.0])
         input_path = self.temp_path / "cube.glb"
@@ -152,14 +152,36 @@ class TestScaleMeshToDimensions(unittest.TestCase):
         scaled_mesh = trimesh.load(output_path, force="mesh")
         scaled_dims = scaled_mesh.bounds[1] - scaled_mesh.bounds[0]
 
-        # Average scale factor is 3.0 (mean of [3.0, 2.0, 4.0]).
-        # Expected result: [3.0, 3.0, 3.0] (all scaled by 3.0).
-        expected_dims = np.array([3.0, 3.0, 3.0])
+        # The limiting scale factor is 2.0, so no axis can exceed its target.
+        expected_dims = np.array([2.0, 2.0, 2.0])
         np.testing.assert_allclose(
             scaled_dims,
             expected_dims,
             rtol=1e-5,
-            err_msg="Did not scale by average factor",
+            err_msg="Uniform fit escaped the requested containing box",
+        )
+
+    def test_wall_asset_quarter_turn_matches_requested_portrait_orientation(self):
+        """Wall art may rotate in its plane to match portrait/landscape intent."""
+        # Canonical Y-up wall mesh: X=width, Y=height, Z=depth.
+        mesh = trimesh.creation.box(extents=[3.0, 2.0, 0.1])
+        input_path = self.temp_path / "landscape_wall_art.glb"
+        output_path = self.temp_path / "portrait_wall_art.glb"
+        mesh.export(input_path)
+
+        scale_mesh_uniformly_to_dimensions(
+            mesh_path=input_path,
+            desired_dimensions=[0.75, 1.0, 0.05],
+            output_path=output_path,
+            allow_wall_plane_quarter_turn=True,
+        )
+
+        scaled = trimesh.load(output_path, force="mesh")
+        dimensions = scaled.bounds[1] - scaled.bounds[0]
+        self.assertLess(dimensions[0], dimensions[1])
+        self.assertTrue(
+            np.all(dimensions <= np.array([0.75, 1.0, 0.05]) + 1e-5),
+            f"Rotated wall asset {dimensions} exceeds requested portrait box",
         )
 
 

@@ -271,6 +271,25 @@ def _passage_profile_value(
     raise AssertionError(profile)
 
 
+def _remove_collinear_path_subdivisions(path: tuple[Point3, ...]) -> tuple[Point3, ...]:
+    """Canonicalize redundant straight-line stations before building sweeps."""
+
+    if len(path) <= 2:
+        return path
+    canonical = [path[0]]
+    for point, following in zip(path[1:-1], path[2:]):
+        incoming = _subtract(point, canonical[-1])
+        outgoing = _subtract(following, point)
+        cross_length = _length(_cross(incoming, outgoing))
+        scale = max(1.0, _length(incoming) * _length(outgoing))
+        same_direction = _dot(incoming, outgoing) > 0.0
+        if same_direction and cross_length <= GEOMETRY_TOLERANCE * scale:
+            continue
+        canonical.append(point)
+    canonical.append(path[-1])
+    return tuple(canonical)
+
+
 def _passage_primitives(
     network: PassageNetworkSpec, region: EnvironmentRegionSpec
 ) -> Iterable[_ImplicitPrimitive]:
@@ -282,7 +301,9 @@ def _passage_primitives(
                 "semantic compiler does not yet support stepped passage floors",
                 entity_id=segment.segment_id,
             )
-        path = tuple(_transform_point(point, region) for point in segment.path)
+        path = _remove_collinear_path_subdivisions(
+            tuple(_transform_point(point, region) for point in segment.path)
+        )
         span_lengths = tuple(
             math.dist(first, second) for first, second in zip(path, path[1:])
         )

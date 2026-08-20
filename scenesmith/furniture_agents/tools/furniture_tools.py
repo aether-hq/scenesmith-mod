@@ -2,6 +2,7 @@ import logging
 import math
 import os
 import time
+import copy
 
 from typing import Any
 
@@ -22,7 +23,9 @@ from scenesmith.agent_utils.placement_noise import (
     PlacementNoiseMode,
     apply_placement_noise,
 )
+from scenesmith.agent_utils.physics_validation import compute_scene_collisions
 from scenesmith.agent_utils.rescale_helpers import rescale_object_common
+from scenesmith.agent_utils.rescale_result import RescaleErrorType, RescaleResult
 from scenesmith.agent_utils.response_datatypes import (
     AssetGenerationResult,
     GeneratedAsset,
@@ -216,6 +219,145 @@ class FurnitureTools:
             math.degrees(rpy.yaw_angle()),
         )
 
+    def _validate_spatial_envelope(self, scene_object: SceneObject) -> tuple[bool, str]:
+        """Require an object's complete AABB to fit its support and enclosure.
+
+        Structural overhead patches are authoritative when present: a missing
+        overhead patch means that XY location is open air. Legacy rectangular
+        rooms use ``has_overhead_cover`` and ``wall_height``.
+        """
+        try:
+            bounds = scene_object.compute_world_bounds()
+        except (TypeError, ValueError, IndexError):
+            # Compatibility for legacy/test registry entries whose bbox fields
+            # predate concrete numeric bounds.
+            return True, ""
+        if (
+            bounds is None
+            or not isinstance(bounds, (tuple, list))
+            or len(bounds) != 2
+            or not all(isinstance(item, np.ndarray) for item in bounds)
+        ):
+            # Older hand-authored test assets may not carry bounds. Production
+            # catalog/generated assets do, and are validated here.
+            return True, ""
+        world_min, world_max = bounds
+        center_x = float((world_min[0] + world_max[0]) / 2.0)
+        center_y = float((world_min[1] + world_max[1]) / 2.0)
+        footprint_samples = (
+            (center_x, center_y),
+            (float(world_min[0]), float(world_min[1])),
+            (float(world_min[0]), float(world_max[1])),
+            (float(world_max[0]), float(world_min[1])),
+            (float(world_max[0]), float(world_max[1])),
+        )
+        epsilon = 1e-4
+        surface_index = self._get_structural_surface_index()
+        if surface_index is not None:
+            reference_z = float(world_min[2]) + 0.10
+            for sample_x, sample_y in footprint_samples:
+                support = surface_index.support_pose(
+                    sample_x,
+                    sample_y,
+                    reference_z=reference_z,
+                    max_drop=0.20,
+                )
+                if support is None:
+                    return (
+                        False,
+                        "Furniture footprint extends beyond its traversable support "
+                        f"near ({sample_x:.3f}, {sample_y:.3f}).",
+                    )
+
+            center_overhead = surface_index.overhead_pose(
+                center_x, center_y, reference_z=float(world_min[2])
+            )
+            if center_overhead is None:
+                return True, ""
+
+            overhead_heights: list[float] = []
+            for sample_x, sample_y in footprint_samples:
+                overhead = surface_index.overhead_pose(
+                    sample_x, sample_y, reference_z=float(world_min[2])
+                )
+                if overhead is None:
+                    return (
+                        False,
+                        "Furniture footprint straddles the edge of a covered area; "
+                        "move it fully under the roof or fully into open air.",
+                    )
+                overhead_heights.append(float(overhead.position[2]))
+            lowest_overhead = min(overhead_heights)
+            if float(world_max[2]) > lowest_overhead + epsilon:
+                return (
+                    False,
+                    "Furniture exceeds the available overhead clearance: object top "
+                    f"is {float(world_max[2]):.3f}m, overhead is "
+                    f"{lowest_overhead:.3f}m.",
+                )
+            return True, ""
+
+        room_geometry = self.scene.room_geometry
+        half_length = float(room_geometry.length) / 2.0
+        half_width = float(room_geometry.width) / 2.0
+        if (
+            float(world_min[0]) < -half_length - epsilon
+            or float(world_max[0]) > half_length + epsilon
+            or float(world_min[1]) < -half_width - epsilon
+            or float(world_max[1]) > half_width + epsilon
+        ):
+            return (
+                False,
+                "Furniture footprint exceeds the room floor bounds: "
+                f"object X=[{world_min[0]:.3f}, {world_max[0]:.3f}], "
+                f"Y=[{world_min[1]:.3f}, {world_max[1]:.3f}].",
+            )
+
+        has_overhead = bool(getattr(room_geometry, "has_overhead_cover", True))
+        if has_overhead:
+            overhead_height = float(room_geometry.wall_height)
+            if float(world_max[2]) > overhead_height + epsilon:
+                return (
+                    False,
+                    "Furniture exceeds the available overhead clearance: object top "
+                    f"is {float(world_max[2]):.3f}m, overhead is "
+                    f"{overhead_height:.3f}m.",
+                )
+        return True, ""
+
+    def _furniture_collisions_for(self, object_id: UniqueID) -> list[str]:
+        """Return concrete furniture collisions involving one proposed pose."""
+
+        furniture = self.scene.get_objects_by_type(ObjectType.FURNITURE)
+        if not isinstance(furniture, list) or len(furniture) < 2:
+            return []
+        physics_cfg = self.cfg.physics_validation
+        collisions = compute_scene_collisions(
+            scene=self.scene,
+            penetration_threshold=physics_cfg.object_penetration_threshold_m,
+            floor_penetration_tolerance=physics_cfg.floor_penetration_tolerance_m,
+            manipuland_furniture_tolerance_m=(
+                physics_cfg.manipuland_furniture_tolerance_m
+            ),
+        )
+        current = str(object_id)
+        descriptions: list[str] = []
+        for collision in collisions:
+            ids = {collision.object_a_id, collision.object_b_id}
+            if current not in ids:
+                continue
+            other_id = next((item for item in ids if item != current), None)
+            if other_id is None:
+                continue
+            try:
+                other = self.scene.get_object(UniqueID(other_id))
+            except Exception:
+                other = None
+            if other is None or other.object_type != ObjectType.FURNITURE:
+                continue
+            descriptions.append(collision.to_description())
+        return descriptions
+
     def _create_loop_error_response(
         self, method_name: str, attempt_count: int, args: tuple, kwargs: dict
     ) -> str:
@@ -303,6 +445,9 @@ class FurnitureTools:
             - Manipulands (small objects meant for surfaces like books, vases, cups)
             - Carpets or rugs
             - Wall decorations
+            - Architecture (stairs, ramps, ladders, platforms, mezzanines, railings,
+              balconies, or bridges). The floor-plan stage already owns and compiles
+              those structures; never duplicate them as furniture.
 
             ONLY generate furniture items that rest directly on the floor.
 
@@ -557,8 +702,36 @@ class FurnitureTools:
                 rotation_yaw_std_degrees=self.active_noise_profile.rotation_yaw_std_degrees,
             )
 
+            envelope_valid, envelope_message = self._validate_spatial_envelope(
+                scene_object
+            )
+            if not envelope_valid:
+                console_logger.warning("Placement rejected: %s", envelope_message)
+                return self._create_failure_result(
+                    asset_id=asset_id,
+                    message=envelope_message,
+                    error_type=FurnitureErrorType.INVALID_POSITION,
+                )
+
             # Add to scene.
             self.scene.add_object(scene_object)
+
+            placement_collisions = self._furniture_collisions_for(
+                scene_object.object_id
+            )
+            if placement_collisions:
+                self.scene.remove_object(scene_object.object_id)
+                message = (
+                    "Placement rejected because it intersects existing furniture: "
+                    + "; ".join(placement_collisions)
+                    + ". Move it farther away and retry."
+                )
+                console_logger.warning(message)
+                return self._create_failure_result(
+                    asset_id=asset_id,
+                    message=message,
+                    error_type=FurnitureErrorType.INVALID_POSITION,
+                )
 
             # Log what changed.
             new_position = scene_object.transform.translation()
@@ -742,8 +915,42 @@ class FurnitureTools:
                 rotation_yaw_std_degrees=self.active_noise_profile.rotation_yaw_std_degrees,
             )
 
+            scene_obj.transform = new_transform
+            envelope_valid, envelope_message = self._validate_spatial_envelope(
+                scene_obj
+            )
+            scene_obj.transform = current_transform
+            if not envelope_valid:
+                console_logger.warning("Move rejected: %s", envelope_message)
+                return FurnitureOperationResult(
+                    success=False,
+                    message=envelope_message,
+                    object_id=object_id,
+                    error_type=FurnitureErrorType.INVALID_POSITION,
+                    suggested_action="Choose a pose that fits the support and enclosure",
+                ).to_json()
+
             # Update object to new absolute pose.
             self.scene.move_object(object_id=unique_id, new_transform=new_transform)
+
+            placement_collisions = self._furniture_collisions_for(unique_id)
+            if placement_collisions:
+                self.scene.move_object(
+                    object_id=unique_id, new_transform=current_transform
+                )
+                message = (
+                    "Move rejected because it intersects existing furniture: "
+                    + "; ".join(placement_collisions)
+                    + ". Try a clear position."
+                )
+                console_logger.warning(message)
+                return FurnitureOperationResult(
+                    success=False,
+                    message=message,
+                    object_id=object_id,
+                    error_type=FurnitureErrorType.INVALID_POSITION,
+                    suggested_action="Move the object farther from the listed furniture",
+                ).to_json()
 
             # Log what changed.
             changes = []
@@ -879,6 +1086,34 @@ class FurnitureTools:
         console_logger.info(
             f"Tool called: rescale_furniture (id={object_id}, scale={scale_factor})"
         )
+        if scale_factor > 0 and scale_factor != 1.0:
+            try:
+                scene_object = self.scene.get_object(UniqueID(object_id))
+            except Exception:
+                scene_object = None
+            if scene_object is not None and scene_object.sdf_path is not None:
+                scene_objects = getattr(self.scene, "objects", {})
+                candidates = (
+                    scene_objects.values()
+                    if isinstance(scene_objects, dict)
+                    else (scene_object,)
+                )
+                for affected in candidates:
+                    if affected.sdf_path != scene_object.sdf_path:
+                        continue
+                    prospective = copy.copy(affected)
+                    if prospective.bbox_min is not None:
+                        prospective.bbox_min = prospective.bbox_min * scale_factor
+                    if prospective.bbox_max is not None:
+                        prospective.bbox_max = prospective.bbox_max * scale_factor
+                    valid, message = self._validate_spatial_envelope(prospective)
+                    if not valid:
+                        return RescaleResult(
+                            success=False,
+                            message=f"Rescale rejected: {message}",
+                            object_id=object_id,
+                            error_type=RescaleErrorType.RESCALE_FAILED,
+                        ).to_json()
         result = rescale_object_common(
             scene=self.scene,
             object_id=object_id,

@@ -167,7 +167,7 @@ class TestGeometryGeneration(unittest.TestCase):
 
     @patch("hy3dgen.rembg.BackgroundRemover")
     @patch(
-        "scenesmith.agent_utils.geometry_generation_server.geometry_generation.Hunyuan3DPipelineManager"
+        "scenesmith.agent_utils.geometry_generation_server.hunyuan3d_pipeline_manager.Hunyuan3DPipelineManager"
     )
     @patch("hy3dgen.shapegen.pipelines.export_to_trimesh")
     @patch(
@@ -325,7 +325,7 @@ class TestGeometryGeneration(unittest.TestCase):
 
     @patch("hy3dgen.rembg.BackgroundRemover")
     @patch(
-        "scenesmith.agent_utils.geometry_generation_server.geometry_generation.Hunyuan3DPipelineManager"
+        "scenesmith.agent_utils.geometry_generation_server.hunyuan3d_pipeline_manager.Hunyuan3DPipelineManager"
     )
     @patch("hy3dgen.shapegen.pipelines.export_to_trimesh")
     @patch(

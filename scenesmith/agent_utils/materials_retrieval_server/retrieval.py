@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from scenesmith.agent_utils.clip_embeddings import (
     compute_clip_similarities,
     get_text_embedding,
+    warm_clip_text_encoder,
 )
 from scenesmith.agent_utils.materials_retrieval_server.config import MaterialsConfig
 from scenesmith.agent_utils.materials_retrieval_server.data_loader import (
@@ -78,6 +79,10 @@ class MaterialsRetriever:
             f"{len(self.preprocessed_data.metadata_by_id)} materials"
         )
         return True
+
+    def warmup(self) -> None:
+        """Initialize the text encoder before serving bounded requests."""
+        warm_clip_text_encoder(device=self.clip_device)
 
     def retrieve(
         self,

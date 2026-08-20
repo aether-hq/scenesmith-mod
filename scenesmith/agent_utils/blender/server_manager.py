@@ -1,6 +1,5 @@
 import logging
 import os
-import shutil
 import subprocess
 import sys
 import tempfile
@@ -10,6 +9,11 @@ from pathlib import Path
 
 import requests
 
+from scenesmith.agent_utils.blender.process_provider import (
+    RenderAllocation,
+    RenderProcessProvider,
+    resolve_render_process_provider,
+)
 from scenesmith.agent_utils.mesh_utils import convert_gltf_to_glb
 from scenesmith.utils.network_utils import find_available_port, is_port_available
 
@@ -37,8 +41,10 @@ class BlenderServer:
         bpy_settings_file: Path | None = None,
         server_startup_delay: float = 3.0,
         port_cleanup_delay: float = 2.0,
-        gpu_id: int | None = None,
         log_file: Path | None = None,
+        process_provider: RenderProcessProvider | None = None,
+        render_provider: str | None = None,
+        render_allocation: RenderAllocation | None = None,
     ) -> None:
         """Initialize the Blender server manager.
 
@@ -54,13 +60,14 @@ class BlenderServer:
                                  to allow Blender initialization.
             port_cleanup_delay: Seconds to wait after stopping server to allow
                                OS port cleanup.
-            gpu_id: Optional GPU device ID to restrict this server to. When set,
-                   uses bubblewrap to isolate the server process to only see
-                   the specified GPU. This enables distributing Blender rendering
-                   across multiple GPUs for parallel scene generation.
             log_file: Optional path to capture server stdout/stderr. If None,
                      output inherits from parent process. Useful for debugging
                      server crashes.
+            process_provider: Optional injected subprocess isolation provider.
+            render_provider: Cycles provider passed to the child process. The
+                external environment override remains authoritative.
+            render_allocation: Optional provider-owned render slot. It supplies
+                both process isolation and the child render-provider choice.
 
         Raises:
             ValueError: If blend_file or bpy_settings_file paths don't exist,
@@ -88,7 +95,21 @@ class BlenderServer:
         self._bpy_settings_file = bpy_settings_file
         self._server_startup_delay = server_startup_delay
         self._port_cleanup_delay = port_cleanup_delay
-        self._gpu_id = gpu_id
+        if render_allocation is not None and process_provider is not None:
+            raise ValueError(
+                "render_allocation and process_provider are mutually exclusive"
+            )
+        self._render_allocation = render_allocation
+        self._process_provider = (
+            render_allocation.process_provider
+            if render_allocation is not None
+            else process_provider or resolve_render_process_provider(None)
+        )
+        self._render_provider = (
+            render_provider
+            if render_provider is not None
+            else render_allocation.render_provider if render_allocation else None
+        )
         self._log_file = log_file
         self._temp_dir: tempfile.TemporaryDirectory | None = None
         self._server_process: subprocess.Popen | None = None
@@ -99,7 +120,7 @@ class BlenderServer:
             f"port_range={port_range}, blend_file={blend_file}, "
             f"bpy_settings_file={bpy_settings_file}, "
             f"server_startup_delay={server_startup_delay}, "
-            f"port_cleanup_delay={port_cleanup_delay}, gpu_id={gpu_id}, "
+            f"port_cleanup_delay={port_cleanup_delay}, "
             f"log_file={log_file})"
         )
 
@@ -156,28 +177,19 @@ class BlenderServer:
 
             console_logger.debug(f"Server command: {' '.join(cmd)}")
 
-            # Set PYTHONPATH so subprocess can find scenesmith module.
-            env = os.environ.copy()
-            project_root = Path(__file__).parent.parent.parent.parent
-            env["PYTHONPATH"] = str(project_root) + ":" + env.get("PYTHONPATH", "")
+            env = self._subprocess_environment()
 
-            # Apply GPU isolation via bubblewrap if gpu_id is set.
-            if self._gpu_id is not None:
-                if self._is_bwrap_available():
-                    cmd = self._build_bwrap_command(cmd=cmd, gpu_id=self._gpu_id)
-                    console_logger.info(
-                        f"BlenderServer using GPU {self._gpu_id} via bubblewrap"
-                    )
-                else:
-                    console_logger.warning(
-                        f"GPU isolation requested (gpu_id={self._gpu_id}) but "
-                        "bubblewrap not installed. Install with: "
-                        "sudo apt-get install bubblewrap. "
-                        "Falling back to shared GPU access."
-                    )
+            prepared_process = self._process_provider.prepare(cmd, env)
+            console_logger.info(
+                "BlenderServer process provider: %s", self._process_provider.key
+            )
 
             # Start the server process.
-            self._server_process = subprocess.Popen(cmd, text=True, env=env)
+            self._server_process = subprocess.Popen(
+                list(prepared_process.command),
+                text=True,
+                env=dict(prepared_process.environment),
+            )
 
             # Wait for Blender to complete initialization.
             time.sleep(self._server_startup_delay)
@@ -221,95 +233,17 @@ class BlenderServer:
             )
         return target_port
 
-    def _is_bwrap_available(self) -> bool:
-        """Check if bubblewrap is installed."""
-        return shutil.which("bwrap") is not None
+    def _subprocess_environment(self) -> dict[str, str]:
+        """Build the child environment without mutating parent process state."""
 
-    def _build_bwrap_command(self, cmd: list[str], gpu_id: int) -> list[str]:
-        """Wrap command in bubblewrap for GPU isolation.
-
-        Uses Linux namespaces to hide all GPU devices except the specified one.
-        This enables EEVEE Next (Vulkan) to use only the target GPU, since
-        Vulkan ignores CUDA_VISIBLE_DEVICES.
-
-        Args:
-            cmd: The command to wrap.
-            gpu_id: The GPU device index to expose (e.g., 0 for /dev/nvidia0).
-
-        Returns:
-            The wrapped command with bubblewrap prefix.
-        """
-        # Get home directory for writable bind.
-        home_dir = Path.home()
-        cwd = Path.cwd()
-
-        bwrap_cmd = [
-            "bwrap",
-            "--die-with-parent",  # Clean up subprocess when parent exits.
-            "--ro-bind",
-            "/",
-            "/",
-            "--bind",
-            str(home_dir),
-            str(home_dir),  # Writable home for outputs.
-            "--bind",
-            "/tmp",
-            "/tmp",  # Shared /tmp for render communication.
-            "--bind",
-            "/dev/shm",
-            "/dev/shm",  # Shared memory for GPU drivers.
-            "--proc",
-            "/proc",
-            "--dev-bind",
-            "/dev/urandom",
-            "/dev/urandom",
-            "--dev-bind",
-            "/dev/null",
-            "/dev/null",
-        ]
-
-        # Bind the working directory writable if it differs from home.
-        if cwd != home_dir:
-            bwrap_cmd.extend(["--bind", str(cwd), str(cwd)])
-
-        # Re-bind any mount points that sit under the working directory.
-        # In Docker, volume mounts (e.g. ./outputs:/app/outputs) are
-        # separate mount points that are NOT propagated by --bind /app
-        # /app (which only binds the overlay layer). Each volume mount
-        # must be explicitly re-bound.
-        try:
-            cwd_prefix = str(cwd) + "/"
-            with open("/proc/mounts") as f:
-                for line in f:
-                    parts = line.split()
-                    if len(parts) < 2:
-                        continue
-                    mount_point = parts[1]
-                    if (
-                        mount_point.startswith(cwd_prefix)
-                        and Path(mount_point).exists()
-                    ):
-                        bwrap_cmd.extend(["--bind", mount_point, mount_point])
-        except OSError:
-            pass
-
-        # Bind NVIDIA devices that exist on this system.
-        nvidia_devices = [
-            "/dev/nvidiactl",
-            "/dev/nvidia-uvm",
-            "/dev/nvidia-uvm-tools",
-            f"/dev/nvidia{gpu_id}",
-        ]
-        for dev in nvidia_devices:
-            if Path(dev).exists():
-                bwrap_cmd.extend(["--dev-bind", dev, dev])
-
-        # Bind DRM for Vulkan rendering.
-        if Path("/dev/dri").exists():
-            bwrap_cmd.extend(["--dev-bind", "/dev/dri", "/dev/dri"])
-
-        bwrap_cmd.append("--")
-        return bwrap_cmd + cmd
+        environment = os.environ.copy()
+        project_root = Path(__file__).parent.parent.parent.parent
+        environment["PYTHONPATH"] = (
+            str(project_root) + ":" + environment.get("PYTHONPATH", "")
+        )
+        if self._render_provider is not None:
+            environment["SCENESMITH_RENDER_PROVIDER"] = self._render_provider
+        return environment
 
     def stop(self) -> None:
         """Stop the Blender server and cleanup resources."""

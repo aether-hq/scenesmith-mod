@@ -2,10 +2,18 @@
 
 import unittest
 
-from unittest.mock import MagicMock
+from pathlib import Path
+from unittest.mock import MagicMock, patch
+
+from omegaconf import OmegaConf
 
 from scenesmith.agent_utils.asset_router import AssetRouter
-from scenesmith.agent_utils.asset_router.dataclasses import AnalysisResult, AssetItem
+from scenesmith.agent_utils.asset_router.dataclasses import (
+    AnalysisResult,
+    AssetItem,
+    GeneratedGeometry,
+    ValidationResult,
+)
 from scenesmith.agent_utils.room import AgentType, ObjectType
 
 
@@ -172,7 +180,82 @@ class TestAnalysisResponseParsing(unittest.TestCase):
         assert len(result.items) == 1
         assert result.items[0].description == "wooden ladder"
         assert result.items[0].object_type == ObjectType.FURNITURE
-        assert not result.was_modified
+
+
+class TestFederatedCatalogRouting(unittest.TestCase):
+    """The all-source route uses the configured quality hierarchy per object."""
+
+    def test_polyhaven_miss_falls_through_to_hssd(self) -> None:
+        cfg = OmegaConf.create(
+            {
+                "asset_manager": {
+                    "side_view_elevation_degrees": 15,
+                    "validation_taa_samples": 8,
+                    "general_asset_source": "all",
+                    "federated": {
+                        "source_order": [
+                            "polyhaven",
+                            "hssd",
+                            "objaverse",
+                            "generated",
+                        ],
+                        "catalog_max_retries": 2,
+                    },
+                    "polyhaven": {"use_lenient_validation": True},
+                    "hssd": {"use_lenient_validation": True},
+                    "objaverse": {"use_lenient_validation": True},
+                    "backend": "hunyuan3d",
+                }
+            }
+        )
+        router = AssetRouter(
+            agent_type=AgentType.FURNITURE,
+            vlm_service=MagicMock(),
+            cfg=cfg,
+        )
+        item = AssetItem(
+            description="oak dining chair",
+            short_name="chair",
+            dimensions=[0.5, 0.5, 0.9],
+            object_type=ObjectType.FURNITURE,
+            strategies=["generated"],
+        )
+        hssd_geometry = GeneratedGeometry(
+            geometry_path=Path("/tmp/hssd-chair.glb"),
+            item=item,
+            asset_source="hssd",
+            hssd_id="hssd-chair",
+        )
+
+        with (
+            patch.object(router, "_fetch_objaverse_candidates", return_value=None),
+            patch.object(router, "_fetch_hssd_candidates", return_value=[object()]),
+            patch.object(
+                router,
+                "_acquire_generated_candidate",
+                return_value=hssd_geometry,
+            ) as acquire,
+            patch.object(
+                router,
+                "validate_asset",
+                return_value=ValidationResult(True, "catalog match"),
+            ),
+        ):
+            result = router._try_generated_strategy(
+                item=item,
+                max_retries=0,
+                geometry_client=None,
+                hssd_client=MagicMock(),
+                objaverse_client=MagicMock(),
+                polyhaven_client=MagicMock(),
+                image_generator=None,
+                images_dir=None,
+                geometry_dir=Path("/tmp"),
+                debug_dir=Path("/tmp"),
+            )
+
+        self.assertIs(result, hssd_geometry)
+        self.assertEqual(acquire.call_args.kwargs["asset_source"], "hssd")
 
     def test_parse_composite_split(self) -> None:
         """Parse response with composite split into multiple items."""

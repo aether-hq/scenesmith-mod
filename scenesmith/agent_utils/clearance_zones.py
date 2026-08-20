@@ -10,6 +10,7 @@ This module provides:
 import logging
 
 from dataclasses import dataclass
+from pathlib import Path
 
 from scenesmith.agent_utils.house import (
     ClearanceOpeningData,
@@ -708,6 +709,33 @@ def compute_wall_height_violations(
     if not room_geom:
         return violations
 
+    additional_sidecars = getattr(room_geom, "additional_structural_surface_paths", ())
+    if not isinstance(additional_sidecars, (list, tuple, set, frozenset)):
+        additional_sidecars = ()
+    sidecar_candidates = (
+        getattr(room_geom, "structural_surface_path", None),
+        *additional_sidecars,
+    )
+    sidecar_paths = [
+        Path(candidate)
+        for candidate in sidecar_candidates
+        if isinstance(candidate, (str, Path)) and Path(candidate).is_file()
+    ]
+    surface_index = None
+    if sidecar_paths:
+        from scenesmith.agent_utils.structural_surfaces import (
+            StructuralSurfaceIndex,
+            load_surface_patches,
+        )
+
+        surface_index = StructuralSurfaceIndex(
+            patch
+            for sidecar_path in sidecar_paths
+            for patch in load_surface_patches(sidecar_path)
+        )
+    elif not bool(getattr(room_geom, "has_overhead_cover", True)):
+        return violations
+
     wall_height = room_geom.wall_height
     if wall_height <= 0:
         return violations
@@ -718,16 +746,30 @@ def compute_wall_height_violations(
         if world_bounds is None:
             continue
         obj_max = world_bounds[1]
+        obj_min = world_bounds[0]
 
         # Object top height.
         obj_top = obj_max[2]
 
-        if obj_top > wall_height:
+        if surface_index is not None:
+            center_x = float((obj_min[0] + obj_max[0]) / 2.0)
+            center_y = float((obj_min[1] + obj_max[1]) / 2.0)
+            overhead = surface_index.overhead_pose(
+                center_x, center_y, reference_z=float(obj_min[2])
+            )
+            if overhead is None:
+                # The object is in an authored open-air region or ceiling hole.
+                continue
+            effective_height = float(overhead.position[2])
+        else:
+            effective_height = wall_height
+
+        if obj_top > effective_height:
             violations.append(
                 WallHeightExceededViolation(
                     object_id=str(obj.object_id),
                     object_top_height=obj_top,
-                    wall_height=wall_height,
+                    wall_height=effective_height,
                 )
             )
 

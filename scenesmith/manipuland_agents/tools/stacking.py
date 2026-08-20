@@ -316,7 +316,7 @@ def simulate_stack_stability(
 
         try:
             # Load directives into plant.
-            directives = LoadModelDirectives(directive_path)
+            directives = LoadModelDirectives(str(directive_path))
             ProcessModelDirectives(directives, plant, parser=None)
             plant.Finalize()
 
