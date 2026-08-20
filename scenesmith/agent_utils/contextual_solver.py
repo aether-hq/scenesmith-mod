@@ -379,12 +379,27 @@ def validate_scene_object_placement(
 ) -> SolverResult:
     """Validate a proposed object against the complete current context."""
 
+    candidate_id = str(candidate.object_id)
     entities = [
         entity
         for scene_object in (*tuple(existing), candidate)
         if (entity := scene_object_to_spatial_entity(scene_object)) is not None
     ]
-    return evaluate_spatial_entities(entities)
+    result = evaluate_spatial_entities(entities)
+    candidate_violations = tuple(
+        violation
+        for violation in result.violations
+        if candidate_id in violation.object_ids
+    )
+    return SolverResult(
+        valid=not any(
+            violation.severity == "hard" for violation in candidate_violations
+        ),
+        violations=candidate_violations,
+        evaluations=result.evaluations,
+        elapsed_ms=result.elapsed_ms,
+        selected_pose=result.selected_pose,
+    )
 
 
 def validate_hosted_object(

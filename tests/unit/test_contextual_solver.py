@@ -14,6 +14,7 @@ from scenesmith.agent_utils.contextual_solver import (
     solve_candidate_poses,
     validate_blueprint_topology,
     validate_hosted_object,
+    validate_scene_object_placement,
     zones_intersect,
 )
 from scenesmith.agent_utils.room import ObjectType, SceneObject, UniqueID
@@ -146,3 +147,21 @@ def test_bounded_solver_is_deterministic_and_stops_early():
     assert first.valid
     assert first.selected_pose == second.selected_pose
     assert first.elapsed_ms < 100
+
+
+def test_candidate_validation_ignores_preexisting_pair_violations():
+    existing = [
+        _object("ottoman_0", "ottoman", (0, 0, 0.25), (0.8, 0.8, 0.5)),
+        _object("ottoman_1", "ottoman", (0.2, 0, 0.25), (0.8, 0.8, 0.5)),
+    ]
+    candidate = _object(
+        "bookshelf_0",
+        "library bookshelf",
+        (4, 4, 1.0),
+        (1.2, 0.4, 2.0),
+    )
+
+    result = validate_scene_object_placement(candidate, existing)
+
+    assert result.valid
+    assert result.violations == ()
