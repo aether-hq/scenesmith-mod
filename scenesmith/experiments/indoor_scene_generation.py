@@ -61,7 +61,11 @@ from scenesmith.experiments.base_experiment import BaseExperiment
 from scenesmith.floor_plan_agents.stateful_floor_plan_agent import (
     StatefulFloorPlanAgent,
 )
-from scenesmith.furniture_agents.stateful_furniture_agent import StatefulFurnitureAgent
+from scenesmith.furniture_agents.stateful_furniture_agent import (
+    StatefulFurnitureAgent,
+    _validate_room_kit_completion,
+)
+from scenesmith.agent_utils.room_kits import select_room_kit
 from scenesmith.manipuland_agents.stateful_manipuland_agent import (
     StatefulManipulandAgent,
 )
@@ -93,6 +97,15 @@ STAGE_ASSET_DIRS = {
     "ceiling_mounted": ["furniture", "wall_mounted"],
     "manipuland": ["furniture", "wall_mounted", "ceiling_mounted"],
 }
+
+
+def _require_projection_success(stage: str, success: bool) -> None:
+    """Prevent a physically invalid scene from becoming a resumable checkpoint."""
+
+    if not success:
+        raise RuntimeError(
+            f"{stage} physical projection failed; cannot publish checkpoint."
+        )
 
 
 def _asset_config_uses_generated_geometry(asset_config: dict) -> bool:
@@ -709,15 +722,24 @@ def _generate_room(
                 )
             if not projection_success:
                 console_logger.error(
-                    "Furniture projection failed, keeping original positions"
+                    "Furniture projection failed; rejecting checkpoint"
                 )
             else:
                 console_logger.info(
                     f"Furniture post-processing completed for room {room_id} in "
                     f"{end_time - start_time:.2f} seconds"
                 )
+            _require_projection_success("furniture", projection_success)
 
-        # Always save state after furniture stage (unconditional for resumability).
+        room_area_m2 = float(scene.room_geometry.width) * float(
+            scene.room_geometry.length
+        )
+        checkpoint_room_kit = select_room_kit(
+            scene.text_description, room_area_m2=room_area_m2
+        )
+        _validate_room_kit_completion(scene, checkpoint_room_kit)
+
+        # Save only after physical and semantic publication gates pass.
         logger.log_scene(scene=scene, name="scene_after_furniture")
         _export_scene_blend_file(
             scene=scene,
