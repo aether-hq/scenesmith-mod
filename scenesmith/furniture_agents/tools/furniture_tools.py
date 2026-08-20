@@ -384,12 +384,14 @@ class FurnitureTools:
                 )
         return True, ""
 
-    def _furniture_collisions_for(self, object_id: UniqueID) -> list[str]:
-        """Return concrete furniture collisions involving one proposed pose."""
+    def _placement_collisions_for(
+        self, object_id: UniqueID
+    ) -> tuple[list[str], list[str]]:
+        """Return furniture and structural collisions involving one proposed pose."""
 
         furniture = self.scene.get_objects_by_type(ObjectType.FURNITURE)
-        if not isinstance(furniture, list) or len(furniture) < 2:
-            return []
+        if not isinstance(furniture, (list, tuple)):
+            return [], []
         physics_cfg = self.cfg.physics_validation
         collisions = compute_scene_collisions(
             scene=self.scene,
@@ -400,7 +402,8 @@ class FurnitureTools:
             ),
         )
         current = str(object_id)
-        descriptions: list[str] = []
+        furniture_descriptions: list[str] = []
+        structural_descriptions: list[str] = []
         for collision in collisions:
             ids = {collision.object_a_id, collision.object_b_id}
             if current not in ids:
@@ -412,10 +415,18 @@ class FurnitureTools:
                 other = self.scene.get_object(UniqueID(other_id))
             except Exception:
                 other = None
-            if other is None or other.object_type != ObjectType.FURNITURE:
-                continue
-            descriptions.append(collision.to_description())
-        return descriptions
+            description = collision.to_description()
+            if other is not None and other.object_type == ObjectType.FURNITURE:
+                furniture_descriptions.append(description)
+            else:
+                structural_descriptions.append(description)
+        return furniture_descriptions, structural_descriptions
+
+    def _furniture_collisions_for(self, object_id: UniqueID) -> list[str]:
+        """Return concrete furniture collisions involving one proposed pose."""
+
+        furniture_collisions, _ = self._placement_collisions_for(object_id)
+        return furniture_collisions
 
     def _validate_contextual_zones(self, scene_object: SceneObject) -> tuple[bool, str]:
         """Run the fast semantic solver before invoking heavyweight physics."""
@@ -824,16 +835,23 @@ class FurnitureTools:
             # Add to scene.
             self.scene.add_object(scene_object)
 
-            placement_collisions = self._furniture_collisions_for(
-                scene_object.object_id
+            placement_collisions, structural_collisions = (
+                self._placement_collisions_for(scene_object.object_id)
             )
-            if placement_collisions:
+            if placement_collisions or structural_collisions:
                 self.scene.remove_object(scene_object.object_id)
-                message = (
-                    "Placement rejected because it intersects existing furniture: "
-                    + "; ".join(placement_collisions)
-                    + ". Move it farther away and retry."
-                )
+                if structural_collisions:
+                    message = (
+                        "Placement rejected because it intersects room structure: "
+                        + "; ".join(structural_collisions)
+                        + ". Choose a clear supported pose and retry."
+                    )
+                else:
+                    message = (
+                        "Placement rejected because it intersects existing furniture: "
+                        + "; ".join(placement_collisions)
+                        + ". Move it farther away and retry."
+                    )
                 console_logger.warning(message)
                 return self._create_failure_result(
                     asset_id=asset_id,
@@ -1056,16 +1074,25 @@ class FurnitureTools:
             # Update object to new absolute pose.
             self.scene.move_object(object_id=unique_id, new_transform=new_transform)
 
-            placement_collisions = self._furniture_collisions_for(unique_id)
-            if placement_collisions:
+            placement_collisions, structural_collisions = (
+                self._placement_collisions_for(unique_id)
+            )
+            if placement_collisions or structural_collisions:
                 self.scene.move_object(
                     object_id=unique_id, new_transform=current_transform
                 )
-                message = (
-                    "Move rejected because it intersects existing furniture: "
-                    + "; ".join(placement_collisions)
-                    + ". Try a clear position."
-                )
+                if structural_collisions:
+                    message = (
+                        "Move rejected because it intersects room structure: "
+                        + "; ".join(structural_collisions)
+                        + ". Try a clear supported position."
+                    )
+                else:
+                    message = (
+                        "Move rejected because it intersects existing furniture: "
+                        + "; ".join(placement_collisions)
+                        + ". Try a clear position."
+                    )
                 console_logger.warning(message)
                 return FurnitureOperationResult(
                     success=False,

@@ -195,6 +195,22 @@ def catalog_candidate_is_compatible(
 
     requested = semantic_families(request_text)
     candidate_catalog_text = candidate_text.casefold()
+    requests_shelving = bool(
+        request_tokens & {"bookcase", "bookshelf", "shelf", "shelves", "shelving"}
+    )
+    intrinsic_cabinet_branch = bool(
+        re.search(
+            r"storage\s+furniture\s*/\s*(?:cabinets?|cupboards?)\b"
+            r"|wordnet\s*/\s*(?:cabinet|cupboard)\.n\.",
+            candidate_catalog_text,
+        )
+    )
+    if requests_shelving and intrinsic_cabinet_branch:
+        return (
+            False,
+            "bookcase/shelving request is incompatible with the intrinsic cabinet "
+            "or cupboard catalog branch",
+        )
     if "storage" in requested and re.search(
         r"\bbooks\s*(?:&|and)\s*documents\b", candidate_catalog_text
     ):

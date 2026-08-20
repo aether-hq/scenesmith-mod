@@ -6,13 +6,14 @@ import tempfile
 import unittest
 
 from pathlib import Path
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 import numpy as np
 
 from omegaconf import OmegaConf
 from pydrake.all import RigidTransform, RollPitchYaw
 
+from scenesmith.agent_utils.physics_validation import CollisionPair
 from scenesmith.agent_utils.room import ObjectType, RoomScene, SceneObject, UniqueID
 from scenesmith.furniture_agents.tools.furniture_tools import FurnitureTools
 from scenesmith.furniture_agents.tools.response_dataclasses import (
@@ -395,6 +396,127 @@ class TestFurnitureTools(BaseAgentToolsTest):
         self.assertNotEqual(
             str(added_objects[0].object_id), str(added_objects[1].object_id)
         )
+
+    def _configure_candidate_collision_test(self) -> SceneObject:
+        asset = SceneObject(
+            object_id=UniqueID("renaissance_bookcase_asset"),
+            object_type=ObjectType.FURNITURE,
+            name="Renaissance bookcase",
+            description="A full-height library bookcase",
+            transform=RigidTransform(),
+            geometry_path=Path("/test/bookcase.obj"),
+            sdf_path=Path("/test/bookcase.sdf"),
+            bbox_min=np.array([-0.5, -0.2, 0.0]),
+            bbox_max=np.array([0.5, 0.2, 2.0]),
+        )
+        self.mock_asset_manager.get_asset_by_id.return_value = asset
+        self.mock_asset_manager.list_available_assets.return_value = [asset]
+        self.mock_scene.objects = {}
+        self.mock_scene.generate_unique_id.return_value = UniqueID(
+            "renaissance_bookcase"
+        )
+        self.mock_scene.add_object.side_effect = (
+            lambda item: self.mock_scene.objects.__setitem__(item.object_id, item)
+        )
+        self.mock_scene.remove_object.side_effect = self.mock_scene.objects.pop
+        self.mock_scene.get_object.side_effect = self.mock_scene.objects.get
+        self.mock_scene.move_object.side_effect = (
+            lambda object_id, new_transform: setattr(
+                self.mock_scene.objects[object_id], "transform", new_transform
+            )
+        )
+        self.mock_scene.get_objects_by_type.side_effect = lambda object_type: [
+            item
+            for item in self.mock_scene.objects.values()
+            if item.object_type == object_type
+        ]
+        self.furniture_tools._check_floor_bounds = Mock(return_value=(True, ""))
+        self.furniture_tools._surface_aligned_pose = Mock(return_value=None)
+        self.furniture_tools._validate_spatial_envelope = Mock(return_value=(True, ""))
+        self.furniture_tools._validate_contextual_zones = Mock(return_value=(True, ""))
+        return asset
+
+    @patch("scenesmith.furniture_agents.tools.furniture_tools.compute_scene_collisions")
+    def test_add_rolls_back_candidate_local_structural_collision(
+        self, compute_collisions
+    ):
+        asset = self._configure_candidate_collision_test()
+        compute_collisions.return_value = [
+            CollisionPair(
+                object_a_name="floor",
+                object_a_id="room_geometry",
+                object_b_name="Renaissance bookcase",
+                object_b_id="renaissance_bookcase",
+                penetration_depth=4.9957,
+            )
+        ]
+
+        result = json.loads(
+            self.furniture_tools._add_furniture_to_scene_impl(
+                asset_id=str(asset.object_id), x=2.002, y=1.0, z=0.0
+            )
+        )
+
+        self.assertFalse(result["success"])
+        self.assertEqual(
+            result["error_type"], FurnitureErrorType.INVALID_POSITION.value
+        )
+        self.assertIn("room_geometry", result["message"])
+        self.assertEqual(self.mock_scene.objects, {})
+
+    @patch("scenesmith.furniture_agents.tools.furniture_tools.compute_scene_collisions")
+    def test_add_accepts_floor_contact_filtered_by_physics_tolerance(
+        self, compute_collisions
+    ):
+        asset = self._configure_candidate_collision_test()
+        compute_collisions.return_value = []
+
+        result = json.loads(
+            self.furniture_tools._add_furniture_to_scene_impl(
+                asset_id=str(asset.object_id), x=2.002, y=1.0, z=0.0
+            )
+        )
+
+        self.assertTrue(result["success"], result)
+        self.assertIn(UniqueID("renaissance_bookcase"), self.mock_scene.objects)
+        compute_collisions.assert_called_once()
+        self.assertEqual(
+            compute_collisions.call_args.kwargs["floor_penetration_tolerance"],
+            self.test_config.physics_validation.floor_penetration_tolerance_m,
+        )
+
+    @patch("scenesmith.furniture_agents.tools.furniture_tools.compute_scene_collisions")
+    def test_move_rolls_back_candidate_local_structural_collision(
+        self, compute_collisions
+    ):
+        asset = self._configure_candidate_collision_test()
+        asset.object_id = UniqueID("renaissance_bookcase")
+        self.mock_scene.objects[asset.object_id] = asset
+        compute_collisions.return_value = [
+            CollisionPair(
+                object_a_name="wall",
+                object_a_id="room_geometry",
+                object_b_name=asset.name,
+                object_b_id=str(asset.object_id),
+                penetration_depth=0.25,
+            )
+        ]
+
+        result = json.loads(
+            self.furniture_tools._move_furniture_impl(
+                object_id=str(asset.object_id),
+                x=3.0,
+                y=1.0,
+                z=0.0,
+                roll=0.0,
+                pitch=0.0,
+                yaw=0.0,
+            )
+        )
+
+        self.assertFalse(result["success"])
+        self.assertIn("room_geometry", result["message"])
+        np.testing.assert_allclose(asset.transform.translation(), [0.0, 0.0, 0.0])
 
     def test_asset_id_not_found_error_handling(self):
         """Test error handling when asset_id doesn't exist in registry."""

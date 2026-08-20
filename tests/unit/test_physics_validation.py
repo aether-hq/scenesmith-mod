@@ -16,7 +16,7 @@ from scenesmith.agent_utils.clearance_zones import (
     WallHeightExceededViolation,
     WindowClearanceViolation,
 )
-from scenesmith.agent_utils.house import RoomGeometry
+from scenesmith.agent_utils.house import PlatformSpec, RoomGeometry
 from scenesmith.agent_utils.physics_validation import (
     CollisionPair,
     ThinCoveringBoundaryViolation,
@@ -43,6 +43,7 @@ from scenesmith.agent_utils.room import (
     serialize_rigid_transform,
 )
 from scenesmith.agent_utils.structural_compiler import (
+    compile_platform,
     compile_polygon_space,
     write_compiled_structure,
 )
@@ -187,6 +188,45 @@ class TestComputeSceneCollisions(unittest.TestCase):
 
         self.assertFalse(
             any("center_box" in {c.object_a_id, c.object_b_id} for c in collisions)
+        )
+
+    def test_furniture_exactly_supported_by_platform_is_not_a_collision(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            paths = write_compiled_structure(
+                compile_platform(
+                    PlatformSpec(
+                        platform_id="upper_gallery",
+                        space_id="library",
+                        footprint=Footprint2D.rectangle(4, 4),
+                        elevation=2.0,
+                    )
+                ),
+                temporary_directory,
+            )
+            room_geometry = RoomGeometry(
+                sdf_tree=ET.parse(self.floor_plan_path),
+                sdf_path=self.floor_plan_path,
+                additional_structural_surface_paths=[paths.surfaces_path],
+            )
+            scene = RoomScene(
+                room_geometry=room_geometry,
+                scene_dir=Path(temporary_directory),
+            )
+            scene.add_object(
+                SceneObject(
+                    object_id=UniqueID("platform_box"),
+                    object_type=ObjectType.FURNITURE,
+                    name="Platform box",
+                    description="Box standing exactly on the upper gallery",
+                    transform=RigidTransform(np.array([2.0, 2.0, 2.25])),
+                    sdf_path=self.box_sdf_path,
+                )
+            )
+
+            collisions = compute_scene_collisions(scene)
+
+        self.assertFalse(
+            any("platform_box" in {c.object_a_id, c.object_b_id} for c in collisions)
         )
 
     def test_furniture_to_furniture_multiple_collisions(self):

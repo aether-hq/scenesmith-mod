@@ -86,6 +86,23 @@ def test_rejects_books_and_documents_prop_for_storage_furniture() -> None:
     assert "document" in reason.casefold()
 
 
+def test_rejects_intrinsic_cabinet_renamed_as_bookcase() -> None:
+    compatible, reason = catalog_candidate_is_compatible(
+        request_text=(
+            "full-height Renaissance library bookcase densely filled with visible books"
+        ),
+        candidate_text=(
+            "Chinese Cabinet traditional shelving full-height Renaissance library "
+            "bookcase densely filled with visible books "
+            "polyhaven/Furniture/Storage Furniture/Cabinets & Cupboards"
+        ),
+        quality_score=1.0,
+    )
+
+    assert not compatible
+    assert "cabinet" in reason.casefold()
+
+
 def test_accepts_books_and_documents_prop_for_book_request() -> None:
     compatible, _ = catalog_candidate_is_compatible(
         request_text="vintage leather-bound encyclopedia books",
