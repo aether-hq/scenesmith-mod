@@ -85,6 +85,8 @@ if TYPE_CHECKING:
 
 console_logger = logging.getLogger(__name__)
 
+HSSD_CANONICAL_CONVERSION_VERSION = 2
+
 
 def _subscription_aware_worker_count(
     configured_workers: int, request_count: int
@@ -1159,6 +1161,15 @@ class AssetManager:
             if is_structural_architecture_request(request_text):
                 compatible = False
                 reason = "architectural structure cannot be cached as furniture"
+            elif source == "hssd" and metadata.get(
+                "canonical_conversion_version"
+            ) != HSSD_CANONICAL_CONVERSION_VERSION:
+                compatible = False
+                reason = (
+                    "stale HSSD canonical conversion version "
+                    f"{metadata.get('canonical_conversion_version')!r}; expected "
+                    f"{HSSD_CANONICAL_CONVERSION_VERSION}"
+                )
             elif source in {"hssd", "objaverse", "polyhaven"}:
                 compatible, reason = catalog_candidate_is_compatible(
                     request_text=request_text,
@@ -1183,6 +1194,16 @@ class AssetManager:
                 reason,
             )
             self.registry.discard(asset.object_id)
+
+    @staticmethod
+    def _asset_conversion_metadata(asset_source: str) -> dict[str, int]:
+        """Return source-specific geometry-contract metadata for cache reuse."""
+
+        if asset_source.casefold() == "hssd":
+            return {
+                "canonical_conversion_version": HSSD_CANONICAL_CONVERSION_VERSION
+            }
+        return {}
 
     def _generate_assets_with_router(
         self, request: AssetGenerationRequest
@@ -1674,6 +1695,9 @@ class AssetManager:
 
         # Build additional metadata using explicit asset_source from GeneratedGeometry.
         additional_metadata = {"asset_source": generated.asset_source}
+        additional_metadata.update(
+            self._asset_conversion_metadata(generated.asset_source)
+        )
         if generated.hssd_id is not None:
             additional_metadata["hssd_mesh_id"] = generated.hssd_id
         if generated.objaverse_uid is not None:

@@ -3,6 +3,7 @@ import tempfile
 import unittest
 
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import numpy as np
@@ -56,6 +57,36 @@ def test_non_hssd_canonical_dimensions_keep_y_up_conversion():
     assert AssetManager._canonical_mesh_target_dimensions(
         desired, is_hssd=False
     ) == [1.0, 2.0, 0.35]
+
+
+def test_unversioned_hssd_cache_entry_is_quarantined():
+    stale_bookcase = SimpleNamespace(
+        object_id="library_bookcase_0",
+        name="library_bookcase",
+        description="full-height Renaissance library bookcase with visible books",
+        metadata={
+            "asset_source": "hssd",
+            "asset_quality_score": 0.76,
+            "catalog_semantics": "wooden bookcase hssd/wordnet/bookcase.n.01",
+        },
+    )
+    discarded = []
+    manager = object.__new__(AssetManager)
+    manager.registry = SimpleNamespace(
+        list_all=lambda: [stale_bookcase],
+        discard=discarded.append,
+    )
+
+    manager._quarantine_incompatible_cached_assets()
+
+    assert discarded == ["library_bookcase_0"]
+
+
+def test_router_hssd_metadata_stamps_current_canonical_conversion():
+    assert AssetManager._asset_conversion_metadata("hssd") == {
+        "canonical_conversion_version": 2
+    }
+    assert AssetManager._asset_conversion_metadata("objaverse") == {}
 
 
 def create_mock_cfg():
