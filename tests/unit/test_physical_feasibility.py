@@ -663,13 +663,11 @@ class TestApplyPhysicalFeasibilityPostprocessing(PhysicalFeasibilityTestCase):
                     "apply_forward_simulation"
                 ) as simulation,
             ):
-                processed, success, removed = (
-                    apply_physical_feasibility_postprocessing(
-                        scene=scene,
-                        weld_furniture=False,
-                        projection_enabled=True,
-                        simulation_enabled=True,
-                    )
+                processed, success, removed = apply_physical_feasibility_postprocessing(
+                    scene=scene,
+                    weld_furniture=False,
+                    projection_enabled=True,
+                    simulation_enabled=True,
                 )
 
             self.assertFalse(success)
@@ -682,6 +680,68 @@ class TestApplyPhysicalFeasibilityPostprocessing(PhysicalFeasibilityTestCase):
                         position,
                     )
                 )
+
+    def test_isolated_ejected_projection_item_is_removed(self) -> None:
+        """One ejected item cannot discard an otherwise valid dense layout."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            scene = self._create_non_overlapping_boxes_scene(Path(tmp_dir))
+            scene.room_geometry.wall_height = 3.0
+            scene.room_geometry.floor = SceneObject(
+                object_id=UniqueID("floor"),
+                object_type=ObjectType.FLOOR,
+                name="floor",
+                description="Test floor",
+                transform=RigidTransform(),
+                bbox_min=np.array([-5.0, -5.0, -0.1]),
+                bbox_max=np.array([5.0, 5.0, 0.0]),
+                immutable=True,
+            )
+            for index in range(11):
+                scene.add_object(
+                    SceneObject(
+                        object_id=UniqueID(f"extra_{index}"),
+                        object_type=ObjectType.FURNITURE,
+                        name="extra box",
+                        description="Test furniture",
+                        transform=RigidTransform(p=[0.0, 0.0, 0.25]),
+                        bbox_min=np.array([-0.25, -0.25, -0.25]),
+                        bbox_max=np.array([0.25, 0.25, 0.25]),
+                    )
+                )
+            for obj in scene.objects.values():
+                obj.bbox_min = np.array([-0.25, -0.25, -0.25])
+                obj.bbox_max = np.array([0.25, 0.25, 0.25])
+
+            def eject_one(*, scene, **_kwargs):
+                scene.get_object(UniqueID("box_1")).transform = RigidTransform(
+                    p=[0.0, 0.0, -20.0]
+                )
+                return scene, True
+
+            with (
+                patch(
+                    "scenesmith.agent_utils.physical_feasibility."
+                    "apply_non_penetration_projection",
+                    side_effect=eject_one,
+                ),
+                patch(
+                    "scenesmith.agent_utils.physical_feasibility."
+                    "apply_forward_simulation",
+                    side_effect=lambda *, scene, **_kwargs: (scene, []),
+                ) as simulation,
+            ):
+                processed, success, removed = apply_physical_feasibility_postprocessing(
+                    scene=scene,
+                    weld_furniture=False,
+                    projection_enabled=True,
+                    simulation_enabled=True,
+                )
+
+            self.assertTrue(success)
+            self.assertEqual(removed, [UniqueID("box_1")])
+            self.assertIsNone(processed.get_object(UniqueID("box_1")))
+            self.assertIsNotNone(processed.get_object(UniqueID("box_2")))
+            simulation.assert_called_once()
 
     def test_disabled_simulation(self) -> None:
         """Test that disabled simulation skips simulation stage."""
