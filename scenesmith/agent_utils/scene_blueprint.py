@@ -292,11 +292,40 @@ def _connector_kind(prompt: str) -> str:
     return "stairs_straight"
 
 
+def _prompt_dimensions_m(
+    prompt: str,
+    *,
+    default_dimensions_m: tuple[float, float],
+    maximum_dimension_m: float,
+) -> tuple[float, float]:
+    """Resolve qualitative room scale into bounded canonical dimensions."""
+
+    maximum = float(maximum_dimension_m)
+    if maximum <= 0.0:
+        raise ValueError("maximum_dimension_m must be positive")
+    bounded_default = tuple(
+        min(maximum, float(dimension)) for dimension in default_dimensions_m
+    )
+    folded = prompt.casefold()
+    large_space = re.search(
+        r"\b(?:large|grand|vast|expansive|huge|monumental)\b"
+        r".{0,40}\b(?:library|hall|room|space|atrium|interior)\b",
+        folded,
+    )
+    collection_scale = re.search(r"\b(?:hundreds|thousands) of books\b", folded)
+    if large_space or collection_scale:
+        return tuple(
+            min(maximum, max(12.0, dimension)) for dimension in bounded_default
+        )
+    return bounded_default
+
+
 def blueprint_from_prompt(
     prompt: str,
     *,
     mode: Literal["room", "house"] = "room",
     default_dimensions_m: tuple[float, float] = (7.0, 7.0),
+    maximum_dimension_m: float = 20.0,
 ) -> SceneBlueprint:
     """Create a structurally valid deterministic blueprint from plain language."""
 
@@ -312,6 +341,11 @@ def blueprint_from_prompt(
         )
         for index in range(level_count)
     )
+    dimensions_m = _prompt_dimensions_m(
+        prompt,
+        default_dimensions_m=default_dimensions_m,
+        maximum_dimension_m=maximum_dimension_m,
+    )
     room_name = "Main room" if mode == "room" else "Primary space"
     spaces = tuple(
         SpaceBlueprint(
@@ -319,7 +353,7 @@ def blueprint_from_prompt(
             name=room_name if index == 0 else f"{room_name} upper {index}",
             room_type="room",
             level_id=level.level_id,
-            dimensions_m=default_dimensions_m,
+            dimensions_m=dimensions_m,
             prompt=prompt,
         )
         for index, level in enumerate(levels)

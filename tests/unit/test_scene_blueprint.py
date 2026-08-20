@@ -31,6 +31,30 @@ def test_plain_prompt_produces_stable_multilevel_spiral_blueprint():
     assert SceneBlueprint.model_validate_json(first.model_dump_json()) == first
 
 
+def test_large_library_prompt_expands_canonical_footprint():
+    prompt = (
+        "a large, multi-level library with thousands of books and a bunch of tables "
+        "and chairs for patrons. A spiral staircase connects the floors, and there "
+        "are huge archted windows, statues, and so on, as it has a renaiissance , "
+        "gorgeous decor."
+    )
+
+    blueprint = blueprint_from_prompt(prompt)
+
+    assert all(min(space.dimensions_m) >= 12.0 for space in blueprint.spaces)
+
+
+def test_ordinary_prompt_keeps_default_footprint_and_large_prompt_respects_cap():
+    ordinary = blueprint_from_prompt("a quiet library")
+    capped = blueprint_from_prompt(
+        "a large grand library with thousands of books",
+        maximum_dimension_m=10.0,
+    )
+
+    assert ordinary.spaces[0].dimensions_m == (7.0, 7.0)
+    assert capped.spaces[0].dimensions_m == (10.0, 10.0)
+
+
 def test_anthropic_style_envelope_and_aliases_normalize_to_canonical_schema():
     raw = {
         "arguments_json": json.dumps(

@@ -771,6 +771,7 @@ class StatefulFloorPlanAgent(BaseStatefulAgent, BaseFloorPlanAgent):
                 min(7.0, float(self.cfg.max_floor_plan_dim_m)),
                 min(7.0, float(self.cfg.max_floor_plan_dim_m)),
             ),
+            maximum_dimension_m=float(self.cfg.max_floor_plan_dim_m),
         )
         if style_bible is not None:
             self.blueprint = self.blueprint.model_copy(
