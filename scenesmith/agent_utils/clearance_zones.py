@@ -23,6 +23,8 @@ from scenesmith.agent_utils.room import ObjectType, RoomScene
 
 console_logger = logging.getLogger(__name__)
 
+_HEIGHT_COMPARISON_TOLERANCE_M = 1e-6
+
 
 @dataclass
 class DoorClearanceViolation:
@@ -764,7 +766,7 @@ def compute_wall_height_violations(
         else:
             effective_height = wall_height
 
-        if obj_top > effective_height:
+        if obj_top > effective_height + _HEIGHT_COMPARISON_TOLERANCE_M:
             violations.append(
                 WallHeightExceededViolation(
                     object_id=str(obj.object_id),

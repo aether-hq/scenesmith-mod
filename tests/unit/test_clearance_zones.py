@@ -11,6 +11,7 @@ from pydrake.all import RigidTransform
 from scenesmith.agent_utils.clearance_zones import (
     compute_door_clearance_violations,
     compute_open_connection_blocked_violations,
+    compute_wall_height_violations,
     compute_window_clearance_violations,
 )
 from scenesmith.agent_utils.house import ClearanceOpeningData, RoomGeometry
@@ -280,6 +281,39 @@ class TestClearanceZonesWallFiltering(unittest.TestCase):
             1,
             "Furniture blocking passage should be flagged",
         )
+
+    def test_wall_height_allows_numerical_ceiling_contact(self):
+        """Canonical ceiling tops may differ from their mount by floating error."""
+        fixture = SceneObject(
+            object_id=UniqueID("ceiling_fixture"),
+            object_type=ObjectType.CEILING_MOUNTED,
+            name="ceiling_fixture",
+            description="Test ceiling fixture",
+            transform=RigidTransform(p=[0.0, 0.0, 2.7 + 1e-10]),
+            bbox_min=np.array([-0.2, -0.2, -0.5]),
+            bbox_max=np.array([0.2, 0.2, 0.0]),
+        )
+        self.scene.add_object(fixture)
+
+        self.assertEqual(compute_wall_height_violations(self.scene), [])
+
+    def test_wall_height_rejects_meaningful_penetration(self):
+        """The contact tolerance must not hide a real overhead penetration."""
+        fixture = SceneObject(
+            object_id=UniqueID("penetrating_fixture"),
+            object_type=ObjectType.CEILING_MOUNTED,
+            name="penetrating_fixture",
+            description="Test penetrating fixture",
+            transform=RigidTransform(p=[0.0, 0.0, 2.71]),
+            bbox_min=np.array([-0.2, -0.2, -0.5]),
+            bbox_max=np.array([0.2, 0.2, 0.0]),
+        )
+        self.scene.add_object(fixture)
+
+        violations = compute_wall_height_violations(self.scene)
+
+        self.assertEqual(len(violations), 1)
+        self.assertEqual(violations[0].object_id, "penetrating_fixture")
 
 
 if __name__ == "__main__":
