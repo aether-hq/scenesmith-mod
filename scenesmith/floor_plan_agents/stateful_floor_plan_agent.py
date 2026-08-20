@@ -34,6 +34,12 @@ from scenesmith.agent_utils.base_stateful_agent import (
 from scenesmith.agent_utils.blender import BlenderServer
 from scenesmith.agent_utils.blender.process_provider import RenderAllocation
 from scenesmith.agent_utils.clearance_zones import compute_openings_data
+from scenesmith.agent_utils.design_system import (
+    apply_style_bible,
+    compile_style_bible,
+    load_design_system_from_env,
+    persist_design_contract,
+)
 from scenesmith.agent_utils.house import (
     HouseLayout,
     Opening,
@@ -50,6 +56,7 @@ from scenesmith.agent_utils.placement_noise import PlacementNoiseMode
 from scenesmith.agent_utils.rendering import save_directive_as_blend
 from scenesmith.agent_utils.room import AgentType, ObjectType, SceneObject, UniqueID
 from scenesmith.agent_utils.scene_blueprint import (
+    BlueprintDesignTokens,
     SceneBlueprint,
     blueprint_from_prompt,
     persist_scene_blueprint,
@@ -742,14 +749,36 @@ class StatefulFloorPlanAgent(BaseStatefulAgent, BaseFloorPlanAgent):
         # Set house_dir early so materials resolver can use it.
         house_dir = output_dir.parent if output_dir else self.logger.output_dir
         self.layout = HouseLayout(house_dir=house_dir, house_prompt=prompt)
+        design_system = load_design_system_from_env()
+        style_bible = compile_style_bible(design_system) if design_system else None
+        styled_prompt = (
+            apply_style_bible(prompt, style_bible) if style_bible else prompt
+        )
+        self.layout.house_prompt = styled_prompt
+        if design_system and style_bible:
+            persist_design_contract(design_system, style_bible, self.logger.output_dir)
         self.blueprint = blueprint_from_prompt(
-            prompt,
+            styled_prompt,
             mode=self.mode,
             default_dimensions_m=(
                 min(7.0, float(self.cfg.max_floor_plan_dim_m)),
                 min(7.0, float(self.cfg.max_floor_plan_dim_m)),
             ),
         )
+        if style_bible is not None:
+            self.blueprint = self.blueprint.model_copy(
+                update={
+                    "design_tokens": BlueprintDesignTokens(
+                        style_keywords=style_bible.asset_search_tags,
+                        palette=tuple(style_bible.palette_roles.values()),
+                        material_roles=style_bible.material_roles,
+                        lighting_mood=style_bible.ceiling_direction,
+                        focal_hierarchy=tuple(
+                            design_system.set_dressing.focal_hierarchy
+                        ),
+                    )
+                }
+            )
         persist_scene_blueprint(
             self.blueprint, self.logger.output_dir / "scene_blueprint.json"
         )
@@ -772,7 +801,7 @@ class StatefulFloorPlanAgent(BaseStatefulAgent, BaseFloorPlanAgent):
         if self.cfg.max_critique_rounds <= 0:
             deterministic_intent = normalize_floor_plan_submission(
                 {},
-                prompt=prompt,
+                prompt=styled_prompt,
                 mode=self.mode,
                 room_dim_min=self.cfg.min_floor_plan_dim_m,
                 room_dim_max=self.cfg.max_floor_plan_dim_m,

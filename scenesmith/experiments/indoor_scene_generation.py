@@ -24,6 +24,12 @@ from scenesmith.agent_utils.blender.process_provider import (
     RenderAllocation,
     render_allocations,
 )
+from scenesmith.agent_utils.design_system import (
+    apply_style_bible,
+    compile_style_bible,
+    load_design_system_from_env,
+    persist_design_contract,
+)
 from scenesmith.agent_utils.execution_providers import (
     HardwareInventory,
     resolve_torch_device,
@@ -599,6 +605,12 @@ def _generate_room(
     room_start_time = time.time()
 
     # Create scene and add walls and floor from room geometry.
+    design_system = load_design_system_from_env()
+    if design_system is not None:
+        style_bible = compile_style_bible(design_system)
+        persist_design_contract(design_system, style_bible, room_dir)
+        room_prompt = apply_style_bible(room_prompt, style_bible)
+
     scene = RoomScene(
         room_geometry=room_geometry,
         scene_dir=room_dir,
