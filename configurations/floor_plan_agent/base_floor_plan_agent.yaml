@@ -82,8 +82,8 @@ doors:
 
 # Window constraints
 windows:
-  width_range: [0.6, 3.0]  # meters (small to picture window)
-  height_range: [0.6, 2.0]  # meters (small to floor-to-ceiling)
+  width_range: [0.6, 4.0]  # meters (small to monumental picture window)
+  height_range: [0.6, 4.0]  # meters (small to monumental arched window)
   default_width: 1.2
   default_height: 1.2
   default_sill_height: 0.9

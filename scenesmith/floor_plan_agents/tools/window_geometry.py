@@ -4,6 +4,7 @@ Creates window meshes with frame and glass components for placement in wall open
 """
 
 import logging
+import math
 
 from dataclasses import dataclass
 from pathlib import Path
@@ -36,6 +37,9 @@ class WindowDimensions:
     glass_thickness: float = 0.01
     """Glass pane thickness (meters)."""
 
+    shape: str = "rectangular"
+    """Window silhouette: rectangular or arched."""
+
 
 @dataclass
 class WindowStyle:
@@ -60,6 +64,43 @@ class WindowStyle:
     """Glass metallic factor for PBR material."""
 
 
+def create_arched_prism(
+    *, width: float, height: float, depth: float, arc_segments: int = 24
+) -> trimesh.Trimesh:
+    """Extrude a convex round-arched profile along the Y axis."""
+
+    radius = width / 2.0
+    if width <= 0.0 or depth <= 0.0 or height <= radius:
+        raise ValueError("arched prism requires height greater than half its width")
+    springline = height / 2.0 - radius
+    profile = [(-radius, -height / 2.0), (radius, -height / 2.0), (radius, springline)]
+    profile.extend(
+        (
+            radius * math.cos(math.pi * index / arc_segments),
+            springline + radius * math.sin(math.pi * index / arc_segments),
+        )
+        for index in range(1, arc_segments + 1)
+    )
+
+    vertex_count = len(profile)
+    vertices = [(x, y, z) for y in (-depth / 2.0, depth / 2.0) for x, z in profile]
+    faces: list[tuple[int, int, int]] = []
+    for index in range(1, vertex_count - 1):
+        faces.append((0, index, index + 1))
+        faces.append(
+            (
+                vertex_count,
+                vertex_count + index + 1,
+                vertex_count + index,
+            )
+        )
+    for index in range(vertex_count):
+        following = (index + 1) % vertex_count
+        faces.append((index, vertex_count + following, following))
+        faces.append((index, vertex_count + index, vertex_count + following))
+    return trimesh.Trimesh(vertices=vertices, faces=faces, process=True)
+
+
 def create_window_frame(dimensions: WindowDimensions) -> trimesh.Trimesh:
     """Create window frame mesh (outer frame with inner cutout).
 
@@ -69,10 +110,19 @@ def create_window_frame(dimensions: WindowDimensions) -> trimesh.Trimesh:
     Returns:
         Frame mesh with hole for glass.
     """
-    # Create outer frame box.
-    outer = trimesh.creation.box(
-        extents=[dimensions.width, dimensions.depth, dimensions.height]
-    )
+    arched = dimensions.shape == "arched"
+    if dimensions.shape not in {"rectangular", "arched"}:
+        raise ValueError(f"unsupported window shape: {dimensions.shape}")
+    if arched:
+        outer = create_arched_prism(
+            width=dimensions.width,
+            height=dimensions.height,
+            depth=dimensions.depth,
+        )
+    else:
+        outer = trimesh.creation.box(
+            extents=[dimensions.width, dimensions.depth, dimensions.height]
+        )
 
     # Create inner cutout (slightly smaller than outer, full depth for clean cut).
     inner_width = dimensions.width - 2 * dimensions.frame_width
@@ -87,9 +137,16 @@ def create_window_frame(dimensions: WindowDimensions) -> trimesh.Trimesh:
         )
         return outer
 
-    inner = trimesh.creation.box(
-        extents=[inner_width, dimensions.depth * 2, inner_height]
-    )
+    if arched:
+        inner = create_arched_prism(
+            width=inner_width,
+            height=inner_height,
+            depth=dimensions.depth * 2,
+        )
+    else:
+        inner = trimesh.creation.box(
+            extents=[inner_width, dimensions.depth * 2, inner_height]
+        )
 
     # Perform boolean difference.
     frame = outer.difference(inner, engine="manifold")
@@ -113,9 +170,18 @@ def create_window_glass(dimensions: WindowDimensions) -> trimesh.Trimesh:
         # No room for glass.
         return trimesh.Trimesh()
 
-    glass = trimesh.creation.box(
-        extents=[glass_width, dimensions.glass_thickness, glass_height]
-    )
+    if dimensions.shape == "arched":
+        glass = create_arched_prism(
+            width=glass_width,
+            height=glass_height,
+            depth=dimensions.glass_thickness,
+        )
+    elif dimensions.shape == "rectangular":
+        glass = trimesh.creation.box(
+            extents=[glass_width, dimensions.glass_thickness, glass_height]
+        )
+    else:
+        raise ValueError(f"unsupported window shape: {dimensions.shape}")
 
     return glass
 
@@ -125,6 +191,7 @@ def create_window_mesh(
     height: float,
     depth: float = 0.1,
     frame_width: float = 0.05,
+    shape: str = "rectangular",
     style: WindowStyle | None = None,
 ) -> trimesh.Scene:
     """Create complete window with frame and glass as a scene.
@@ -134,6 +201,7 @@ def create_window_mesh(
         height: Window height (meters).
         depth: Window depth (meters).
         frame_width: Frame profile width (meters).
+        shape: Window silhouette: rectangular or arched.
         style: Optional style parameters.
 
     Returns:
@@ -143,7 +211,11 @@ def create_window_mesh(
         style = WindowStyle()
 
     dimensions = WindowDimensions(
-        width=width, height=height, depth=depth, frame_width=frame_width
+        width=width,
+        height=height,
+        depth=depth,
+        frame_width=frame_width,
+        shape=shape,
     )
 
     # Create frame with PBR material.
@@ -183,6 +255,7 @@ def create_window_gltf(
     height: float,
     depth: float = 0.1,
     frame_width: float = 0.05,
+    shape: str = "rectangular",
     output_path: Path | None = None,
     style: WindowStyle | None = None,
 ) -> trimesh.Scene:
@@ -193,6 +266,7 @@ def create_window_gltf(
         height: Window height (meters).
         depth: Window depth (meters).
         frame_width: Frame profile width (meters).
+        shape: Window silhouette: rectangular or arched.
         output_path: If provided, export GLTF to this path.
         style: Optional style parameters.
 
@@ -200,7 +274,12 @@ def create_window_gltf(
         The generated window scene.
     """
     window = create_window_mesh(
-        width=width, height=height, depth=depth, frame_width=frame_width, style=style
+        width=width,
+        height=height,
+        depth=depth,
+        frame_width=frame_width,
+        shape=shape,
+        style=style,
     )
 
     if output_path:
@@ -215,7 +294,10 @@ def create_window_gltf(
 
 
 def create_simple_window_mesh(
-    width: float, height: float, depth: float = 0.1
+    width: float,
+    height: float,
+    depth: float = 0.1,
+    shape: str = "rectangular",
 ) -> trimesh.Trimesh:
     """Create a simple single-mesh window (combined frame and glass).
 
@@ -225,11 +307,12 @@ def create_simple_window_mesh(
         width: Window width (meters).
         height: Window height (meters).
         depth: Window depth (meters).
+        shape: Window silhouette: rectangular or arched.
 
     Returns:
         A single trimesh representing the window.
     """
-    dimensions = WindowDimensions(width=width, height=height, depth=depth)
+    dimensions = WindowDimensions(width=width, height=height, depth=depth, shape=shape)
 
     frame = create_window_frame(dimensions)
     glass = create_window_glass(dimensions)

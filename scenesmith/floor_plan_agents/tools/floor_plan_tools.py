@@ -107,9 +107,9 @@ class DoorWindowConfig:
 
     # Window constraints.
     window_width_min: float = 0.6
-    window_width_max: float = 3.0
+    window_width_max: float = 4.0
     window_height_min: float = 0.6
-    window_height_max: float = 2.0
+    window_height_max: float = 4.0
     window_default_width: float = 1.2
     window_default_height: float = 1.2
     window_default_sill_height: float = 0.9
@@ -463,6 +463,7 @@ class FloorPlanTools(DoorWindowMixin, OpenPlanMixin):
             width: float = 1.2,
             height: float = 1.2,
             sill_height: float = 0.9,
+            shape: str = "rectangular",
         ) -> Result:
             """Add a window to an exterior wall segment.
 
@@ -472,6 +473,7 @@ class FloorPlanTools(DoorWindowMixin, OpenPlanMixin):
                 width: Window width in meters.
                 height: Window height in meters.
                 sill_height: Height from floor to window bottom in meters.
+                shape: Window silhouette: "rectangular" or "arched".
 
             Returns:
                 Result indicating success or failure.
@@ -482,6 +484,7 @@ class FloorPlanTools(DoorWindowMixin, OpenPlanMixin):
                 width=width,
                 height=height,
                 sill_height=sill_height,
+                shape=shape,
             )
 
         @function_tool
@@ -605,7 +608,8 @@ class FloorPlanTools(DoorWindowMixin, OpenPlanMixin):
         description = """Submit a complete floor-plan design in one call.
 
         Prefer room_specs plus optional structural, wall_height_meters,
-        windows_per_room, material descriptions, and exterior_door_room_id. Common
+        windows_per_room, window shape/dimensions, material descriptions, and
+        exterior_door_room_id. Common
         aliases, camelCase, JSON-encoded fields, numeric IDs, design/plan envelopes,
         and room maps are accepted. Structural connector endpoints should identify a
         space, level, and 3D position. Doors, windows, materials, safe defaults,
@@ -647,6 +651,10 @@ class FloorPlanTools(DoorWindowMixin, OpenPlanMixin):
                     "wall_height_meters": {},
                     "structural": {},
                     "windows_per_room": {},
+                    "window_shape": {},
+                    "window_width_m": {},
+                    "window_height_m": {},
+                    "window_sill_height_m": {},
                     "materials": {},
                     "design": {},
                     "plan": {},
@@ -771,6 +779,10 @@ class FloorPlanTools(DoorWindowMixin, OpenPlanMixin):
         wall_height_meters: float = 3.0,
         structural: dict[str, Any] | None = None,
         windows_per_room: int = 1,
+        window_shape: str = "rectangular",
+        window_width_m: float = 1.2,
+        window_height_m: float = 1.2,
+        window_sill_height_m: float = 0.9,
         floor_material_description: str = "warm wood floor",
         wall_material_description: str = "neutral plaster wall",
         exterior_material_description: str = "neutral exterior plaster",
@@ -819,7 +831,13 @@ class FloorPlanTools(DoorWindowMixin, OpenPlanMixin):
         if door_error is not None:
             return door_error
 
-        self._add_windows_deterministically(windows_per_room=windows_per_room)
+        self._add_windows_deterministically(
+            windows_per_room=windows_per_room,
+            shape=window_shape,
+            width=window_width_m,
+            height=window_height_m,
+            sill_height=window_sill_height_m,
+        )
         self._assign_materials_deterministically(
             floor_description=floor_material_description,
             wall_description=wall_material_description,
@@ -908,7 +926,15 @@ class FloorPlanTools(DoorWindowMixin, OpenPlanMixin):
                 return last_result
         return last_result
 
-    def _add_windows_deterministically(self, *, windows_per_room: int) -> None:
+    def _add_windows_deterministically(
+        self,
+        *,
+        windows_per_room: int,
+        shape: str = "rectangular",
+        width: float = 1.2,
+        height: float = 1.2,
+        sill_height: float = 0.9,
+    ) -> None:
         """Add requested windows to viable exterior walls, best effort."""
 
         try:
@@ -934,7 +960,14 @@ class FloorPlanTools(DoorWindowMixin, OpenPlanMixin):
             ]
             for wall_id in candidates:
                 for position in ("center", "left", "right"):
-                    result = self._add_window_impl(wall_id=wall_id, position=position)
+                    result = self._add_window_impl(
+                        wall_id=wall_id,
+                        position=position,
+                        width=width,
+                        height=height,
+                        sill_height=sill_height,
+                        shape=shape,
+                    )
                     if result.success:
                         existing_count += 1
                         if existing_count >= target_count:

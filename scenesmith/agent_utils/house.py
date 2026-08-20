@@ -140,6 +140,13 @@ class OpeningType(Enum):
     OPEN = "open"  # Open floor plan connection (no wall, floor-to-ceiling).
 
 
+class WindowShape(Enum):
+    """Supported window and wall-cutout silhouettes."""
+
+    RECTANGULAR = "rectangular"
+    ARCHED = "arched"
+
+
 @dataclass
 class Opening:
     """Opening (door/window/open connection) in a wall.
@@ -165,6 +172,8 @@ class Opening:
 
     sill_height: float = 0.0
 
+    shape: WindowShape = WindowShape.RECTANGULAR
+
     def to_dict(self) -> dict:
         """Serialize opening to dictionary."""
         return {
@@ -174,6 +183,7 @@ class Opening:
             "width": self.width,
             "height": self.height,
             "sill_height": self.sill_height,
+            "shape": self.shape.value,
         }
 
     @classmethod
@@ -186,6 +196,7 @@ class Opening:
             width=data["width"],
             height=data["height"],
             sill_height=data.get("sill_height", 0.0),
+            shape=WindowShape(data.get("shape", WindowShape.RECTANGULAR.value)),
         )
 
     """Height from floor to bottom (0 for doors, >0 for windows)."""
@@ -363,6 +374,9 @@ class Window:
     sill_height: float = 0.9
     """Designer-chosen: height from floor (typically 0.9m)."""
 
+    shape: WindowShape = WindowShape.RECTANGULAR
+    """Visible frame and wall-opening silhouette."""
+
     def to_dict(self) -> dict:
         """Serialize window to dictionary."""
         return {
@@ -376,6 +390,7 @@ class Window:
             "width": self.width,
             "height": self.height,
             "sill_height": self.sill_height,
+            "shape": self.shape.value,
         }
 
     @classmethod
@@ -391,6 +406,7 @@ class Window:
             width=data.get("width", 1.2),
             height=data.get("height", 1.2),
             sill_height=data.get("sill_height", 0.9),
+            shape=WindowShape(data.get("shape", WindowShape.RECTANGULAR.value)),
         )
 
 

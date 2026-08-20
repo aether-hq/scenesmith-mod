@@ -1709,6 +1709,33 @@ class TestOpeningPreservation(unittest.TestCase):
         assert not door_result2.success, "Door should fail when overlapping window"
         assert "overlap" in door_result2.message.lower()
 
+    def test_arched_window_rejects_impossible_crown_proportions(self):
+        layout = HouseLayout()
+        tools = FloorPlanTools(layout=layout, mode="room")
+        created = tools._generate_room_specs_impl(
+            room_specs_json=json.dumps(
+                [{"type": "gallery", "prompt": "Gallery", "width": 8, "depth": 6}]
+            )
+        )
+        assert created.success
+        exterior_wall = next(
+            label
+            for label, (_room_a, room_b, _direction) in layout.boundary_labels.items()
+            if room_b is None
+        )
+
+        result = tools._add_window_impl(
+            wall_id=exterior_wall,
+            position="center",
+            width=4.0,
+            height=1.5,
+            sill_height=0.5,
+            shape="arched",
+        )
+
+        assert not result.success
+        assert "height must exceed half its width" in result.message
+
 
 class TestLayoutCheckpointRestore(unittest.TestCase):
     """Test HouseLayout checkpoint/restore for reset functionality."""

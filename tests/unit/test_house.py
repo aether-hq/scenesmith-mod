@@ -20,6 +20,7 @@ from scenesmith.agent_utils.house import (
     Wall,
     WallDirection,
     Window,
+    WindowShape,
     legacy_openings_to_boundary_portals,
 )
 from scenesmith.agent_utils.semantic_environments import (
@@ -66,6 +67,7 @@ class TestRoundTrip(unittest.TestCase):
             width=1.5,
             height=1.2,
             sill_height=0.9,
+            shape=WindowShape.ARCHED,
         )
         restored = Opening.from_dict(original.to_dict())
         assert restored.opening_id == original.opening_id
@@ -74,6 +76,7 @@ class TestRoundTrip(unittest.TestCase):
         assert restored.width == original.width
         assert restored.height == original.height
         assert restored.sill_height == original.sill_height
+        assert restored.shape == WindowShape.ARCHED
 
     def test_door_round_trip(self) -> None:
         """Door survives to_dict/from_dict."""
@@ -110,6 +113,7 @@ class TestRoundTrip(unittest.TestCase):
             width=1.5,
             height=1.2,
             sill_height=0.9,
+            shape=WindowShape.ARCHED,
         )
         restored = Window.from_dict(original.to_dict())
         assert restored.id == original.id
@@ -120,6 +124,7 @@ class TestRoundTrip(unittest.TestCase):
         assert restored.width == original.width
         assert restored.height == original.height
         assert restored.sill_height == original.sill_height
+        assert restored.shape == WindowShape.ARCHED
 
     def test_room_geometry_hash_tracks_structural_sidecars(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:

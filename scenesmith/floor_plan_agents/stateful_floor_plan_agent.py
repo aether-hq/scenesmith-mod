@@ -1204,12 +1204,16 @@ class StatefulFloorPlanAgent(BaseStatefulAgent, BaseFloorPlanAgent):
             height=opening.height,
             depth=wall_thickness,
             is_horizontal=is_horizontal,
+            shape=opening.shape.value,
         )
 
         def create_fn(output_path: Path) -> None:
             # Create window frame mesh (in Z-up coords, facing +Y).
             window_scene = create_window_mesh(
-                width=opening.width, height=opening.height, depth=wall_thickness
+                width=opening.width,
+                height=opening.height,
+                depth=wall_thickness,
+                shape=opening.shape.value,
             )
 
             # Z-up to Y-up transform for GLTF export.
@@ -1452,6 +1456,7 @@ class StatefulFloorPlanAgent(BaseStatefulAgent, BaseFloorPlanAgent):
                     height=effective_height,
                     sill_height=opening.sill_height,
                     opening_type=opening.opening_type,
+                    shape=opening.shape,
                 )
             )
 

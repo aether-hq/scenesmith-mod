@@ -3,7 +3,7 @@
 import asyncio
 import json
 
-from scenesmith.agent_utils.house import HouseLayout
+from scenesmith.agent_utils.house import HouseLayout, WindowShape
 from scenesmith.agent_utils.structural_compiler import (
     compile_connector,
     compile_platform,
@@ -173,6 +173,48 @@ def test_missing_tool_fields_synthesize_safe_room_and_multilevel_structure():
     assert submission.structural["connectors"][0]["type"] == "stairs_spiral"
     assert len(submission.structural["platforms"]) == 4
     assert any("synthesized missing room" in repair for repair in submission.repairs)
+
+
+def test_exact_prompt_preserves_huge_arched_window_intent():
+    prompt = (
+        "a large, multi-level library with thousands of books and a bunch of tables "
+        "and chairs for patrons. A spiral staircase connects the floors, and there "
+        "are huge archted windows, statues, and so on, as it has a renaiissance , "
+        "gorgeous decor."
+    )
+
+    submission = normalize_floor_plan_submission(
+        {},
+        prompt=prompt,
+        mode="room",
+        room_dim_min=1.5,
+        room_dim_max=20.0,
+        wall_height_min=2.0,
+        wall_height_max=12.0,
+    )
+
+    assert submission.windows_per_room >= 3
+    assert submission.window_shape == "arched"
+    assert submission.window_width_m >= 3.5
+    assert submission.window_height_m >= 3.0
+
+    layout = HouseLayout(house_prompt=prompt)
+    result = FloorPlanTools(layout=layout, mode="room")._submit_floor_plan_impl(
+        **submission.tool_kwargs()
+    )
+
+    assert result.success, result.message
+    assert len(layout.windows) >= 3
+    assert all(window.shape == WindowShape.ARCHED for window in layout.windows)
+    window_openings = [
+        opening
+        for room in layout.placed_rooms
+        for wall in room.walls
+        for opening in wall.openings
+        if opening.opening_type.value == "window"
+    ]
+    assert len(window_openings) == len(layout.windows)
+    assert all(opening.shape == WindowShape.ARCHED for opening in window_openings)
 
 
 def test_multilevel_synthesis_fits_story_heights_and_emits_walkable_slabs():

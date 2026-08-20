@@ -63,6 +63,22 @@ class TestCreateWindowFrame(unittest.TestCase):
             frame.volume, expected_volume, delta=expected_volume * 0.01
         )
 
+    def test_arched_frame_has_curved_crown_without_rectangular_top_corners(self):
+        dimensions = WindowDimensions(
+            width=4.0,
+            height=3.5,
+            depth=0.1,
+            frame_width=0.12,
+            shape="arched",
+        )
+
+        frame = create_window_frame(dimensions)
+
+        assert frame.is_watertight
+        high_vertices = frame.vertices[frame.vertices[:, 2] > 1.65]
+        assert len(high_vertices) > 0
+        assert np.max(np.abs(high_vertices[:, 0])) < 1.0
+
 
 class TestCreateWindowGlass(unittest.TestCase):
     """Tests for window glass pane creation."""

@@ -80,7 +80,11 @@ def wall_cache_key(
 
 
 def window_cache_key(
-    width: float, height: float, depth: float, is_horizontal: bool
+    width: float,
+    height: float,
+    depth: float,
+    is_horizontal: bool,
+    shape: str = "rectangular",
 ) -> str:
     """Generate cache key for window frame GLTF.
 
@@ -92,6 +96,7 @@ def window_cache_key(
         height: Window height in meters.
         depth: Window depth (wall thickness) in meters.
         is_horizontal: Whether window is on N/S wall (rotation baked into mesh).
+        shape: Window silhouette baked into the mesh.
 
     Returns:
         SHA-256 hash string (first 16 chars).
@@ -101,6 +106,7 @@ def window_cache_key(
         "height": height,
         "depth": depth,
         "is_horizontal": is_horizontal,
+        "shape": shape,
     }
     content_json = json.dumps(state, sort_keys=True)
     return hashlib.sha256(content_json.encode()).hexdigest()[:16]

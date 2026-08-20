@@ -338,6 +338,10 @@ prompt: |
 
   **Window Sizing Guidelines**:
   - Living room: 2-3 windows or large picture window
+  - Preserve explicitly requested arched window shapes (including obvious typos such
+    as "archted") with `shape="arched"`
+  - For explicitly huge or monumental windows, provide large width/height values near
+    the allowed maximum instead of accepting the 1.2m defaults
   - Bedroom: 1-2 windows for ventilation
   - Kitchen: 1-2 windows for light
   - Bathroom: 1 small window (privacy) or none

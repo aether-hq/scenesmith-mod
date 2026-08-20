@@ -42,6 +42,13 @@ def test_large_library_prompt_expands_canonical_footprint():
     blueprint = blueprint_from_prompt(prompt)
 
     assert all(min(space.dimensions_m) >= 12.0 for space in blueprint.spaces)
+    assert len(blueprint.openings) >= 3
+    assert all(opening.shape == "arched" for opening in blueprint.openings)
+    assert all(opening.width_m >= 3.5 for opening in blueprint.openings)
+    assert all(opening.height_m >= 3.0 for opening in blueprint.openings)
+    submission = floor_plan_submission_from_blueprint(blueprint)
+    assert submission["window_shape"] == "arched"
+    assert submission["window_width_m"] >= 3.5
 
 
 def test_ordinary_prompt_keeps_default_footprint_and_large_prompt_respects_cap():

@@ -16,7 +16,8 @@ from PIL import Image
 from trimesh.visual.material import PBRMaterial as TrimeshPBRMaterial
 from trimesh.visual.texture import TextureVisuals
 
-from scenesmith.agent_utils.house import OpeningType
+from scenesmith.agent_utils.house import OpeningType, WindowShape
+from scenesmith.floor_plan_agents.tools.window_geometry import create_arched_prism
 from scenesmith.utils.gltf_generation import get_zup_to_yup_matrix
 from scenesmith.utils.material import Material
 
@@ -129,6 +130,9 @@ class WallOpening:
     opening_type: OpeningType = OpeningType.DOOR
     """Type of opening."""
 
+    shape: WindowShape = WindowShape.RECTANGULAR
+    """Visible silhouette for window openings."""
+
     def to_dict(self) -> dict:
         """Serialize opening to dictionary for cache key generation."""
         return {
@@ -137,6 +141,7 @@ class WallOpening:
             "height": self.height,
             "sill_height": self.sill_height,
             "opening_type": self.opening_type.value,
+            "shape": self.shape.value,
         }
 
 
@@ -185,14 +190,21 @@ def create_wall_with_openings(
 
     # Cut each opening.
     for opening in openings:
-        # Create cutter box slightly larger in Y to ensure clean cut.
-        cutter = trimesh.creation.box(
-            extents=[
-                opening.width,
-                dimensions.thickness * 2,  # Ensure full penetration.
-                opening.height,
-            ]
-        )
+        # Create cutter slightly larger in Y to ensure clean cut.
+        if opening.shape == WindowShape.ARCHED:
+            cutter = create_arched_prism(
+                width=opening.width,
+                height=opening.height,
+                depth=dimensions.thickness * 2,
+            )
+        else:
+            cutter = trimesh.creation.box(
+                extents=[
+                    opening.width,
+                    dimensions.thickness * 2,  # Ensure full penetration.
+                    opening.height,
+                ]
+            )
 
         # Position cutter at opening location.
         # X: offset from center of wall. position_along_wall is LEFT EDGE.

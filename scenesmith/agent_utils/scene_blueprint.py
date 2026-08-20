@@ -64,6 +64,8 @@ class OpeningBlueprint(BlueprintModel):
     connects_to_space_id: str | None = None
     width_m: float = 0.9
     height_m: float = 2.1
+    sill_height_m: float = 0.0
+    shape: Literal["rectangular", "arched"] = "rectangular"
 
 
 class ConnectorEndpoint(BlueprintModel):
@@ -320,6 +322,41 @@ def _prompt_dimensions_m(
     return bounded_default
 
 
+def _prompt_window_openings(
+    prompt: str, *, host_space_id: str
+) -> tuple[OpeningBlueprint, ...]:
+    """Create explicit canonical openings for strongly authored window intent."""
+
+    folded = prompt.casefold()
+    arched = bool(re.search(r"\barch[a-z]{0,5}\s+windows?\b", folded))
+    huge = bool(
+        re.search(
+            r"\b(?:huge|grand|monumental|oversized)\b.{0,30}\bwindows?\b",
+            folded,
+        )
+    )
+    if not arched and not huge:
+        return ()
+    count = 3 if re.search(r"\bwindows\b", folded) else 1
+    width = 4.0 if huge else 2.4
+    height = 3.5 if huge else 2.8
+    sill_height = 0.35 if huge else 0.6
+    return tuple(
+        OpeningBlueprint(
+            opening_id=stable_blueprint_id(
+                "opening", f"requested window {index}", index
+            ),
+            kind="window",
+            host_space_id=host_space_id,
+            width_m=width,
+            height_m=height,
+            sill_height_m=sill_height,
+            shape="arched" if arched else "rectangular",
+        )
+        for index in range(count)
+    )
+
+
 def blueprint_from_prompt(
     prompt: str,
     *,
@@ -358,6 +395,7 @@ def blueprint_from_prompt(
         )
         for index, level in enumerate(levels)
     )
+    openings = _prompt_window_openings(prompt, host_space_id=spaces[0].space_id)
     connectors: list[ConnectorBlueprint] = []
     for index in range(1, level_count):
         lower = levels[index - 1]
@@ -385,7 +423,7 @@ def blueprint_from_prompt(
                 ),
             )
         )
-    constraints = (
+    constraints: tuple[BlueprintConstraint, ...] = (
         BlueprintConstraint(
             constraint_id=stable_blueprint_id("constraint", "walkable circulation"),
             kind="minimum_circulation_width",
@@ -395,12 +433,31 @@ def blueprint_from_prompt(
             source="system",
         ),
     )
+    if openings:
+        constraints += (
+            BlueprintConstraint(
+                constraint_id=stable_blueprint_id(
+                    "constraint", "requested window geometry"
+                ),
+                kind="requested_window_geometry",
+                target_ids=tuple(opening.opening_id for opening in openings),
+                parameters={
+                    "minimum_count": len(openings),
+                    "shape": openings[0].shape,
+                    "minimum_width_m": openings[0].width_m,
+                    "minimum_height_m": openings[0].height_m,
+                },
+                strength="hard",
+                source="user",
+            ),
+        )
     return SceneBlueprint(
         blueprint_id=blueprint_id,
         source_prompt=prompt,
         mode=mode,
         levels=levels,
         spaces=spaces,
+        openings=openings,
         connectors=tuple(connectors),
         constraints=constraints,
     )
@@ -613,6 +670,20 @@ def floor_plan_submission_from_blueprint(blueprint: SceneBlueprint) -> dict[str,
         "room_specs": room_specs,
         "wall_height_meters": min(12.0, clear_height * len(blueprint.levels)),
     }
+    requested_windows = [
+        opening for opening in blueprint.openings if opening.kind == "window"
+    ]
+    if requested_windows:
+        representative = requested_windows[0]
+        payload.update(
+            {
+                "windows_per_room": len(requested_windows),
+                "window_shape": representative.shape,
+                "window_width_m": representative.width_m,
+                "window_height_m": representative.height_m,
+                "window_sill_height_m": representative.sill_height_m,
+            }
+        )
     if blueprint.design_tokens.material_roles:
         roles = blueprint.design_tokens.material_roles
         payload["materials"] = {

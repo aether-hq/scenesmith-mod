@@ -30,6 +30,10 @@ class NormalizedFloorPlanSubmission:
     wall_height_meters: float
     structural: dict[str, Any] | None
     windows_per_room: int
+    window_shape: Literal["rectangular", "arched"]
+    window_width_m: float
+    window_height_m: float
+    window_sill_height_m: float
     floor_material_description: str
     wall_material_description: str
     exterior_material_description: str
@@ -44,6 +48,10 @@ class NormalizedFloorPlanSubmission:
             "wall_height_meters": self.wall_height_meters,
             "structural": self.structural,
             "windows_per_room": self.windows_per_room,
+            "window_shape": self.window_shape,
+            "window_width_m": self.window_width_m,
+            "window_height_m": self.window_height_m,
+            "window_sill_height_m": self.window_sill_height_m,
             "floor_material_description": self.floor_material_description,
             "wall_material_description": self.wall_material_description,
             "exterior_material_description": self.exterior_material_description,
@@ -832,13 +840,52 @@ def normalize_floor_plan_submission(
         ),
         "neutral exterior plaster",
     )
+    folded_prompt = prompt.casefold()
+    prompt_arched = bool(re.search(r"\barch[a-z]{0,5}\s+windows?\b", folded_prompt))
+    prompt_huge = bool(
+        re.search(
+            r"\b(?:huge|grand|monumental|oversized)\b.{0,30}\bwindows?\b",
+            folded_prompt,
+        )
+    )
+    default_window_count = (
+        3
+        if (prompt_arched or prompt_huge) and re.search(r"\bwindows\b", folded_prompt)
+        else 2
+    )
     windows = round(
         _bounded_number(
             _pick(source, "windows_per_room", "window_count", "windows"),
-            2,
+            default_window_count,
             0,
             8,
         )
+    )
+    raw_window_shape = _snake_key(
+        _pick(source, "window_shape", "windows_shape", default="")
+    )
+    window_shape: Literal["rectangular", "arched"] = (
+        "arched"
+        if raw_window_shape in {"arch", "arched"} or prompt_arched
+        else "rectangular"
+    )
+    window_width = _bounded_number(
+        _pick(source, "window_width_m", "window_width"),
+        4.0 if prompt_huge else 1.2,
+        0.6,
+        4.0,
+    )
+    window_height = _bounded_number(
+        _pick(source, "window_height_m", "window_height"),
+        3.5 if prompt_huge else 1.2,
+        0.6,
+        4.0,
+    )
+    window_sill_height = _bounded_number(
+        _pick(source, "window_sill_height_m", "window_sill_height", "sill_height"),
+        0.35 if prompt_huge else 0.9,
+        0.0,
+        2.0,
     )
     exterior_door_room = _text(
         _pick(
@@ -855,6 +902,10 @@ def normalize_floor_plan_submission(
         wall_height_meters=wall_height,
         structural=structural,
         windows_per_room=windows,
+        window_shape=window_shape,
+        window_width_m=window_width,
+        window_height_m=window_height,
+        window_sill_height_m=window_sill_height,
         floor_material_description=floor_material,
         wall_material_description=wall_material,
         exterior_material_description=exterior_material,

@@ -7,7 +7,12 @@ import unittest
 from pathlib import Path
 from unittest.mock import MagicMock
 
-from scenesmith.agent_utils.house import HouseLayout, OpeningType, RoomSpec
+from scenesmith.agent_utils.house import (
+    HouseLayout,
+    OpeningType,
+    RoomSpec,
+    WindowShape,
+)
 from scenesmith.floor_plan_agents.tools.geometry_cache import (
     GeometryCache,
     floor_cache_key,
@@ -116,6 +121,24 @@ class TestCacheKeyFunctions(unittest.TestCase):
         key2 = window_cache_key(width=1.2, height=1.5, depth=0.1, is_horizontal=False)
         assert key1 != key2
 
+    def test_window_cache_key_tracks_shape(self) -> None:
+        rectangular = window_cache_key(
+            width=4.0,
+            height=3.5,
+            depth=0.1,
+            is_horizontal=True,
+            shape="rectangular",
+        )
+        arched = window_cache_key(
+            width=4.0,
+            height=3.5,
+            depth=0.1,
+            is_horizontal=True,
+            shape="arched",
+        )
+
+        assert rectangular != arched
+
 
 class TestWallOpening(unittest.TestCase):
     """Tests for WallOpening dataclass serialization."""
@@ -141,11 +164,13 @@ class TestWallOpening(unittest.TestCase):
             height=1.5,
             sill_height=0.9,
             opening_type=OpeningType.WINDOW,
+            shape=WindowShape.ARCHED,
         )
         result = opening.to_dict()
         # Should not raise TypeError: Object of type OpeningType is not JSON serializable.
         json_str = json.dumps(result)
         assert "window" in json_str
+        assert result["shape"] == "arched"
 
     def test_wall_cache_key_with_wall_opening_to_dict(self) -> None:
         """wall_cache_key works with WallOpening.to_dict() output."""

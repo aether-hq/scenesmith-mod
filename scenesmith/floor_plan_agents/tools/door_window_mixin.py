@@ -16,6 +16,7 @@ from scenesmith.agent_utils.house import (
     OpeningType,
     WallDirection,
     Window,
+    WindowShape,
 )
 from scenesmith.floor_plan_agents.tools.room_placement import (
     get_shared_edge,
@@ -519,6 +520,7 @@ class DoorWindowMixin:
             width=window.width,
             height=window.height,
             sill_height=window.sill_height,
+            shape=window.shape,
         )
 
         # Add to wall if not already present.
@@ -592,6 +594,7 @@ class DoorWindowMixin:
         width: float | None = None,
         height: float | None = None,
         sill_height: float | None = None,
+        shape: str = "rectangular",
     ):
         """Add a window to an exterior wall.
 
@@ -603,6 +606,7 @@ class DoorWindowMixin:
             width: Window width in valid range (uses config default if not specified).
             height: Window height in valid range (uses config default if not specified).
             sill_height: Height from floor to window bottom (uses config default).
+            shape: Window silhouette: "rectangular" or "arched".
 
         Returns:
             Result indicating success or failure.
@@ -617,10 +621,16 @@ class DoorWindowMixin:
             height = cfg.window_default_height
         if sill_height is None:
             sill_height = cfg.window_default_sill_height
+        try:
+            window_shape = WindowShape(shape)
+        except ValueError:
+            return self._fail(
+                f"Window shape must be 'rectangular' or 'arched'. Got: {shape}"
+            )
 
         console_logger.info(
             f"Tool called: add_window(wall_id={wall_id}, position={position}, "
-            f"width={width}, sill_height={sill_height})"
+            f"width={width}, sill_height={sill_height}, shape={window_shape.value})"
         )
         error = self._check_rooms_exist()
         if error:
@@ -642,6 +652,11 @@ class DoorWindowMixin:
             return self._fail(
                 f"Window height must be {cfg.window_height_min}-{cfg.window_height_max}m. "
                 f"Got: {height}"
+            )
+        if window_shape == WindowShape.ARCHED and height <= width / 2.0:
+            return self._fail(
+                "Arched window height must exceed half its width so the curved "
+                f"crown fits. Got width={width}, height={height}."
             )
 
         # Check wall exists and is exterior.
@@ -779,6 +794,7 @@ class DoorWindowMixin:
             width=width,
             height=height,
             sill_height=sill_height,
+            shape=window_shape,
         )
 
         # Add Opening to wall for rendering/ASCII.

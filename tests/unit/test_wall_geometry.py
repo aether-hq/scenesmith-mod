@@ -5,6 +5,7 @@ import unittest
 import numpy as np
 import trimesh
 
+from scenesmith.agent_utils.house import OpeningType, WindowShape
 from scenesmith.floor_plan_agents.tools.wall_geometry import (
     WallDimensions,
     WallOpening,
@@ -97,6 +98,29 @@ class TestCreateWallWithOpenings(unittest.TestCase):
         self.assertAlmostEqual(
             wall.volume, expected_volume, delta=expected_volume * 0.01
         )
+
+    def test_wall_with_arched_window_uses_curved_cutout(self):
+        dimensions = WallDimensions(width=6.0, height=4.5, thickness=0.1)
+        opening = WallOpening(
+            position_along_wall=1.0,
+            width=4.0,
+            height=3.5,
+            sill_height=0.35,
+            opening_type=OpeningType.WINDOW,
+            shape=WindowShape.ARCHED,
+        )
+
+        wall = create_wall_with_openings(dimensions, [opening])
+
+        assert wall.is_watertight
+        radius = opening.width / 2.0
+        cutout_area = (
+            opening.width * (opening.height - radius) + np.pi * radius**2 / 2.0
+        )
+        expected_volume = (
+            dimensions.width * dimensions.height - cutout_area
+        ) * dimensions.thickness
+        self.assertAlmostEqual(wall.volume, expected_volume, delta=0.01)
 
     def test_wall_with_multiple_openings(self):
         """Wall with both door and window."""
