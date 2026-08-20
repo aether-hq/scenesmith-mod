@@ -9,7 +9,7 @@ before an asset is allowed into a scene.
 from __future__ import annotations
 
 import re
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 
 _FAMILY_TERMS: dict[str, frozenset[str]] = {
     "chair": frozenset(
@@ -194,6 +194,15 @@ def catalog_candidate_is_compatible(
             )
 
     requested = semantic_families(request_text)
+    candidate_catalog_text = candidate_text.casefold()
+    if "storage" in requested and re.search(
+        r"\bbooks\s*(?:&|and)\s*documents\b", candidate_catalog_text
+    ):
+        return (
+            False,
+            "storage furniture request is incompatible with the Books & Documents "
+            "catalog branch",
+        )
     candidate = semantic_families(candidate_text)
     if not requested:
         return True, "request has no coarse ontology family"
@@ -215,6 +224,36 @@ def catalog_candidate_is_compatible(
             + ", ".join(sorted(unexpected)),
         )
     return True, "compatible ontology family"
+
+
+def tall_furniture_dimensions_are_compatible(
+    *,
+    desired_dimensions: Sequence[float] | None,
+    bbox_min: Sequence[float] | None,
+    bbox_max: Sequence[float] | None,
+    minimum_target_height_m: float = 1.2,
+    minimum_height_ratio: float = 0.6,
+) -> tuple[bool, str]:
+    """Reject tall furniture meshes that cannot approach their requested height."""
+
+    if desired_dimensions is None or bbox_min is None or bbox_max is None:
+        return True, "dimension metadata unavailable"
+    if len(desired_dimensions) < 3 or len(bbox_min) < 3 or len(bbox_max) < 3:
+        return True, "dimension metadata incomplete"
+
+    target_height = float(desired_dimensions[2])
+    if target_height < minimum_target_height_m:
+        return True, "requested furniture is not tall"
+
+    produced_height = float(bbox_max[2]) - float(bbox_min[2])
+    required_height = minimum_height_ratio * target_height
+    if produced_height + 1e-9 < required_height:
+        return (
+            False,
+            f"produced height {produced_height:.3f}m is below "
+            f"{minimum_height_ratio:.0%} of requested height {target_height:.3f}m",
+        )
+    return True, "produced height is compatible with requested tall furniture"
 
 
 def candidate_metadata_text(

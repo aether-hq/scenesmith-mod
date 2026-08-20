@@ -68,6 +68,35 @@ def test_accepts_chair_and_bookshelf_ontology_matches() -> None:
     assert shelf
 
 
+def test_rejects_books_and_documents_prop_for_storage_furniture() -> None:
+    compatible, reason = catalog_candidate_is_compatible(
+        request_text=(
+            "full-height Renaissance library bookcase densely filled with visible books"
+        ),
+        candidate_text=(
+            "Book Encyclopedia Set 01 books bookshelf encyclopedia library "
+            "polyhaven/Office & Stationery/Books & Documents/Books"
+        ),
+        quality_score=1.0,
+    )
+
+    assert not compatible
+    assert "document" in reason.casefold()
+
+
+def test_accepts_books_and_documents_prop_for_book_request() -> None:
+    compatible, _ = catalog_candidate_is_compatible(
+        request_text="vintage leather-bound encyclopedia books",
+        candidate_text=(
+            "Book Encyclopedia Set 01 polyhaven/Office & Stationery/Books & "
+            "Documents/Books"
+        ),
+        quality_score=1.0,
+    )
+
+    assert compatible
+
+
 def test_stationary_chair_request_rejects_rocking_mechanism() -> None:
     rocking, reason = catalog_candidate_is_compatible(
         request_text="stationary upholstered library reading chair",

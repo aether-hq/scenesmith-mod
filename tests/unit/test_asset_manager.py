@@ -59,6 +59,29 @@ def test_non_hssd_canonical_dimensions_keep_y_up_conversion():
     ) == [1.0, 2.0, 0.35]
 
 
+def test_tall_furniture_rejects_converted_height_far_below_target():
+    compatible, reason = AssetManager._converted_dimensions_are_compatible(
+        object_type=ObjectType.FURNITURE,
+        desired_dimensions=[1.0, 0.35, 2.0],
+        bbox_min=np.array([-0.5, -0.148, 0.0]),
+        bbox_max=np.array([0.5, 0.148, 0.431]),
+    )
+
+    assert not compatible
+    assert "height" in reason
+
+
+def test_tall_furniture_accepts_height_at_sixty_percent_of_target():
+    compatible, _ = AssetManager._converted_dimensions_are_compatible(
+        object_type=ObjectType.FURNITURE,
+        desired_dimensions=[0.7, 0.7, 2.0],
+        bbox_min=np.array([-0.35, -0.35, 0.0]),
+        bbox_max=np.array([0.35, 0.35, 1.2]),
+    )
+
+    assert compatible
+
+
 def test_unversioned_hssd_cache_entry_is_quarantined():
     stale_bookcase = SimpleNamespace(
         object_id="library_bookcase_0",

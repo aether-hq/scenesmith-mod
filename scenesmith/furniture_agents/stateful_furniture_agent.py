@@ -15,7 +15,10 @@ from agents import Agent, FunctionTool
 from agents.exceptions import ModelBehaviorError
 from omegaconf import DictConfig
 
-from scenesmith.agent_utils.asset_semantics import catalog_candidate_is_compatible
+from scenesmith.agent_utils.asset_semantics import (
+    catalog_candidate_is_compatible,
+    tall_furniture_dimensions_are_compatible,
+)
 from scenesmith.agent_utils.base_stateful_agent import BaseStatefulAgent
 from scenesmith.agent_utils.blender.process_provider import RenderAllocation
 from scenesmith.agent_utils.placement_noise import PlacementNoiseMode
@@ -58,13 +61,40 @@ def _object_matches_room_kit_slot(obj: Any, slot: Any) -> bool:
             .replace("_", " "),
         )
     )
+    role_match = False
     for role_name in (slot.role, *getattr(slot, "aliases", ())):
         role_tokens = set(
             re.findall(r"[a-z0-9]+", str(role_name).casefold().replace("_", " "))
         )
         if role_tokens and role_tokens <= object_tokens:
-            return True
-    return False
+            role_match = True
+            break
+    if not role_match:
+        return False
+
+    metadata = getattr(obj, "metadata", None) or {}
+    candidate_text = str(
+        metadata.get("catalog_semantics") or metadata.get("ontology_path") or ""
+    )
+    if candidate_text:
+        compatible, _ = catalog_candidate_is_compatible(
+            request_text=str(getattr(slot, "query", slot.role)),
+            candidate_text=candidate_text,
+            quality_score=(
+                float(metadata["asset_quality_score"])
+                if metadata.get("asset_quality_score") is not None
+                else None
+            ),
+        )
+        if not compatible:
+            return False
+
+    compatible_dimensions, _ = tall_furniture_dimensions_are_compatible(
+        desired_dimensions=getattr(slot, "nominal_dimensions_m", None),
+        bbox_min=getattr(obj, "bbox_min", None),
+        bbox_max=getattr(obj, "bbox_max", None),
+    )
+    return compatible_dimensions
 
 
 def _validate_room_kit_completion(
@@ -385,6 +415,13 @@ class StatefulFurnitureAgent(BaseStatefulAgent, BaseFurnitureAgent):
             quality_score=quality,
         )
         if not compatible:
+            return (-1, 0, quality, str(asset.object_id))
+        compatible_dimensions, _ = tall_furniture_dimensions_are_compatible(
+            desired_dimensions=getattr(slot, "nominal_dimensions_m", None),
+            bbox_min=getattr(asset, "bbox_min", None),
+            bbox_max=getattr(asset, "bbox_max", None),
+        )
+        if not compatible_dimensions:
             return (-1, 0, quality, str(asset.object_id))
         query_tokens = cls._semantic_tokens(str(getattr(slot, "query", slot.role)))
         candidate_tokens = asset_tokens | cls._semantic_tokens(candidate_text)

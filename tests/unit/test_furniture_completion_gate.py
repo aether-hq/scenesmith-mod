@@ -113,6 +113,51 @@ def test_matched_library_kit_rejects_role_deficit_despite_large_total():
         _validate_room_kit_completion(scene, room_kit)
 
 
+def test_library_gate_rejects_renamed_short_book_props_as_bookshelves():
+    kit = _library_kit()
+    kit.slots[0].query = (
+        "full-height Renaissance library bookcase densely filled with visible books"
+    )
+    kit.slots[0].nominal_dimensions_m = (1.0, 0.35, 2.0)
+    objects = {
+        "wall": SimpleNamespace(object_type=ObjectType.WALL),
+        **{
+            f"book_prop_{index}": SimpleNamespace(
+                object_type=ObjectType.FURNITURE,
+                object_id=f"full_height_bookshelf_{index}",
+                name="full_height_bookshelf",
+                description=kit.slots[0].query,
+                bbox_min=(-0.5, -0.148, 0.0),
+                bbox_max=(0.5, 0.148, 0.431),
+                metadata={
+                    "asset_quality_score": 1.0,
+                    "catalog_semantics": (
+                        "Book Encyclopedia Set 01 books bookshelf "
+                        "polyhaven/Office & Stationery/Books & Documents/Books"
+                    ),
+                },
+            )
+            for index in range(2)
+        },
+        "reading_table_0": SimpleNamespace(
+            object_type=ObjectType.FURNITURE,
+            name="reading_table",
+            description="reading table",
+        ),
+        **{
+            f"reading_chair_{index}": SimpleNamespace(
+                object_type=ObjectType.FURNITURE,
+                name="reading_chair",
+                description="reading chair",
+            )
+            for index in range(4)
+        },
+    }
+
+    with pytest.raises(ModelBehaviorError, match=r"bookshelf.*0.*2"):
+        _validate_room_kit_completion(SimpleNamespace(objects=objects), kit)
+
+
 def test_unmatched_room_allows_intentionally_empty_scene():
     assert _validate_room_kit_completion(_scene_with_furniture(0), None) == 0
 

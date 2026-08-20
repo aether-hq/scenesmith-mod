@@ -22,6 +22,7 @@ from scenesmith.agent_utils.asset_registry import AssetRegistry
 from scenesmith.agent_utils.asset_semantics import (
     catalog_candidate_is_compatible,
     is_structural_architecture_request,
+    tall_furniture_dimensions_are_compatible,
 )
 from scenesmith.agent_utils.asset_router import AssetRouter
 from scenesmith.agent_utils.asset_router.dataclasses import (
@@ -2271,11 +2272,43 @@ class AssetManager:
             is_hssd=is_hssd,
         )
 
+        compatible_dimensions, dimension_reason = (
+            self._converted_dimensions_are_compatible(
+                object_type=object_type,
+                desired_dimensions=desired_dimensions,
+                bbox_min=bbox_min,
+                bbox_max=bbox_max,
+            )
+        )
+        if not compatible_dimensions:
+            raise ValueError(
+                f"Converted asset '{config.description}' is incompatible with its "
+                f"requested dimensions: {dimension_reason}"
+            )
+
         console_logger.info(
             f"Drake SDF complete: SDF at {sdf_path}, bounds: {bbox_min} to {bbox_max}"
         )
 
         return sdf_path, final_gltf_path, bbox_min, bbox_max, initial_scale
+
+    @staticmethod
+    def _converted_dimensions_are_compatible(
+        *,
+        object_type: ObjectType,
+        desired_dimensions: list[float] | None,
+        bbox_min: np.ndarray,
+        bbox_max: np.ndarray,
+    ) -> tuple[bool, str]:
+        """Validate the produced height contract for requested tall furniture."""
+
+        if object_type != ObjectType.FURNITURE:
+            return True, "object is not furniture"
+        return tall_furniture_dimensions_are_compatible(
+            desired_dimensions=desired_dimensions,
+            bbox_min=bbox_min,
+            bbox_max=bbox_max,
+        )
 
     @staticmethod
     def _gltf_axis_to_blender(axis: str) -> str:
