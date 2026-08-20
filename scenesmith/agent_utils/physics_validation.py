@@ -619,11 +619,19 @@ def _get_object_info_from_geometry_id(
         if "room_geometry" in frame_name:
             # Try to extract specific wall/floor name from geometry.
             geometry_name = inspector.GetName(geometry_id)
-            if "wall" in geometry_name.lower():
+            geometry_name_lower = geometry_name.lower()
+            geometry_basename = geometry_name_lower.rsplit("::", 1)[-1]
+            is_primary_additional_support = (
+                "_additional_support_" in frame_name
+                and geometry_basename == "structure_collision"
+            )
+            if is_primary_additional_support:
+                return {"name": "floor", "id": "room_geometry"}
+            if "wall" in geometry_name_lower:
                 # Extract wall ID from geometry name (e.g., "west_wall_collision" -> "west_wall").
-                wall_id = geometry_name.lower().rsplit("_collision", 1)[0]
+                wall_id = geometry_name_lower.rsplit("_collision", 1)[0]
                 return {"name": geometry_name, "id": wall_id}
-            elif "floor" in geometry_name.lower() or "ground" in geometry_name.lower():
+            elif "floor" in geometry_name_lower or "ground" in geometry_name_lower:
                 # Floor or ground element.
                 return {"name": "floor", "id": "room_geometry"}
             else:

@@ -190,7 +190,7 @@ class TestComputeSceneCollisions(unittest.TestCase):
             any("center_box" in {c.object_a_id, c.object_b_id} for c in collisions)
         )
 
-    def test_furniture_exactly_supported_by_platform_is_not_a_collision(self):
+    def test_platform_support_contact_uses_floor_penetration_tolerance(self):
         with tempfile.TemporaryDirectory() as temporary_directory:
             paths = write_compiled_structure(
                 compile_platform(
@@ -214,7 +214,7 @@ class TestComputeSceneCollisions(unittest.TestCase):
             )
             scene.add_object(
                 SceneObject(
-                    object_id=UniqueID("platform_box"),
+                    object_id=UniqueID("exact_platform_box"),
                     object_type=ObjectType.FURNITURE,
                     name="Platform box",
                     description="Box standing exactly on the upper gallery",
@@ -222,11 +222,27 @@ class TestComputeSceneCollisions(unittest.TestCase):
                     sdf_path=self.box_sdf_path,
                 )
             )
+            scene.add_object(
+                SceneObject(
+                    object_id=UniqueID("settled_platform_box"),
+                    object_type=ObjectType.FURNITURE,
+                    name="Settled platform box",
+                    description="Box settled 3cm into the upper gallery support",
+                    transform=RigidTransform(np.array([1.0, 1.0, 2.22])),
+                    sdf_path=self.box_sdf_path,
+                )
+            )
 
-            collisions = compute_scene_collisions(scene)
+            collisions = compute_scene_collisions(
+                scene, floor_penetration_tolerance=0.05
+            )
 
         self.assertFalse(
-            any("platform_box" in {c.object_a_id, c.object_b_id} for c in collisions)
+            any(
+                {"exact_platform_box", "settled_platform_box"}
+                & {c.object_a_id, c.object_b_id}
+                for c in collisions
+            )
         )
 
     def test_furniture_to_furniture_multiple_collisions(self):
