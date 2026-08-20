@@ -219,3 +219,44 @@ def test_library_recovery_prefers_stable_armchair_over_role_exact_rocker():
 
     assert agent._place_room_kit_minimums_deterministically(room_kit) == 1
     assert placements[0]["asset_id"] == "library_reading_chair_0"
+
+
+def test_library_recovery_prefers_filled_bookcase_over_bare_shelf():
+    slot = SimpleNamespace(
+        role="bookshelf",
+        aliases=("bookcase",),
+        query=(
+            "full-height Renaissance library bookcase densely filled with "
+            "visible books"
+        ),
+    )
+    bare_shelf = SimpleNamespace(
+        object_id="library_bookshelf_0",
+        name="library_bookshelf",
+        description="short empty wooden shelf",
+        metadata={
+            "asset_quality_score": 1.0,
+            "catalog_semantics": "wooden bookshelf furniture storage",
+        },
+    )
+    filled_bookcase = SimpleNamespace(
+        object_id="renaissance_bookcase_0",
+        name="renaissance_bookcase",
+        description=(
+            "full-height Renaissance library bookcase densely filled with "
+            "visible books"
+        ),
+        metadata={
+            "asset_quality_score": 0.76,
+            "catalog_semantics": (
+                "ornate Renaissance bookcase with shelves full of visible books"
+            ),
+        },
+    )
+
+    ranked = max(
+        (bare_shelf, filled_bookcase),
+        key=lambda asset: StatefulFurnitureAgent._slot_relevance(asset, slot),
+    )
+
+    assert ranked.object_id == "renaissance_bookcase_0"

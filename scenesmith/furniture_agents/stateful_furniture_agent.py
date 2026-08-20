@@ -358,7 +358,7 @@ class StatefulFurnitureAgent(BaseStatefulAgent, BaseFurnitureAgent):
         }
 
     @classmethod
-    def _slot_relevance(cls, asset: Any, slot: Any) -> tuple[int, float, str]:
+    def _slot_relevance(cls, asset: Any, slot: Any) -> tuple[int, int, float, str]:
         """Rank one cached asset against a semantic room-kit slot."""
 
         role_names = (slot.role, *getattr(slot, "aliases", ()))
@@ -385,8 +385,16 @@ class StatefulFurnitureAgent(BaseStatefulAgent, BaseFurnitureAgent):
             quality_score=quality,
         )
         if not compatible:
-            return (-1, quality, str(asset.object_id))
-        return (exact * 100 + overlap, quality, str(asset.object_id))
+            return (-1, 0, quality, str(asset.object_id))
+        query_tokens = cls._semantic_tokens(str(getattr(slot, "query", slot.role)))
+        candidate_tokens = asset_tokens | cls._semantic_tokens(candidate_text)
+        query_overlap = len(query_tokens & candidate_tokens)
+        return (
+            exact * 100 + overlap,
+            query_overlap,
+            quality,
+            str(asset.object_id),
+        )
 
     def _deterministic_room_positions(
         self, *, wall: bool
