@@ -17,6 +17,7 @@ from omegaconf import DictConfig
 
 from scenesmith.agent_utils.asset_semantics import (
     catalog_candidate_is_compatible,
+    catalog_candidate_satisfies_request_details,
     tall_furniture_dimensions_are_compatible,
 )
 from scenesmith.agent_utils.base_stateful_agent import BaseStatefulAgent
@@ -73,13 +74,13 @@ def _object_matches_room_kit_slot(obj: Any, slot: Any) -> bool:
         return False
 
     metadata = getattr(obj, "metadata", None) or {}
-    candidate_text = str(
+    catalog_text = str(
         metadata.get("catalog_semantics") or metadata.get("ontology_path") or ""
     )
-    if candidate_text:
+    if catalog_text:
         compatible, _ = catalog_candidate_is_compatible(
             request_text=str(getattr(slot, "query", slot.role)),
-            candidate_text=candidate_text,
+            candidate_text=catalog_text,
             quality_score=(
                 float(metadata["asset_quality_score"])
                 if metadata.get("asset_quality_score") is not None
@@ -88,8 +89,16 @@ def _object_matches_room_kit_slot(obj: Any, slot: Any) -> bool:
         )
         if not compatible:
             return False
+        compatible, _ = catalog_candidate_satisfies_request_details(
+            request_text=str(getattr(slot, "query", slot.role)),
+            candidate_text=catalog_text,
+            supports_detail_fill=bool(metadata.get("support_zones")),
+        )
+        if not compatible:
+            return False
 
     compatible_dimensions, _ = tall_furniture_dimensions_are_compatible(
+        request_text=str(getattr(slot, "query", slot.role)),
         desired_dimensions=getattr(slot, "nominal_dimensions_m", None),
         bbox_min=getattr(obj, "bbox_min", None),
         bbox_max=getattr(obj, "bbox_max", None),
@@ -404,19 +413,30 @@ class StatefulFurnitureAgent(BaseStatefulAgent, BaseFurnitureAgent):
         overlap = len(asset_tokens & role_tokens)
         metadata = getattr(asset, "metadata", None) or {}
         quality = float(metadata.get("asset_quality_score", 0.0))
-        candidate_text = str(
+        catalog_text = str(
             metadata.get("catalog_semantics")
             or metadata.get("ontology_path")
             or f"{asset.name} {getattr(asset, 'description', '')}"
         )
+        detail_text = (
+            f"{asset.name} {getattr(asset, 'description', '')} {catalog_text}"
+        )
         compatible, _ = catalog_candidate_is_compatible(
             request_text=str(getattr(slot, "query", slot.role)),
-            candidate_text=candidate_text,
+            candidate_text=catalog_text,
             quality_score=quality,
         )
         if not compatible:
             return (-1, 0, quality, str(asset.object_id))
+        compatible, _ = catalog_candidate_satisfies_request_details(
+            request_text=str(getattr(slot, "query", slot.role)),
+            candidate_text=catalog_text,
+            supports_detail_fill=bool(metadata.get("support_zones")),
+        )
+        if not compatible:
+            return (-1, 0, quality, str(asset.object_id))
         compatible_dimensions, _ = tall_furniture_dimensions_are_compatible(
+            request_text=str(getattr(slot, "query", slot.role)),
             desired_dimensions=getattr(slot, "nominal_dimensions_m", None),
             bbox_min=getattr(asset, "bbox_min", None),
             bbox_max=getattr(asset, "bbox_max", None),
@@ -424,10 +444,10 @@ class StatefulFurnitureAgent(BaseStatefulAgent, BaseFurnitureAgent):
         if not compatible_dimensions:
             return (-1, 0, quality, str(asset.object_id))
         query_tokens = cls._semantic_tokens(str(getattr(slot, "query", slot.role)))
-        candidate_tokens = asset_tokens | cls._semantic_tokens(candidate_text)
+        candidate_tokens = asset_tokens | cls._semantic_tokens(detail_text)
         query_overlap = len(query_tokens & candidate_tokens)
         return (
-            exact * 100 + overlap,
+            query_overlap * 1000 + exact * 100 + overlap,
             query_overlap,
             quality,
             str(asset.object_id),
@@ -507,7 +527,7 @@ class StatefulFurnitureAgent(BaseStatefulAgent, BaseFurnitureAgent):
                 continue
             existing = sum(
                 obj.object_type == ObjectType.FURNITURE
-                and self._slot_relevance(obj, slot)[0] >= 100
+                and _object_matches_room_kit_slot(obj, slot)
                 for obj in self.scene.objects.values()
             )
             missing = max(0, int(slot.minimum_count) - existing)

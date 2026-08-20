@@ -21,6 +21,7 @@ from scenesmith.agent_utils.articulated_retrieval_server import (
 from scenesmith.agent_utils.asset_registry import AssetRegistry
 from scenesmith.agent_utils.asset_semantics import (
     catalog_candidate_is_compatible,
+    catalog_candidate_satisfies_request_details,
     is_structural_architecture_request,
     tall_furniture_dimensions_are_compatible,
 )
@@ -1156,6 +1157,11 @@ class AssetManager:
         for asset in list(self.registry.list_all()):
             request_text = f"{asset.name} {asset.description}"
             metadata = asset.metadata or {}
+            catalog_text = str(
+                metadata.get("catalog_semantics")
+                or metadata.get("ontology_path")
+                or ""
+            )
             source = str(metadata.get("asset_source", "")).casefold()
             reason = ""
             compatible = True
@@ -1174,11 +1180,7 @@ class AssetManager:
             elif source in {"hssd", "objaverse", "polyhaven"}:
                 compatible, reason = catalog_candidate_is_compatible(
                     request_text=request_text,
-                    candidate_text=str(
-                        metadata.get("catalog_semantics")
-                        or metadata.get("ontology_path")
-                        or ""
-                    ),
+                    candidate_text=catalog_text,
                     quality_score=(
                         float(metadata["asset_quality_score"])
                         if metadata.get("asset_quality_score") is not None
@@ -1186,6 +1188,21 @@ class AssetManager:
                     ),
                     minimum_quality=0.70,
                 )
+                if compatible:
+                    compatible, reason = (
+                        tall_furniture_dimensions_are_compatible(
+                            request_text=request_text,
+                            desired_dimensions=None,
+                            bbox_min=getattr(asset, "bbox_min", None),
+                            bbox_max=getattr(asset, "bbox_max", None),
+                        )
+                    )
+                if compatible:
+                    compatible, reason = catalog_candidate_satisfies_request_details(
+                        request_text=request_text,
+                        candidate_text=catalog_text,
+                        supports_detail_fill=bool(metadata.get("support_zones")),
+                    )
             if compatible:
                 continue
             console_logger.warning(
@@ -2278,6 +2295,7 @@ class AssetManager:
         compatible_dimensions, dimension_reason = (
             self._converted_dimensions_are_compatible(
                 object_type=object_type,
+                request_text=config.description,
                 desired_dimensions=desired_dimensions,
                 bbox_min=bbox_min,
                 bbox_max=bbox_max,
@@ -2299,6 +2317,7 @@ class AssetManager:
     def _converted_dimensions_are_compatible(
         *,
         object_type: ObjectType,
+        request_text: str = "",
         desired_dimensions: list[float] | None,
         bbox_min: np.ndarray,
         bbox_max: np.ndarray,
@@ -2308,6 +2327,7 @@ class AssetManager:
         if object_type != ObjectType.FURNITURE:
             return True, "object is not furniture"
         return tall_furniture_dimensions_are_compatible(
+            request_text=request_text,
             desired_dimensions=desired_dimensions,
             bbox_min=bbox_min,
             bbox_max=bbox_max,

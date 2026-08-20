@@ -228,6 +228,7 @@ def catalog_candidate_is_compatible(
 
 def tall_furniture_dimensions_are_compatible(
     *,
+    request_text: str = "",
     desired_dimensions: Sequence[float] | None,
     bbox_min: Sequence[float] | None,
     bbox_max: Sequence[float] | None,
@@ -236,24 +237,71 @@ def tall_furniture_dimensions_are_compatible(
 ) -> tuple[bool, str]:
     """Reject tall furniture meshes that cannot approach their requested height."""
 
-    if desired_dimensions is None or bbox_min is None or bbox_max is None:
+    if bbox_min is None or bbox_max is None:
         return True, "dimension metadata unavailable"
-    if len(desired_dimensions) < 3 or len(bbox_min) < 3 or len(bbox_max) < 3:
+    if len(bbox_min) < 3 or len(bbox_max) < 3:
+        return True, "dimension metadata incomplete"
+
+    request_tokens = semantic_tokens(request_text)
+    explicit_full_height = {"full", "height"} <= request_tokens
+    produced_height = float(bbox_max[2]) - float(bbox_min[2])
+    if desired_dimensions is None:
+        if explicit_full_height and produced_height + 1e-9 < 1.6:
+            return (
+                False,
+                f"produced height {produced_height:.3f}m is below the 1.600m "
+                "minimum for explicit full-height furniture",
+            )
+        return True, "requested target dimensions unavailable"
+    if len(desired_dimensions) < 3:
         return True, "dimension metadata incomplete"
 
     target_height = float(desired_dimensions[2])
     if target_height < minimum_target_height_m:
         return True, "requested furniture is not tall"
 
-    produced_height = float(bbox_max[2]) - float(bbox_min[2])
-    required_height = minimum_height_ratio * target_height
+    required_ratio = 0.8 if explicit_full_height else minimum_height_ratio
+    required_height = required_ratio * target_height
     if produced_height + 1e-9 < required_height:
         return (
             False,
             f"produced height {produced_height:.3f}m is below "
-            f"{minimum_height_ratio:.0%} of requested height {target_height:.3f}m",
+            f"{required_ratio:.0%} of requested height {target_height:.3f}m",
         )
     return True, "produced height is compatible with requested tall furniture"
+
+
+def catalog_candidate_satisfies_request_details(
+    *,
+    request_text: str,
+    candidate_text: str,
+    supports_detail_fill: bool = False,
+) -> tuple[bool, str]:
+    """Enforce explicit semantic capabilities beyond coarse object family."""
+
+    request_tokens = semantic_tokens(request_text)
+    candidate_tokens = semantic_tokens(candidate_text)
+    wants_visible_books = bool(
+        request_tokens & {"book", "books", "volumes"}
+        and request_tokens & {"dense", "densely", "filled", "populated", "visible"}
+    )
+    if wants_visible_books:
+        has_visible_books = bool(
+            candidate_tokens
+            & {"book", "books", "encyclopedia", "encyclopedias", "volume", "volumes"}
+        )
+        is_fillable_shelving = bool(
+            semantic_families(candidate_text) & {"storage"}
+            and candidate_tokens
+            & {"bookcase", "bookshelf", "shelf", "shelves", "shelving"}
+        )
+        if not has_visible_books and not supports_detail_fill and not is_fillable_shelving:
+            return (
+                False,
+                "request requires visible books but candidate is neither populated, "
+                "fillable shelving, nor exposes support zones for detail fill",
+            )
+    return True, "candidate satisfies explicit request details"
 
 
 def candidate_metadata_text(

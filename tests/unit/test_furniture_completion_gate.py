@@ -158,6 +158,37 @@ def test_library_gate_rejects_renamed_short_book_props_as_bookshelves():
         _validate_room_kit_completion(SimpleNamespace(objects=objects), kit)
 
 
+def test_library_gate_rejects_bare_shelf_that_barely_passes_generic_height():
+    kit = _library_kit()
+    kit.slots[0].query = (
+        "full-height Renaissance library bookcase densely filled with visible books"
+    )
+    kit.slots[0].nominal_dimensions_m = (1.0, 0.35, 2.0)
+    scene = _scene_with_role_counts(
+        reading_table=1,
+        reading_chair=4,
+    )
+    for index in range(2):
+        scene.objects[f"bare_shelf_{index}"] = SimpleNamespace(
+            object_type=ObjectType.FURNITURE,
+            object_id=f"library_bookshelf_{index}",
+            name="library_bookshelf",
+            description="Full-height library bookshelf in dark wood",
+            bbox_min=(-0.414, -0.175, 0.0),
+            bbox_max=(0.414, 0.175, 1.242),
+            metadata={
+                "asset_quality_score": 1.0,
+                "catalog_semantics": (
+                    "Wooden Bookshelf Worn antique bookcase rustic shelves storage "
+                    "polyhaven/Furniture/Storage Furniture/Shelving & Bookcases"
+                ),
+            },
+        )
+
+    with pytest.raises(ModelBehaviorError, match=r"bookshelf.*0.*2"):
+        _validate_room_kit_completion(scene, kit)
+
+
 def test_unmatched_room_allows_intentionally_empty_scene():
     assert _validate_room_kit_completion(_scene_with_furniture(0), None) == 0
 
@@ -305,3 +336,77 @@ def test_library_recovery_prefers_filled_bookcase_over_bare_shelf():
     )
 
     assert ranked.object_id == "renaissance_bookcase_0"
+
+
+def test_library_recovery_prefers_rich_bookcase_over_exact_generic_role():
+    slot = SimpleNamespace(
+        role="bookshelf",
+        aliases=("bookcase",),
+        query=(
+            "full-height Renaissance library bookcase densely filled with visible books"
+        ),
+        nominal_dimensions_m=(1.0, 0.35, 2.0),
+    )
+    exact_generic = SimpleNamespace(
+        object_id="bookshelf_0",
+        name="bookshelf",
+        description="generic storage shelf",
+        bbox_min=(-0.5, -0.175, 0.0),
+        bbox_max=(0.5, 0.175, 1.8),
+        metadata={
+            "asset_quality_score": 1.0,
+            "catalog_semantics": "generic wooden bookshelf furniture storage",
+        },
+    )
+    rich_bookcase = SimpleNamespace(
+        object_id="renaissance_bookcase_0",
+        name="renaissance_bookcase",
+        description=(
+            "full-height Renaissance bookcase densely filled with visible books"
+        ),
+        bbox_min=(-0.5, -0.175, 0.0),
+        bbox_max=(0.5, 0.175, 1.8),
+        metadata={
+            "asset_quality_score": 0.76,
+            "catalog_semantics": (
+                "ornate Renaissance bookcase populated with visible leather books"
+            ),
+        },
+    )
+
+    ranked = max(
+        (exact_generic, rich_bookcase),
+        key=lambda asset: StatefulFurnitureAgent._slot_relevance(asset, slot),
+    )
+
+    assert ranked.object_id == "renaissance_bookcase_0"
+
+
+def test_exact_hssd_bookcase_is_intrinsically_fillable_without_support_zones():
+    slot = SimpleNamespace(
+        role="bookshelf",
+        aliases=("bookcase",),
+        query=(
+            "full-height Renaissance library bookcase densely filled with visible books"
+        ),
+        nominal_dimensions_m=(1.0, 0.35, 2.0),
+    )
+    hssd_bookcase = SimpleNamespace(
+        object_id="tall_renaissance_bookshelf_0",
+        name="tall_renaissance_bookshelf",
+        description=(
+            "Tall ornate Renaissance library bookcase with full-height shelving "
+            "densely packed with books"
+        ),
+        bbox_min=(-0.48, -0.18, 0.0),
+        bbox_max=(0.48, 0.18, 1.8),
+        metadata={
+            "asset_quality_score": 0.76,
+            "catalog_semantics": (
+                "Revolve Lexington Tall Bookcase Walnut "
+                "hssd/wordnet/bookcase.n.01"
+            ),
+        },
+    )
+
+    assert StatefulFurnitureAgent._slot_relevance(hssd_bookcase, slot)[0] > 0

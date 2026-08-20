@@ -7,7 +7,9 @@ import numpy as np
 
 from scenesmith.agent_utils.asset_semantics import (
     catalog_candidate_is_compatible,
+    catalog_candidate_satisfies_request_details,
     is_structural_architecture_request,
+    tall_furniture_dimensions_are_compatible,
 )
 from scenesmith.agent_utils.objaverse_retrieval.data_loader import (
     ObjaverseMeshMetadata,
@@ -92,6 +94,57 @@ def test_accepts_books_and_documents_prop_for_book_request() -> None:
             "Documents/Books"
         ),
         quality_score=1.0,
+    )
+
+    assert compatible
+
+
+def test_full_height_storage_requires_eighty_percent_of_target_height() -> None:
+    compatible, reason = tall_furniture_dimensions_are_compatible(
+        request_text="full-height Renaissance library bookcase",
+        desired_dimensions=(1.0, 0.35, 2.0),
+        bbox_min=(-0.414, -0.175, 0.0),
+        bbox_max=(0.414, 0.175, 1.242),
+    )
+
+    assert not compatible
+    assert "80%" in reason
+
+
+def test_generic_tall_furniture_retains_sixty_percent_threshold() -> None:
+    compatible, _ = tall_furniture_dimensions_are_compatible(
+        request_text="classical marble statue on pedestal",
+        desired_dimensions=(0.7, 0.7, 2.0),
+        bbox_min=(-0.35, -0.35, 0.0),
+        bbox_max=(0.35, 0.35, 1.242),
+    )
+
+    assert compatible
+
+
+def test_dense_visible_book_request_rejects_non_fillable_storage_metadata() -> None:
+    compatible, reason = catalog_candidate_satisfies_request_details(
+        request_text=(
+            "full-height Renaissance library bookcase densely filled with visible books"
+        ),
+        candidate_text=(
+            "Wooden storage cabinet with closed drawers "
+            "polyhaven/Furniture/Storage Furniture/Cabinets"
+        ),
+        supports_detail_fill=False,
+    )
+
+    assert not compatible
+    assert "visible books" in reason
+
+
+def test_dense_visible_book_request_accepts_fillable_catalog_bookcase() -> None:
+    compatible, _ = catalog_candidate_satisfies_request_details(
+        request_text=(
+            "full-height Renaissance library bookcase densely filled with visible books"
+        ),
+        candidate_text="Dawson Tall Bookcase hssd/wordnet/bookcase.n.01",
+        supports_detail_fill=False,
     )
 
     assert compatible

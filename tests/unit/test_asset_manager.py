@@ -125,6 +125,36 @@ def test_unversioned_hssd_cache_entry_is_quarantined():
     assert discarded == ["library_bookcase_0"]
 
 
+def test_short_bare_full_height_shelf_cache_entry_is_quarantined():
+    bare_shelf = SimpleNamespace(
+        object_id="library_bookshelf_0",
+        name="library_bookshelf",
+        description=(
+            "Full-height library bookshelf in dark wood with adjustable shelves"
+        ),
+        bbox_min=np.array([-0.414, -0.175, 0.0]),
+        bbox_max=np.array([0.414, 0.175, 1.242]),
+        metadata={
+            "asset_source": "polyhaven",
+            "asset_quality_score": 1.0,
+            "catalog_semantics": (
+                "Wooden Bookshelf Worn antique bookcase rustic shelves storage "
+                "polyhaven/Furniture/Storage Furniture/Shelving & Bookcases"
+            ),
+        },
+    )
+    discarded = []
+    manager = object.__new__(AssetManager)
+    manager.registry = SimpleNamespace(
+        list_all=lambda: [bare_shelf],
+        discard=discarded.append,
+    )
+
+    manager._quarantine_incompatible_cached_assets()
+
+    assert discarded == ["library_bookshelf_0"]
+
+
 def test_router_hssd_metadata_stamps_current_canonical_conversion():
     assert AssetManager._asset_conversion_metadata("hssd") == {
         "canonical_conversion_version": 3
