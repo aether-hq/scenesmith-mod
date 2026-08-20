@@ -1,7 +1,7 @@
 name: "designer_initial_instruction"
 version: "1.0"
 description: "Instructions for initial furniture design phase"
-template_variables: ["scene_description", "has_reference_image"]
+template_variables: ["scene_description", "has_reference_image", "room_kit_brief"]
 prompt: |
   Create the initial furniture layout for this room using the bounded fast path below.
 
@@ -28,6 +28,9 @@ prompt: |
   The floor-plan stage has already authored all stairs, ramps, platforms,
   mezzanines, railings, balconies, and bridges. Never request or place those as
   furniture, even when they are mentioned in the scene prompt.
+
+  ## SEMANTIC ROOM KIT CONTRACT
+  {{ room_kit_brief }}
 
   {% if has_reference_image %}
   A reference image showing a possible design arrangement has been provided above

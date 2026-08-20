@@ -21,9 +21,8 @@ from scenesmith.agent_utils.reachability import (
     format_reachability_for_critic,
 )
 from scenesmith.agent_utils.room import AgentType, RoomScene
-from scenesmith.agent_utils.scoring import (
-    FurnitureCritiqueWithScores,
-)
+from scenesmith.agent_utils.room_kits import persist_room_kit, select_room_kit
+from scenesmith.agent_utils.scoring import FurnitureCritiqueWithScores
 from scenesmith.agent_utils.workflow_tools import WorkflowTools
 from scenesmith.furniture_agents.base_furniture_agent import BaseFurnitureAgent
 from scenesmith.furniture_agents.tools.furniture_tools import FurnitureTools
@@ -90,6 +89,9 @@ class StatefulFurnitureAgent(BaseStatefulAgent, BaseFurnitureAgent):
 
         # Context image for designer initialization (furniture-specific).
         self.context_image_path: Path | None = None
+        self.room_kit_brief = (
+            "No semantic room kit matched; use the scene requirements."
+        )
 
     def _create_designer_agent(self, tools: list[FunctionTool]) -> Agent:
         """Create designer agent with tools.
@@ -266,6 +268,24 @@ class StatefulFurnitureAgent(BaseStatefulAgent, BaseFurnitureAgent):
         # Store everything as instance variables for closure access.
         self.scene = scene
 
+        room_area_m2 = float(scene.room_geometry.width) * float(
+            scene.room_geometry.length
+        )
+        room_kit = select_room_kit(scene.text_description, room_area_m2=room_area_m2)
+        if room_kit is not None:
+            self.room_kit_brief = room_kit.to_prompt_brief()
+            persist_room_kit(room_kit, scene.scene_dir / "room_kit.json")
+            console_logger.info(
+                "Selected semantic room kit %s with counts %s",
+                room_kit.kit_id,
+                room_kit.slot_counts,
+            )
+        else:
+            self.room_kit_brief = (
+                "No semantic room kit matched; infer a compact functional grouping "
+                "from the scene requirements."
+            )
+
         # Generate context image if configured. If generation fails, continue without it.
         if self.cfg.context_image_generation.enabled:
             try:
@@ -357,6 +377,7 @@ class StatefulFurnitureAgent(BaseStatefulAgent, BaseFurnitureAgent):
         return {
             "scene_description": self.scene.text_description,
             "has_reference_image": self.context_image_path is not None,
+            "room_kit_brief": self.room_kit_brief,
         }
 
     def _get_context_image_path(self) -> Path | None:
