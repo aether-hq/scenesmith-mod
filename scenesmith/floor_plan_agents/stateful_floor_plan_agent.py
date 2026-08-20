@@ -49,6 +49,11 @@ from scenesmith.agent_utils.house import (
 from scenesmith.agent_utils.placement_noise import PlacementNoiseMode
 from scenesmith.agent_utils.rendering import save_directive_as_blend
 from scenesmith.agent_utils.room import AgentType, ObjectType, SceneObject, UniqueID
+from scenesmith.agent_utils.scene_blueprint import (
+    SceneBlueprint,
+    blueprint_from_prompt,
+    persist_scene_blueprint,
+)
 from scenesmith.agent_utils.scoring import (
     FloorPlanCritiqueWithScores,
     format_score_deltas_for_planner,
@@ -58,11 +63,11 @@ from scenesmith.agent_utils.scoring import (
 )
 from scenesmith.agent_utils.workflow_tools import WorkflowTools
 from scenesmith.floor_plan_agents.base_floor_plan_agent import BaseFloorPlanAgent
-from scenesmith.floor_plan_agents.tools.floor_plan_tools import FloorPlanTools
 from scenesmith.floor_plan_agents.tools.floor_plan_submission import (
     normalize_floor_plan_submission,
     synthesize_structural_layout,
 )
+from scenesmith.floor_plan_agents.tools.floor_plan_tools import FloorPlanTools
 from scenesmith.floor_plan_agents.tools.geometry_cache import (
     GeometryCache,
     floor_cache_key,
@@ -148,6 +153,7 @@ class StatefulFloorPlanAgent(BaseStatefulAgent, BaseFloorPlanAgent):
         # Prompt and layout state.
         self.house_prompt: str = ""
         self.layout: HouseLayout = HouseLayout()
+        self.blueprint: SceneBlueprint | None = None
 
         # Create persistent agent sessions.
         self.designer_session, self.critic_session = self._create_sessions()
@@ -736,7 +742,24 @@ class StatefulFloorPlanAgent(BaseStatefulAgent, BaseFloorPlanAgent):
         # Set house_dir early so materials resolver can use it.
         house_dir = output_dir.parent if output_dir else self.logger.output_dir
         self.layout = HouseLayout(house_dir=house_dir, house_prompt=prompt)
-        self.house_prompt = prompt
+        self.blueprint = blueprint_from_prompt(
+            prompt,
+            mode=self.mode,
+            default_dimensions_m=(
+                min(7.0, float(self.cfg.max_floor_plan_dim_m)),
+                min(7.0, float(self.cfg.max_floor_plan_dim_m)),
+            ),
+        )
+        persist_scene_blueprint(
+            self.blueprint, self.logger.output_dir / "scene_blueprint.json"
+        )
+        self.house_prompt = self.blueprint.to_prompt_brief()
+        console_logger.info(
+            "Compiled SceneBlueprint %s with %d spaces and %d connectors",
+            self.blueprint.blueprint_id,
+            len(self.blueprint.spaces),
+            len(self.blueprint.connectors),
+        )
 
         # Initialize geometry cache for reusing unchanged room geometry.
         cache_dir = house_dir / ".geometry_cache"
