@@ -237,6 +237,102 @@ def test_library_kit_recovers_required_minimums_from_cached_assets():
     assert {call["z"] for call in placements} == {0.0, 4.0, 8.0}
 
 
+_EXACT_MULTILEVEL_LIBRARY_PROMPT = (
+    "a large, multi-level library with thousands of books and a bunch of "
+    "tables and chairs for patrons"
+)
+
+
+def _full_height_bookshelf(index: int, elevation: float):
+    return SimpleNamespace(
+        object_id=f"renaissance_bookshelf_{index}",
+        object_type=ObjectType.FURNITURE,
+        name="renaissance_bookshelf",
+        description="full-height Renaissance library bookcase",
+        bbox_min=(-0.48, -0.18, 0.0),
+        bbox_max=(0.48, 0.18, 2.0),
+        metadata={
+            "asset_quality_score": 0.76,
+            "catalog_semantics": (
+                "Reproduction Bookcase hssd/wordnet/bookcase.n.01"
+            ),
+        },
+        transform=SimpleNamespace(translation=lambda: (0.0, 0.0, elevation)),
+    )
+
+
+def _dense_multilevel_bookshelf_kit():
+    return SimpleNamespace(
+        kit_id="library-reading-hall-v1",
+        slots=(
+            SimpleNamespace(
+                role="bookshelf",
+                aliases=("bookcase",),
+                query=(
+                    "full-height Renaissance library bookcase densely filled "
+                    "with visible books"
+                ),
+                nominal_dimensions_m=(1.0, 0.35, 2.0),
+                required=True,
+                minimum_count=15,
+                placement_class="wall",
+            ),
+        ),
+    )
+
+
+def test_large_multilevel_library_gate_rejects_ground_only_bookshelves():
+    scene = SimpleNamespace(
+        text_description=_EXACT_MULTILEVEL_LIBRARY_PROMPT,
+        objects={
+            shelf.object_id: shelf
+            for shelf in (_full_height_bookshelf(index, 0.0) for index in range(16))
+        },
+    )
+
+    with pytest.raises(ModelBehaviorError, match=r"bookshelf.*4\.000m.*0.*3"):
+        _validate_room_kit_completion(
+            scene,
+            _dense_multilevel_bookshelf_kit(),
+            support_elevations=(0.0, 4.0, 8.0),
+        )
+
+
+def test_large_multilevel_library_recovery_fills_bookshelves_on_every_story():
+    shelves = [_full_height_bookshelf(index, 0.0) for index in range(16)]
+    placements = []
+
+    class FakeTools:
+        def set_noise_profile(self, _mode):
+            pass
+
+        def _major_support_elevations(self):
+            return (0.0, 4.0, 8.0)
+
+        def _add_furniture_to_scene_impl(self, **kwargs):
+            placements.append(kwargs)
+            return json.dumps({"success": True})
+
+    agent = object.__new__(StatefulFurnitureAgent)
+    agent.scene = SimpleNamespace(
+        text_description=_EXACT_MULTILEVEL_LIBRARY_PROMPT,
+        objects={shelf.object_id: shelf for shelf in shelves},
+        room_geometry=SimpleNamespace(length=13.8, width=13.8),
+    )
+    agent.asset_manager = SimpleNamespace(list_available_assets=lambda: [shelves[0]])
+    agent.furniture_tools = FakeTools()
+
+    assert (
+        agent._place_room_kit_minimums_deterministically(
+            _dense_multilevel_bookshelf_kit()
+        )
+        == 6
+    )
+    assert [call["z"] for call in placements].count(4.0) == 3
+    assert [call["z"] for call in placements].count(8.0) == 3
+    assert not any(call["z"] == 0.0 for call in placements)
+
+
 def test_library_recovery_prefers_stable_armchair_over_role_exact_rocker():
     assets = [
         SimpleNamespace(

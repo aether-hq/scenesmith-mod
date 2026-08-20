@@ -106,8 +106,63 @@ def _object_matches_room_kit_slot(obj: Any, slot: Any) -> bool:
     return compatible_dimensions
 
 
+def _required_room_kit_level_coverage(
+    scene_text: str,
+    room_kit: RoomKitSelection,
+    support_elevations: tuple[float, ...],
+) -> dict[str, int]:
+    """Return per-story role minimums for explicit dense multilevel libraries."""
+
+    normalized = str(scene_text).casefold().replace("_", " ")
+    explicit_multilevel = bool(
+        re.search(
+            r"\bmulti[ -]?level\b|\bmultiple (?:levels|floors|stories)\b",
+            normalized,
+        )
+    )
+    dense_library = (
+        str(getattr(room_kit, "kit_id", "")) == "library-reading-hall-v1"
+        and bool(re.search(r"\blarge\b", normalized))
+        and bool(re.search(r"\bthousands?\b", normalized))
+    )
+    if not dense_library or not explicit_multilevel or len(support_elevations) < 2:
+        return {}
+    return {"bookshelf": 3}
+
+
+def _room_kit_role_level_counts(
+    objects: Any,
+    slot: Any,
+    support_elevations: tuple[float, ...],
+) -> dict[float, int]:
+    """Count suitable role instances at their nearest authored support level."""
+
+    counts = {elevation: 0 for elevation in support_elevations}
+    if not counts:
+        return counts
+    for obj in objects:
+        if (
+            getattr(obj, "object_type", None) != ObjectType.FURNITURE
+            or not _object_matches_room_kit_slot(obj, slot)
+        ):
+            continue
+        try:
+            object_elevation = float(obj.transform.translation()[2])
+        except (AttributeError, IndexError, TypeError, ValueError):
+            continue
+        nearest = min(
+            support_elevations,
+            key=lambda elevation: abs(elevation - object_elevation),
+        )
+        counts[nearest] += 1
+    return counts
+
+
 def _validate_room_kit_completion(
-    scene: RoomScene, room_kit: RoomKitSelection | None
+    scene: RoomScene,
+    room_kit: RoomKitSelection | None,
+    *,
+    support_elevations: tuple[float, ...] = (),
 ) -> int:
     """Reject a matched semantic room kit that did not place required furniture."""
 
@@ -150,6 +205,36 @@ def _validate_room_kit_completion(
         raise ModelBehaviorError(
             f"Semantic room kit {room_kit.kit_id} has required role deficits: "
             f"{details}. The furniture stage cannot publish this checkpoint."
+        )
+
+    level_requirements = _required_room_kit_level_coverage(
+        str(getattr(scene, "text_description", "")),
+        room_kit,
+        support_elevations,
+    )
+    level_deficits: list[tuple[str, float, int, int]] = []
+    for slot in room_kit.slots:
+        required_per_level = level_requirements.get(slot.role)
+        if required_per_level is None:
+            continue
+        counts = _room_kit_role_level_counts(
+            furniture,
+            slot,
+            support_elevations,
+        )
+        level_deficits.extend(
+            (slot.role, elevation, counts[elevation], required_per_level)
+            for elevation in support_elevations
+            if counts[elevation] < required_per_level
+        )
+    if level_deficits:
+        details = "; ".join(
+            f"{role} at {elevation:.3f}m placed {placed}, required {required}"
+            for role, elevation, placed, required in level_deficits
+        )
+        raise ModelBehaviorError(
+            f"Semantic room kit {room_kit.kit_id} has required level coverage "
+            f"deficits: {details}. The furniture stage cannot publish this checkpoint."
         )
     console_logger.info(
         "Semantic room kit %s completion gate passed: %d furniture objects "
@@ -506,6 +591,11 @@ class StatefulFurnitureAgent(BaseStatefulAgent, BaseFurnitureAgent):
 
         self.furniture_tools.set_noise_profile(PlacementNoiseMode.PERFECT)
         support_elevations = self.furniture_tools._major_support_elevations()
+        level_requirements = _required_room_kit_level_coverage(
+            str(getattr(self.scene, "text_description", "")),
+            room_kit,
+            support_elevations,
+        )
         attempted_positions: set[tuple[float, float, float]] = set()
         level_counts = {elevation: 0 for elevation in support_elevations}
         for scene_object in self.scene.objects.values():
@@ -530,7 +620,21 @@ class StatefulFurnitureAgent(BaseStatefulAgent, BaseFurnitureAgent):
                 and _object_matches_room_kit_slot(obj, slot)
                 for obj in self.scene.objects.values()
             )
-            missing = max(0, int(slot.minimum_count) - existing)
+            aggregate_missing = max(0, int(slot.minimum_count) - existing)
+            level_targets: list[float] = []
+            required_per_level = level_requirements.get(slot.role)
+            if required_per_level is not None:
+                role_level_counts = _room_kit_role_level_counts(
+                    self.scene.objects.values(),
+                    slot,
+                    support_elevations,
+                )
+                for elevation in support_elevations:
+                    level_targets.extend(
+                        [elevation]
+                        * max(0, required_per_level - role_level_counts[elevation])
+                    )
+            missing = max(aggregate_missing, len(level_targets))
             if missing == 0:
                 continue
 
@@ -550,12 +654,24 @@ class StatefulFurnitureAgent(BaseStatefulAgent, BaseFurnitureAgent):
                 wall=getattr(slot, "placement_class", "floor") == "wall"
             )
 
-            for _ in range(missing):
+            for recovery_index in range(missing):
                 success = False
-                for elevation in sorted(
-                    support_elevations,
-                    key=lambda value: (level_counts[value], value),
-                ):
+                target_elevation = (
+                    level_targets[recovery_index]
+                    if recovery_index < len(level_targets)
+                    else None
+                )
+                candidate_elevations = (
+                    (target_elevation,)
+                    if target_elevation is not None
+                    else tuple(
+                        sorted(
+                            support_elevations,
+                            key=lambda value: (level_counts[value], value),
+                        )
+                    )
+                )
+                for elevation in candidate_elevations:
                     for x, y, yaw in positions:
                         position_key = (
                             round(x, 4),
@@ -692,7 +808,11 @@ class StatefulFurnitureAgent(BaseStatefulAgent, BaseFurnitureAgent):
 
         # Validate final scene and save scores.
         await self._finalize_scene_and_scores()
-        _validate_room_kit_completion(self.scene, room_kit)
+        _validate_room_kit_completion(
+            self.scene,
+            room_kit,
+            support_elevations=self.furniture_tools._major_support_elevations(),
+        )
 
     def _get_final_scores_directory(self) -> Path:
         """Get the directory path for saving final furniture placement state.
