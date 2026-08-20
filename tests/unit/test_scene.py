@@ -313,6 +313,30 @@ class TestScene(unittest.TestCase):
         self.assertIn("file: package://scene/simple_room_geometry.sdf", directive)
         self.assertIn("file: package://scene/simple_box.sdf", directive)
 
+    def test_to_drake_directive_includes_persisted_platform_geometry(self):
+        """Support sidecars include their adjacent collision SDF in physics."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            scene_dir = Path(tmp_dir)
+            platform_sidecar = scene_dir / "upper_floor.surfaces.json"
+            platform_sdf = scene_dir / "upper_floor.sdf"
+            platform_sidecar.write_text("{}", encoding="utf-8")
+            platform_sdf.write_text("<sdf version='1.7'/>", encoding="utf-8")
+            room_geometry = RoomGeometry(
+                sdf_tree=ET.parse(self.floor_plan_path),
+                sdf_path=self.floor_plan_path,
+                additional_structural_surface_paths=[platform_sidecar],
+            )
+            scene = RoomScene(room_geometry=room_geometry, scene_dir=scene_dir)
+
+            directive = scene.to_drake_directive()
+
+            self.assertIn(f"file: file://{platform_sdf}", directive)
+            self.assertIn("name: room_geometry_additional_support_0", directive)
+            self.assertIn(
+                "child: room_geometry_additional_support_0::structure_link",
+                directive,
+            )
+
     def test_to_drake_directive_with_parent_frame(self):
         """Test that welded furniture uses parent_frame instead of world."""
         furniture_obj = SceneObject(

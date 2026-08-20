@@ -467,6 +467,67 @@ class TestApplyNonPenetrationProjection(PhysicalFeasibilityTestCase):
 class TestApplyForwardSimulation(PhysicalFeasibilityTestCase):
     """Tests for apply_forward_simulation function."""
 
+    def test_persisted_upper_platform_supports_furniture(self) -> None:
+        """Furniture remains on collision geometry paired with support metadata."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            scene_dir = Path(tmp_dir)
+            platform_sidecar = scene_dir / "upper_floor.surfaces.json"
+            platform_sdf = scene_dir / "upper_floor.sdf"
+            platform_sidecar.write_text("{}", encoding="utf-8")
+            platform_sdf.write_text(
+                """<sdf version="1.7">
+  <model name="upper_floor">
+    <link name="structure_link">
+      <visual name="visual">
+        <pose>0 0 1 0 0 0</pose>
+        <geometry><box><size>4 4 0.2</size></box></geometry>
+      </visual>
+      <collision name="collision">
+        <pose>0 0 1 0 0 0</pose>
+        <geometry><box><size>4 4 0.2</size></box></geometry>
+      </collision>
+    </link>
+  </model>
+</sdf>
+""",
+                encoding="utf-8",
+            )
+            room_geometry = RoomGeometry(
+                sdf_tree=ET.parse(TEST_DATA_DIR / "simple_room_geometry.sdf"),
+                sdf_path=TEST_DATA_DIR / "simple_room_geometry.sdf",
+                additional_structural_surface_paths=[platform_sidecar],
+            )
+            scene = RoomScene(
+                room_geometry=room_geometry,
+                scene_dir=scene_dir,
+                text_description="Upper platform support test",
+            )
+            scene.add_object(
+                SceneObject(
+                    object_id=UniqueID("upper_box"),
+                    object_type=ObjectType.FURNITURE,
+                    name="upper box",
+                    description="Box on upper floor",
+                    transform=RigidTransform(p=[0.0, 0.0, 1.35]),
+                    sdf_path=TEST_DATA_DIR / "simple_box.sdf",
+                )
+            )
+
+            simulated_scene, removed_ids = apply_forward_simulation(
+                scene=scene,
+                simulation_time_s=0.5,
+                time_step_s=0.01,
+                timeout_s=10.0,
+                weld_furniture=False,
+            )
+
+            self.assertEqual(removed_ids, [])
+            upper_box = simulated_scene.get_object(UniqueID("upper_box"))
+            self.assertIsNotNone(upper_box)
+            self.assertAlmostEqual(
+                float(upper_box.transform.translation()[2]), 1.35, delta=0.03
+            )
+
     def test_simulation_runs_without_error(self) -> None:
         """Test that simulation runs without errors."""
         with tempfile.TemporaryDirectory() as tmp_dir:

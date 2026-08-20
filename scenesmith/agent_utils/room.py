@@ -920,6 +920,7 @@ class RoomScene:
         weld_furniture: bool = True,
         free_objects: list[UniqueID] | None = None,
         exclude_room_geometry: bool = False,
+        include_additional_structural_geometry: bool = True,
         weld_stack_members: bool = True,
         weld_room_geometry: bool = True,
         room_geometry_name: str = "room_geometry",
@@ -945,6 +946,9 @@ class RoomScene:
             exclude_room_geometry: If True, completely exclude the room geometry
                 from the directive. Useful for focused rendering (e.g., manipuland
                 agent viewing only furniture + manipulands).
+            include_additional_structural_geometry: Include collision SDFs adjacent
+                to persisted structural-surface sidecars. HouseScene disables this
+                because HouseLayout emits the same platform models globally.
             weld_stack_members: If True (default), weld upper stack members to
                 the bottom member, treating stacks as rigid units. If False, all
                 stack members are free bodies (legacy behavior).
@@ -1019,6 +1023,35 @@ class RoomScene:
 - add_weld:
     parent: {parent_frame}
     child: {room_geometry_name}::room_geometry_body_link"""
+
+            if include_additional_structural_geometry:
+                for index, surface_path in enumerate(
+                    self.room_geometry.additional_structural_surface_paths
+                ):
+                    suffix = ".surfaces.json"
+                    if not surface_path.name.endswith(suffix):
+                        console_logger.warning(
+                            "Cannot resolve structural collision geometry from %s",
+                            surface_path,
+                        )
+                        continue
+                    structure_name = surface_path.name[: -len(suffix)]
+                    sdf_path = surface_path.with_name(f"{structure_name}.sdf")
+                    if not sdf_path.is_file():
+                        console_logger.warning(
+                            "Structural collision geometry is missing for %s: %s",
+                            surface_path,
+                            sdf_path,
+                        )
+                        continue
+                    model_name = f"{room_geometry_name}_additional_support_{index}"
+                    directive += f"""
+- add_model:
+    name: {model_name}
+    file: {format_sdf_path(sdf_path)}
+- add_weld:
+    parent: {parent_frame}
+    child: {model_name}::structure_link"""
 
         # Filter objects by ID and/or type.
         objects_to_add = list(self.objects.values())

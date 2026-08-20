@@ -3098,6 +3098,7 @@ class HouseScene:
                 weld_furniture=weld_furniture,
                 weld_stack_members=weld_composite_members,
                 parent_frame=room_frame_name,
+                include_additional_structural_geometry=False,
             )
 
             # Strip the "directives:" header.
