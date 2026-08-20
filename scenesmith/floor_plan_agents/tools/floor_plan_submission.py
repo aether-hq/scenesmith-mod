@@ -704,11 +704,52 @@ def synthesize_structural_layout(
         [max_x, min_y],
     ]
     hole = [platform_xy(point_xy) for point_xy in hole_house]
+    platform_holes = [hole]
+    folded_prompt = prompt.casefold()
+    gallery_library = "library" in folded_prompt and any(
+        token in folded_prompt
+        for token in (
+            "multi-level",
+            "multilevel",
+            "mezzanine",
+            "two-story",
+            "two storey",
+            "three-story",
+            "three storey",
+        )
+    ) and any(
+        token in folded_prompt
+        for token in ("large", "grand", "vast", "thousands of books")
+    )
+    if gallery_library:
+        minimum_extent = min(width, depth)
+        gallery_gap = max(0.4, minimum_extent * 0.04)
+        perimeter_width = max(1.5, minimum_extent * 0.14)
+        gallery_min_x = max(width * 0.36, max_x + gallery_gap)
+        gallery_min_y = max(depth * 0.36, max_y + gallery_gap)
+        gallery_max_x = width - inset - perimeter_width
+        gallery_max_y = depth - inset - perimeter_width
+        if (
+            gallery_max_x - gallery_min_x >= 5.0
+            and gallery_max_y - gallery_min_y >= 5.0
+        ):
+            gallery_hole_house = [
+                [gallery_min_x, gallery_min_y],
+                [gallery_min_x, gallery_max_y],
+                [gallery_max_x, gallery_max_y],
+                [gallery_max_x, gallery_min_y],
+            ]
+            platform_holes.append(
+                [platform_xy(point_xy) for point_xy in gallery_hole_house]
+            )
+            diagnostics.append(
+                "Added a large gallery atrium void to each upper library level."
+            )
     platforms = [
         {
             "id": f"level_{index}_walkable_slab",
             "space_id": room_id,
-            "footprint": {"outer": outer, "holes": [hole]},
+            "footprint": {"outer": outer, "holes": platform_holes},
             "elevation": index * height,
             "thickness": 0.2,
             "traversable": True,

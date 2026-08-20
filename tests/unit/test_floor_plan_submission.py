@@ -279,6 +279,40 @@ def test_multilevel_synthesis_fits_story_heights_and_emits_walkable_slabs():
     assert "Reduced each storey" in structural["_diagnostics"][0]
 
 
+def test_large_multilevel_library_synthesizes_gallery_atrium():
+    structural = synthesize_structural_layout(
+        PROMPT,
+        [{"type": "library", "width": 13.8, "depth": 13.8, "prompt": PROMPT}],
+        4.0,
+        max_total_height=12.0,
+    )
+
+    assert structural is not None
+    slabs = [
+        platform
+        for platform in structural["platforms"]
+        if platform["id"].endswith("walkable_slab")
+    ]
+    assert slabs
+    for slab in slabs:
+        holes = slab["footprint"]["holes"]
+        assert len(holes) >= 2
+        gallery_hole = max(
+            holes,
+            key=lambda hole: (
+                max(point[0] for point in hole) - min(point[0] for point in hole)
+            )
+            * (max(point[1] for point in hole) - min(point[1] for point in hole)),
+        )
+        assert max(point[0] for point in gallery_hole) - min(
+            point[0] for point in gallery_hole
+        ) >= 5.0
+        assert max(point[1] for point in gallery_hole) - min(
+            point[1] for point in gallery_hole
+        ) >= 5.0
+        assert compile_platform(PlatformSpec.from_dict(slab)).visual_mesh.vertices
+
+
 def test_multilevel_synthesis_supports_each_structural_stair_family():
     cases = {
         "with a spiral staircase": "stairs_spiral",
