@@ -41,6 +41,32 @@ from scenesmith.utils.logging import BaseLogger
 console_logger = logging.getLogger(__name__)
 
 
+def _object_matches_room_kit_slot(obj: Any, slot: Any) -> bool:
+    """Whether one furniture object satisfies a semantic room-kit role."""
+
+    object_tokens = set(
+        re.findall(
+            r"[a-z0-9]+",
+            " ".join(
+                (
+                    str(getattr(obj, "name", "")),
+                    str(getattr(obj, "description", "")),
+                    str(getattr(obj, "object_id", "")),
+                )
+            )
+            .casefold()
+            .replace("_", " "),
+        )
+    )
+    for role_name in (slot.role, *getattr(slot, "aliases", ())):
+        role_tokens = set(
+            re.findall(r"[a-z0-9]+", str(role_name).casefold().replace("_", " "))
+        )
+        if role_tokens and role_tokens <= object_tokens:
+            return True
+    return False
+
+
 def _validate_room_kit_completion(
     scene: RoomScene, room_kit: RoomKitSelection | None
 ) -> int:
@@ -61,12 +87,38 @@ def _validate_room_kit_completion(
             f"furniture objects; required minimum is {required_minimum}. "
             "The furniture stage cannot publish this checkpoint."
         )
+
+    furniture = [
+        obj
+        for obj in scene.objects.values()
+        if obj.object_type == ObjectType.FURNITURE
+    ]
+    role_counts = {
+        slot.role: sum(_object_matches_room_kit_slot(obj, slot) for obj in furniture)
+        for slot in room_kit.slots
+        if slot.required
+    }
+    deficits = [
+        (slot.role, role_counts[slot.role], int(slot.minimum_count))
+        for slot in room_kit.slots
+        if slot.required and role_counts[slot.role] < int(slot.minimum_count)
+    ]
+    if deficits:
+        details = "; ".join(
+            f"{role} placed {placed}, required {required}"
+            for role, placed, required in deficits
+        )
+        raise ModelBehaviorError(
+            f"Semantic room kit {room_kit.kit_id} has required role deficits: "
+            f"{details}. The furniture stage cannot publish this checkpoint."
+        )
     console_logger.info(
         "Semantic room kit %s completion gate passed: %d furniture objects "
-        "(minimum %d)",
+        "(minimum %d; roles %s)",
         room_kit.kit_id,
         furniture_count,
         required_minimum,
+        role_counts,
     )
     return furniture_count
 

@@ -66,6 +66,22 @@ def _scene_with_furniture(count: int):
     return SimpleNamespace(objects=objects)
 
 
+def _scene_with_role_counts(**role_counts: int):
+    objects = {"wall": SimpleNamespace(object_type=ObjectType.WALL)}
+    for role, count in role_counts.items():
+        objects.update(
+            {
+                f"{role}_{index}": SimpleNamespace(
+                    object_type=ObjectType.FURNITURE,
+                    name=role,
+                    description=role.replace("_", " "),
+                )
+                for index in range(count)
+            }
+        )
+    return SimpleNamespace(objects=objects)
+
+
 def test_matched_library_kit_rejects_zero_furniture():
     with pytest.raises(
         ModelBehaviorError,
@@ -75,7 +91,28 @@ def test_matched_library_kit_rejects_zero_furniture():
 
 
 def test_matched_library_kit_accepts_required_minimum():
-    assert _validate_room_kit_completion(_scene_with_furniture(7), _library_kit()) == 7
+    scene = _scene_with_role_counts(
+        bookshelf=2,
+        reading_table=1,
+        reading_chair=4,
+    )
+
+    assert _validate_room_kit_completion(scene, _library_kit()) == 7
+
+
+def test_matched_library_kit_rejects_role_deficit_despite_large_total():
+    room_kit = _library_kit()
+    room_kit.slots[2].minimum_count = 12
+    scene = _scene_with_role_counts(
+        bookshelf=27,
+        classical_statue=3,
+        reading_table=7,
+        reading_chair=8,
+        task_lamp=1,
+    )
+
+    with pytest.raises(ModelBehaviorError, match=r"reading_chair.*8.*12"):
+        _validate_room_kit_completion(scene, room_kit)
 
 
 def test_unmatched_room_allows_intentionally_empty_scene():
