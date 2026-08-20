@@ -162,6 +162,88 @@ def test_router_hssd_metadata_stamps_current_canonical_conversion():
     assert AssetManager._asset_conversion_metadata("objaverse") == {}
 
 
+def _conversion_boundary_manager(tmp_path: Path) -> AssetManager:
+    manager = object.__new__(AssetManager)
+    manager.collision_client = MagicMock()
+    manager.blender_server = MagicMock()
+    manager.cfg = SimpleNamespace(
+        asset_manager=SimpleNamespace(floater_distance_threshold=0.05)
+    )
+    manager.debug_dir = tmp_path / "debug"
+    manager.vlm_service = MagicMock()
+    manager.side_view_elevation_degrees = 15.0
+    manager.num_side_views_for_physics_analysis = 4
+    return manager
+
+
+def test_catalog_conversion_skips_generated_mesh_floater_cleanup(tmp_path):
+    """Authored non-watertight catalog furniture must retain all components."""
+    manager = _conversion_boundary_manager(tmp_path)
+    config = AssetPathConfig(
+        description="Full-height Renaissance library bookcase",
+        short_name="bookcase",
+        image_path=tmp_path / "bookcase.png",
+        geometry_path=tmp_path / "bookcase.glb",
+        sdf_dir=tmp_path / "sdf",
+    )
+
+    with (
+        patch("scenesmith.agent_utils.asset_manager.remove_mesh_floaters") as remove,
+        patch.object(
+            manager,
+            "_deterministic_catalog_physics",
+            side_effect=RuntimeError("stop after cleanup boundary"),
+        ),
+    ):
+        try:
+            manager._convert_mesh_to_simulation_asset(
+                config.geometry_path,
+                config,
+                ObjectType.FURNITURE,
+                desired_dimensions=[1.0, 0.35, 2.0],
+                asset_source="hssd",
+            )
+        except RuntimeError as error:
+            assert str(error) == "stop after cleanup boundary"
+        else:
+            raise AssertionError("conversion did not reach catalog physics boundary")
+
+    remove.assert_not_called()
+
+
+def test_generated_conversion_keeps_mesh_floater_cleanup(tmp_path):
+    manager = _conversion_boundary_manager(tmp_path)
+    config = AssetPathConfig(
+        description="Generated chair",
+        short_name="chair",
+        image_path=tmp_path / "chair.png",
+        geometry_path=tmp_path / "chair.glb",
+        sdf_dir=tmp_path / "sdf",
+    )
+
+    with (
+        patch("scenesmith.agent_utils.asset_manager.remove_mesh_floaters") as remove,
+        patch(
+            "scenesmith.agent_utils.asset_manager."
+            "analyze_mesh_orientation_and_material",
+            side_effect=RuntimeError("stop after cleanup boundary"),
+        ),
+    ):
+        try:
+            manager._convert_mesh_to_simulation_asset(
+                config.geometry_path,
+                config,
+                ObjectType.FURNITURE,
+                asset_source="generated",
+            )
+        except RuntimeError as error:
+            assert str(error) == "stop after cleanup boundary"
+        else:
+            raise AssertionError("conversion did not reach generated analysis boundary")
+
+    remove.assert_called_once()
+
+
 def create_mock_cfg():
     """Create mock configuration for AssetManager tests.
 

@@ -2098,7 +2098,8 @@ class AssetManager:
 
         Pipeline:
         - Convert GLB → Y-up GLTF (enables VLM analysis in Blender's Z-up space)
-        - Remove mesh floaters (disconnected components below volume threshold)
+        - Remove mesh floaters from generated geometry (trusted catalog geometry
+          may contain valid authored non-watertight components)
         - VLM analysis → orientation + material + mass (in Blender coords)
         - Canonicalize in Blender → rotate to canonical orientation + placement
           (Y-up GLTF input → Z-up GLTF output for Drake)
@@ -2144,13 +2145,21 @@ class AssetManager:
             export_yup=True,
         )
 
-        # Remove floaters from mesh before VLM analysis.
-        console_logger.info("Removing disconnected mesh floaters")
-        remove_mesh_floaters(
-            mesh_path=gltf_path,
-            output_path=gltf_path,
-            distance_threshold=self.cfg.asset_manager.floater_distance_threshold,
-        )
+        # Generated geometry can contain disconnected junk. Authored catalog meshes
+        # commonly contain valid non-watertight components (shelves, doors, trim);
+        # trimesh's watertight-only split would silently drop those components.
+        if asset_source == "generated":
+            console_logger.info("Removing disconnected mesh floaters")
+            remove_mesh_floaters(
+                mesh_path=gltf_path,
+                output_path=gltf_path,
+                distance_threshold=self.cfg.asset_manager.floater_distance_threshold,
+            )
+        else:
+            console_logger.info(
+                "Preserving authored catalog mesh components (source=%s)",
+                asset_source,
+            )
 
         # VLM analysis for orientation, material, mass.
         # Create debug directory for saving multi-view physics analysis images.
