@@ -37,18 +37,38 @@ def test_hssd_gltf_axes_are_converted_to_blender_import_frame():
     assert AssetManager._gltf_axis_to_blender("-Z") == "+Y"
 
 
-def test_hssd_canonical_dimensions_and_bounds_stay_in_scene_axes():
+def test_hssd_without_authored_axes_keeps_blender_defaults():
+    assert AssetManager._canonical_axes_for_blender(
+        is_hssd=True,
+        analyzed_up="+Z",
+        analyzed_front="+Y",
+        authored_up=None,
+        authored_front=None,
+    ) == ("+Z", "+Y")
+
+
+def test_hssd_explicit_source_axes_are_converted_to_blender_frame():
+    assert AssetManager._canonical_axes_for_blender(
+        is_hssd=True,
+        analyzed_up="+Z",
+        analyzed_front="+Y",
+        authored_up="+Z",
+        authored_front="+Y",
+    ) == ("-Y", "+Z")
+
+
+def test_hssd_canonical_dimensions_and_bounds_use_exported_y_up_frame():
     desired = [1.0, 0.35, 2.0]
-    bounds = np.array([[0.0, 0.0, 0.0], [0.9779, 0.3568, 2.0574]])
+    bounds = np.array([[0.0, 0.0, -0.175], [0.9, 1.7, 0.175]])
 
     assert AssetManager._canonical_mesh_target_dimensions(
         desired, is_hssd=True
-    ) == desired
+    ) == [1.0, 2.0, 0.35]
     bbox_min, bbox_max = AssetManager._canonical_bounds_to_drake(
         bounds, is_hssd=True
     )
-    np.testing.assert_allclose(bbox_min, bounds[0])
-    np.testing.assert_allclose(bbox_max, bounds[1])
+    np.testing.assert_allclose(bbox_min, [0.0, -0.175, 0.0])
+    np.testing.assert_allclose(bbox_max, [0.9, 0.175, 1.7])
 
 
 def test_non_hssd_canonical_dimensions_keep_y_up_conversion():
@@ -107,7 +127,7 @@ def test_unversioned_hssd_cache_entry_is_quarantined():
 
 def test_router_hssd_metadata_stamps_current_canonical_conversion():
     assert AssetManager._asset_conversion_metadata("hssd") == {
-        "canonical_conversion_version": 2
+        "canonical_conversion_version": 3
     }
     assert AssetManager._asset_conversion_metadata("objaverse") == {}
 

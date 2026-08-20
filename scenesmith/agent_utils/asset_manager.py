@@ -86,7 +86,7 @@ if TYPE_CHECKING:
 
 console_logger = logging.getLogger(__name__)
 
-HSSD_CANONICAL_CONVERSION_VERSION = 2
+HSSD_CANONICAL_CONVERSION_VERSION = 3
 
 
 def _subscription_aware_worker_count(
@@ -2189,11 +2189,14 @@ class AssetManager:
         # canonicalizer receives axes after Blender has imported that Y-up file.
         # Convert those authored axes exactly once. Other catalog sources use
         # Blender-frame deterministic defaults and must not be remapped here.
-        canonical_up_axis = physics_analysis.up_axis
-        canonical_front_axis = physics_analysis.front_axis
-        if is_hssd:
-            canonical_up_axis = self._gltf_axis_to_blender(canonical_up_axis)
-            canonical_front_axis = self._gltf_axis_to_blender(canonical_front_axis)
+        canonical_up_axis, canonical_front_axis = self._canonical_axes_for_blender(
+            is_hssd=is_hssd,
+            analyzed_up=physics_analysis.up_axis,
+            analyzed_front=physics_analysis.front_axis,
+            authored_up=canonical_up,
+            authored_front=canonical_front,
+        )
+        if is_hssd and (canonical_up is not None or canonical_front is not None):
             console_logger.info(
                 "Converted HSSD source axes to Blender frame: up=%s, front=%s",
                 canonical_up_axis,
@@ -2220,8 +2223,8 @@ class AssetManager:
         final_gltf_path = canonical_path
         initial_scale = 1.0
         if desired_dimensions is not None:
-            # HSSD canonicalization emits scene/Z-up coordinates, while the
-            # other catalog paths retain the historical Y-up glTF convention.
+            # Canonicalization exports every source through the same Y-up glTF
+            # contract; express scene [width, depth, height] in that frame.
             mesh_target_dimensions = self._canonical_mesh_target_dimensions(
                 desired_dimensions,
                 is_hssd=is_hssd,
@@ -2323,6 +2326,29 @@ class AssetManager:
         }
         return mapping.get(axis.upper(), axis.upper())
 
+    @classmethod
+    def _canonical_axes_for_blender(
+        cls,
+        *,
+        is_hssd: bool,
+        analyzed_up: str,
+        analyzed_front: str,
+        authored_up: str | None,
+        authored_front: str | None,
+    ) -> tuple[str, str]:
+        """Resolve catalog axes without remapping inferred Blender defaults."""
+
+        if not is_hssd:
+            return analyzed_up, analyzed_front
+        return (
+            cls._gltf_axis_to_blender(analyzed_up)
+            if authored_up is not None
+            else analyzed_up,
+            cls._gltf_axis_to_blender(analyzed_front)
+            if authored_front is not None
+            else analyzed_front,
+        )
+
     @staticmethod
     def _canonical_mesh_target_dimensions(
         desired_dimensions: list[float],
@@ -2330,8 +2356,6 @@ class AssetManager:
         is_hssd: bool,
     ) -> list[float]:
         """Express scene dimensions in the canonical mesh's coordinate frame."""
-        if is_hssd:
-            return list(desired_dimensions)
         return [
             desired_dimensions[0],
             desired_dimensions[2],
@@ -2345,11 +2369,6 @@ class AssetManager:
         is_hssd: bool,
     ) -> tuple[np.ndarray, np.ndarray]:
         """Express canonical mesh bounds in the scene/Drake Z-up frame."""
-        if is_hssd:
-            return np.asarray(bounds[0], dtype=float), np.asarray(
-                bounds[1], dtype=float
-            )
-
         # Y-up → Z-up transformation: (x, y, z) → (x, -z, y).
         bbox_min_yup = bounds[0]
         bbox_max_yup = bounds[1]
