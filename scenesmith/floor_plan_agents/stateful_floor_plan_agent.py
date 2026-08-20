@@ -59,7 +59,13 @@ from scenesmith.agent_utils.scene_blueprint import (
     BlueprintDesignTokens,
     SceneBlueprint,
     blueprint_from_prompt,
+    floor_plan_submission_from_blueprint,
     persist_scene_blueprint,
+)
+from scenesmith.agent_utils.scene_candidates import (
+    CandidateTournament,
+    create_candidate_tournament,
+    persist_candidate_tournament,
 )
 from scenesmith.agent_utils.scoring import (
     FloorPlanCritiqueWithScores,
@@ -161,6 +167,7 @@ class StatefulFloorPlanAgent(BaseStatefulAgent, BaseFloorPlanAgent):
         self.house_prompt: str = ""
         self.layout: HouseLayout = HouseLayout()
         self.blueprint: SceneBlueprint | None = None
+        self.candidate_tournament: CandidateTournament | None = None
 
         # Create persistent agent sessions.
         self.designer_session, self.critic_session = self._create_sessions()
@@ -779,12 +786,25 @@ class StatefulFloorPlanAgent(BaseStatefulAgent, BaseFloorPlanAgent):
                     )
                 }
             )
+        self.candidate_tournament = create_candidate_tournament(
+            self.blueprint,
+            prompt=prompt,
+            candidate_count=6,
+        )
+        persist_candidate_tournament(
+            self.candidate_tournament,
+            self.logger.output_dir / "scene_candidates.json",
+        )
+        self.blueprint = self.candidate_tournament.winner.blueprint
         persist_scene_blueprint(
             self.blueprint, self.logger.output_dir / "scene_blueprint.json"
         )
         self.house_prompt = self.blueprint.to_prompt_brief()
         console_logger.info(
-            "Compiled SceneBlueprint %s with %d spaces and %d connectors",
+            "Selected proxy candidate %s (score %.2f) as SceneBlueprint %s with "
+            "%d spaces and %d connectors",
+            self.candidate_tournament.winner_id,
+            self.candidate_tournament.winner.scores.total,
             self.blueprint.blueprint_id,
             len(self.blueprint.spaces),
             len(self.blueprint.connectors),
@@ -799,8 +819,9 @@ class StatefulFloorPlanAgent(BaseStatefulAgent, BaseFloorPlanAgent):
         self.designer = self._create_designer_agent(tools=designer_tools)
 
         if self.cfg.max_critique_rounds <= 0:
+            blueprint_submission = floor_plan_submission_from_blueprint(self.blueprint)
             deterministic_intent = normalize_floor_plan_submission(
-                {},
+                blueprint_submission,
                 prompt=styled_prompt,
                 mode=self.mode,
                 room_dim_min=self.cfg.min_floor_plan_dim_m,
@@ -819,7 +840,9 @@ class StatefulFloorPlanAgent(BaseStatefulAgent, BaseFloorPlanAgent):
                 console_logger.info(
                     "Using deterministic multi-level floor-plan authoring"
                 )
-                result = await designer_tools[0].on_invoke_tool(None, "{}")
+                result = await designer_tools[0].on_invoke_tool(
+                    None, json.dumps(blueprint_submission)
+                )
             else:
                 # There is no critic to coordinate, so a planner would only add a
                 # second serial LLM launch before requesting the same design.

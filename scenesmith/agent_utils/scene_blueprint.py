@@ -560,6 +560,35 @@ def diff_blueprints(before: SceneBlueprint, after: SceneBlueprint) -> BlueprintD
     )
 
 
+def floor_plan_submission_from_blueprint(blueprint: SceneBlueprint) -> dict[str, Any]:
+    """Project canonical intent into the floor-plan tool's provider schema."""
+
+    spaces = blueprint.spaces[:1] if blueprint.mode == "room" else blueprint.spaces
+    room_specs = [
+        {
+            "id": space.space_id,
+            "type": space.room_type,
+            "width": space.dimensions_m[0],
+            "depth": space.dimensions_m[1],
+            "prompt": space.prompt or blueprint.source_prompt,
+        }
+        for space in spaces
+    ]
+    clear_height = max(level.clear_height_m for level in blueprint.levels)
+    payload: dict[str, Any] = {
+        "room_specs": room_specs,
+        "wall_height_meters": min(12.0, clear_height * len(blueprint.levels)),
+    }
+    if blueprint.design_tokens.material_roles:
+        roles = blueprint.design_tokens.material_roles
+        payload["materials"] = {
+            "floor": roles.get("floor", "warm wood floor"),
+            "walls": roles.get("walls", "neutral plaster wall"),
+            "exterior": roles.get("exterior", roles.get("walls", "neutral plaster")),
+        }
+    return payload
+
+
 def persist_scene_blueprint(blueprint: SceneBlueprint, output_path: Path) -> None:
     """Atomically persist canonical scene intent for resume and revisions."""
 

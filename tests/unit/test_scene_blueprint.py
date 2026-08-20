@@ -7,9 +7,11 @@ import pytest
 from pydantic import ValidationError
 
 from scenesmith.agent_utils.scene_blueprint import (
+    BlueprintDesignTokens,
     SceneBlueprint,
     blueprint_from_prompt,
     diff_blueprints,
+    floor_plan_submission_from_blueprint,
     normalize_scene_blueprint,
     persist_scene_blueprint,
 )
@@ -118,3 +120,23 @@ def test_persisted_blueprint_round_trips(tmp_path):
     persist_scene_blueprint(blueprint, output)
 
     assert SceneBlueprint.model_validate_json(output.read_text()) == blueprint
+
+
+def test_blueprint_projects_winning_dimensions_and_materials_to_floor_plan():
+    blueprint = blueprint_from_prompt("A quiet studio").model_copy(
+        update={
+            "design_tokens": BlueprintDesignTokens(
+                style_keywords=("graphic",),
+                palette=("#111", "#eee"),
+                material_roles={"floor": "black rubber", "walls": "white paint"},
+                lighting_mood="crisp",
+                focal_hierarchy=(),
+            )
+        }
+    )
+
+    submission = floor_plan_submission_from_blueprint(blueprint)
+
+    assert submission["room_specs"][0]["width"] == 7.0
+    assert submission["room_specs"][0]["depth"] == 7.0
+    assert submission["materials"]["floor"] == "black rubber"
