@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from agents import Agent, FunctionTool
+from agents.exceptions import ModelBehaviorError
 from omegaconf import DictConfig
 
 from scenesmith.agent_utils.base_stateful_agent import BaseStatefulAgent
@@ -20,8 +21,12 @@ from scenesmith.agent_utils.reachability import (
     compute_reachability,
     format_reachability_for_critic,
 )
-from scenesmith.agent_utils.room import AgentType, RoomScene
-from scenesmith.agent_utils.room_kits import persist_room_kit, select_room_kit
+from scenesmith.agent_utils.room import AgentType, ObjectType, RoomScene
+from scenesmith.agent_utils.room_kits import (
+    RoomKitSelection,
+    persist_room_kit,
+    select_room_kit,
+)
 from scenesmith.agent_utils.scoring import FurnitureCritiqueWithScores
 from scenesmith.agent_utils.workflow_tools import WorkflowTools
 from scenesmith.furniture_agents.base_furniture_agent import BaseFurnitureAgent
@@ -32,6 +37,36 @@ from scenesmith.prompts.registry import FurnitureAgentPrompts
 from scenesmith.utils.logging import BaseLogger
 
 console_logger = logging.getLogger(__name__)
+
+
+def _validate_room_kit_completion(
+    scene: RoomScene, room_kit: RoomKitSelection | None
+) -> int:
+    """Reject a matched semantic room kit that did not place required furniture."""
+
+    furniture_count = sum(
+        obj.object_type == ObjectType.FURNITURE for obj in scene.objects.values()
+    )
+    if room_kit is None:
+        return furniture_count
+
+    required_minimum = sum(
+        slot.minimum_count for slot in room_kit.slots if slot.required
+    )
+    if furniture_count < required_minimum:
+        raise ModelBehaviorError(
+            f"Semantic room kit {room_kit.kit_id} placed {furniture_count} "
+            f"furniture objects; required minimum is {required_minimum}. "
+            "The furniture stage cannot publish this checkpoint."
+        )
+    console_logger.info(
+        "Semantic room kit %s completion gate passed: %d furniture objects "
+        "(minimum %d)",
+        room_kit.kit_id,
+        furniture_count,
+        required_minimum,
+    )
+    return furniture_count
 
 
 class StatefulFurnitureAgent(BaseStatefulAgent, BaseFurnitureAgent):
@@ -343,6 +378,7 @@ class StatefulFurnitureAgent(BaseStatefulAgent, BaseFurnitureAgent):
 
         # Validate final scene and save scores.
         await self._finalize_scene_and_scores()
+        _validate_room_kit_completion(self.scene, room_kit)
 
     def _get_final_scores_directory(self) -> Path:
         """Get the directory path for saving final furniture placement state.
