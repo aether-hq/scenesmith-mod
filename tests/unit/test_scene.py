@@ -212,6 +212,29 @@ class TestScene(unittest.TestCase):
         # Manipulands should not be welded (they are free bodies).
         self.assertNotIn("child: coffee_cup", directive)
 
+    def test_owner_bound_decor_is_welded_for_dynamics_but_free_for_collision(self):
+        row = SceneObject(
+            object_id=UniqueID("book_row_0"),
+            object_type=ObjectType.MANIPULAND,
+            name="encyclopedia_book_row",
+            description="owner-bound books on an authored shelf tier",
+            transform=RigidTransform(np.array([0.2, 0.1, 1.0])),
+            sdf_path=Path("/path/to/book_row.sdf"),
+            metadata={"dense_library_owner_bound": "bookcase_0"},
+        )
+        self.scene.add_object(row)
+
+        dynamics = self.scene.to_drake_directive(weld_furniture=True)
+        collision_query = self.scene.to_drake_directive(
+            weld_furniture=True,
+            free_mounted_objects_for_collision=True,
+        )
+
+        self.assertIn("child: encyclopedia_book_row_0::base_link", dynamics)
+        self.assertNotIn("default_free_body_pose:", dynamics)
+        self.assertIn("default_free_body_pose:", collision_query)
+        self.assertNotIn("child: encyclopedia_book_row_0::base_link", collision_query)
+
     def test_to_drake_directive_skips_objects_without_sdf(self):
         """Test that objects without sdf_path are skipped in directive."""
         obj_without_sdf = SceneObject(

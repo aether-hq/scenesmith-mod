@@ -1495,12 +1495,18 @@ class RoomScene:
             is_thin_covering = obj.metadata.get("asset_source") == "thin_covering"
             is_wall_mounted = obj.object_type == ObjectType.WALL_MOUNTED
             is_ceiling_mounted = obj.object_type == ObjectType.CEILING_MOUNTED
+            is_owner_bound_decor = bool(obj.metadata.get("dense_library_owner_bound"))
             if free_mounted_objects_for_collision:
-                # Only thin coverings stay welded for collision checking.
+                # Only thin coverings stay welded for collision checking. Mounted
+                # and owner-bound decor remain free so broadphase queries can see
+                # their contacts with room geometry and non-owner objects.
                 always_welded = is_thin_covering
             else:
                 always_welded = (
-                    is_thin_covering or is_wall_mounted or is_ceiling_mounted
+                    is_thin_covering
+                    or is_wall_mounted
+                    or is_ceiling_mounted
+                    or is_owner_bound_decor
                 )
             if free_objects is not None:
                 # Exclusive mode: ONLY objects in free_objects are free.

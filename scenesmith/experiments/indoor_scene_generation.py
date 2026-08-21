@@ -108,6 +108,28 @@ def _require_projection_success(stage: str, success: bool) -> None:
         )
 
 
+def _validate_final_dense_library_book_rows(
+    scene: RoomScene,
+    manipuland_agent: StatefulManipulandAgent,
+) -> int:
+    """Revalidate owner-bound book rows after every final pose mutation."""
+
+    invalid_row_ids = StatefulManipulandAgent._physically_invalid_dense_book_row_ids(
+        scene,
+        manipuland_agent.cfg,
+    )
+    count = StatefulManipulandAgent._validate_dense_library_book_rows(
+        scene,
+        invalid_row_ids=invalid_row_ids,
+    )
+    if count:
+        console_logger.info(
+            "Final dense library book-row gate passed with %d surviving rows",
+            count,
+        )
+    return count
+
+
 def _asset_config_uses_generated_geometry(asset_config: dict) -> bool:
     """Return whether an asset configuration can reach text-to-3D generation."""
 
@@ -999,6 +1021,8 @@ def _generate_room(
                 f"Final post-processing completed for room {room_id} in "
                 f"{end_time - start_time:.2f} seconds"
             )
+
+    _validate_final_dense_library_book_rows(scene, manipuland_agent)
 
     # Log and export final scene.
     logger.log_scene(scene=scene, name="final_scene")

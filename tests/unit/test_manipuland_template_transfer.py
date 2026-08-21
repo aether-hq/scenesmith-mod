@@ -1,4 +1,5 @@
 import json
+import math
 
 from pathlib import Path
 from types import SimpleNamespace
@@ -18,6 +19,9 @@ from scenesmith.agent_utils.room import (
     UniqueID,
 )
 from scenesmith.agent_utils.physics_validation import CollisionPair
+from scenesmith.experiments.indoor_scene_generation import (
+    _validate_final_dense_library_book_rows,
+)
 from scenesmith.manipuland_agents.stateful_manipuland_agent import (
     StatefulManipulandAgent,
 )
@@ -560,6 +564,65 @@ def test_dense_library_physics_allows_only_shallow_owner_support_contact(
     assert rows[0].object_id not in invalid
     assert rows[1].object_id not in invalid
     assert invalid == {rows[2].object_id, rows[3].object_id}
+
+
+def test_final_dense_library_gate_rejects_row_displaced_after_simulation(
+    tmp_path: Path,
+    monkeypatch,
+):
+    bookcases = [
+        _dense_bookcase(f"bookcase_{int(level)}", level, tmp_path)
+        for level in (0.0, 4.0, 8.0)
+    ]
+    rows = []
+    for level_index, bookcase in enumerate(bookcases):
+        for row_index in range(4):
+            surface = bookcase.support_surfaces[row_index + 1]
+            row = SceneObject(
+                object_id=UniqueID(f"book_row_{level_index}_{row_index}"),
+                object_type=ObjectType.MANIPULAND,
+                name="encyclopedia_book_row",
+                description="upright encyclopedia book set",
+                transform=surface.transform,
+                geometry_path=tmp_path / "book_row.gltf",
+                metadata={
+                    "dense_library_book_row": True,
+                    "dense_library_owner_bound": str(bookcase.object_id),
+                },
+                bbox_min=np.array([-0.1, -0.05, 0.0]),
+                bbox_max=np.array([0.1, 0.05, 0.2]),
+                placement_info=PlacementInfo(
+                    parent_surface_id=surface.surface_id,
+                    position_2d=np.array([0.0, 0.0]),
+                    rotation_2d=0.0,
+                ),
+            )
+            rows.append(row)
+    rows[0].transform = rows[0].transform @ RigidTransform(
+        RollPitchYaw(0.0, 0.0, math.radians(130.0)),
+        [0.4, 0.0, 0.0],
+    )
+    scene = RoomScene(
+        room_geometry=object(),
+        scene_dir=tmp_path,
+        text_description="large multi-level library with thousands of books",
+        objects={obj.object_id: obj for obj in [*bookcases, *rows]},
+    )
+    monkeypatch.setattr(
+        "scenesmith.manipuland_agents.stateful_manipuland_agent.compute_scene_collisions",
+        lambda **_kwargs: [],
+    )
+    agent = SimpleNamespace(
+        cfg=SimpleNamespace(
+            physics_validation=SimpleNamespace(
+                object_penetration_threshold_m=0.001,
+                floor_penetration_tolerance_m=0.05,
+            )
+        )
+    )
+
+    with pytest.raises(ModelBehaviorError, match="physically invalid"):
+        _validate_final_dense_library_book_rows(scene, agent)
 
 
 def test_patient_support_zone_rejects_equipment_and_mislabeled_tape(tmp_path: Path):
