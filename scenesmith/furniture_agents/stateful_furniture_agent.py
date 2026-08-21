@@ -865,7 +865,25 @@ class StatefulFurnitureAgent(BaseStatefulAgent, BaseFurnitureAgent):
                             key=lambda obj: str(getattr(obj, "object_id", "")),
                         )
                         if tables:
-                            candidate_positions = _chair_cluster_poses(tables[0], asset)
+                            chairs = [
+                                obj
+                                for obj in self.scene.objects.values()
+                                if _object_matches_room_kit_slot(obj, slot)
+                                and _nearest_level(obj, support_elevations) == elevation
+                            ]
+                            anchor_table = min(
+                                tables,
+                                key=lambda table: (
+                                    -sum(
+                                        _stable_chair_faces_table(chair, table)
+                                        for chair in chairs
+                                    ),
+                                    str(getattr(table, "object_id", "")),
+                                ),
+                            )
+                            candidate_positions = _chair_cluster_poses(
+                                anchor_table, asset
+                            )
                     for x, y, yaw in candidate_positions:
                         position_key = (
                             round(x, 4),

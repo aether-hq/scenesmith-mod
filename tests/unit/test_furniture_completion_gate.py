@@ -468,6 +468,65 @@ def test_large_multilevel_library_recovery_places_chairs_around_upper_tables():
         assert 0.75 <= distance <= 2.25
 
 
+def test_library_recovery_extends_the_existing_table_ensemble():
+    furniture = _library_with_ground_only_tables()
+    furniture.extend(
+        (
+            _role_furniture("reading_table", 5, 4.0, x=1.25, y=-1.5),
+            _role_furniture("reading_table", 6, 8.0, x=1.25, y=-1.5),
+        )
+    )
+    ground_chairs = [
+        obj
+        for obj in furniture
+        if obj.name == "reading_chair" and obj.transform.translation()[2] == 0.0
+    ]
+    ground_chairs[0].transform = RigidTransform(
+        RollPitchYaw(0.0, 0.0, math.radians(90.0)),
+        (6.9, -1.5, 0.0),
+    )
+    for index, chair in enumerate(ground_chairs[1:]):
+        chair.transform = RigidTransform(
+            RollPitchYaw(0.0, 0.0, 0.0),
+            (-5.0 + index, 5.0, 0.0),
+        )
+    chair_asset = ground_chairs[0]
+    placements = []
+
+    class FakeTools:
+        def set_noise_profile(self, _mode):
+            pass
+
+        def _major_support_elevations(self):
+            return (0.0, 4.0, 8.0)
+
+        def _add_furniture_to_scene_impl(self, **kwargs):
+            placements.append(kwargs)
+            return json.dumps(
+                {"success": True, "object_id": f"recovered_{len(placements)}"}
+            )
+
+    agent = object.__new__(StatefulFurnitureAgent)
+    agent.scene = SimpleNamespace(
+        text_description=_EXACT_MULTILEVEL_LIBRARY_PROMPT,
+        objects={obj.object_id: obj for obj in furniture},
+        room_geometry=SimpleNamespace(length=13.8, width=13.8),
+    )
+    agent.asset_manager = SimpleNamespace(list_available_assets=lambda: [chair_asset])
+    agent.furniture_tools = FakeTools()
+
+    assert (
+        agent._place_room_kit_minimums_deterministically(
+            _dense_multilevel_library_kit()
+        )
+        == 2
+    )
+    assert [call["z"] for call in placements] == [0.0, 0.0]
+    for call in placements:
+        distance = math.dist((call["x"], call["y"]), (5.25, -1.5))
+        assert 0.75 <= distance <= 2.25
+
+
 def test_library_recovery_rolls_back_incomplete_new_chair_cluster():
     furniture = _library_with_ground_only_tables()
     furniture.extend(
