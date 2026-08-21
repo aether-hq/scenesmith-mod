@@ -587,6 +587,76 @@ def test_dense_library_recovers_variable_capacity_templates_to_twelve_rows(
     assert all(row.name != "candlestick" for row in recovered_rows)
 
 
+def test_dense_library_recovery_clusters_millimeter_story_drift(
+    tmp_path: Path,
+    monkeypatch,
+):
+    """Post-simulation support drift must not split one authored story."""
+
+    story_elevations = (
+        (-0.0011208129834938, -0.0023808841993158, -0.0023808841648540),
+        (3.9974164006940396,) * 3,
+        (7.9974164006646555,) * 3,
+    )
+    bookcases = [
+        _dense_bookcase(f"bookcase_{story_index}_{case_index}", elevation, tmp_path)
+        for story_index, elevations in enumerate(story_elevations)
+        for case_index, elevation in enumerate(elevations)
+    ]
+    rows = []
+    for story_index, source_index in enumerate((0, 3, 6)):
+        source = bookcases[source_index]
+        for row_index in range(4 if story_index == 0 else 12):
+            owner = (
+                source if story_index == 0 else bookcases[source_index + row_index // 4]
+            )
+            surface = owner.support_surfaces[row_index % 4 + 1]
+            rows.append(
+                SceneObject(
+                    object_id=UniqueID(f"book_row_{story_index}_{row_index}"),
+                    object_type=ObjectType.MANIPULAND,
+                    name="encyclopedia_book_row",
+                    description="upright encyclopedia book set",
+                    transform=surface.transform,
+                    geometry_path=tmp_path / "book_row.gltf",
+                    metadata={
+                        "dense_library_book_row": True,
+                        "dense_library_owner_bound": str(owner.object_id),
+                    },
+                    bbox_min=np.array([-0.1, -0.05, 0.0]),
+                    bbox_max=np.array([0.1, 0.05, 0.2]),
+                    placement_info=PlacementInfo(
+                        parent_surface_id=surface.surface_id,
+                        position_2d=np.array([0.0, 0.0]),
+                        rotation_2d=0.0,
+                    ),
+                )
+            )
+    scene = RoomScene(
+        room_geometry=object(),
+        scene_dir=tmp_path,
+        text_description="large multi-level library with thousands of books",
+        objects={obj.object_id: obj for obj in [*bookcases, *rows]},
+    )
+    monkeypatch.setattr(
+        "scenesmith.manipuland_agents.stateful_manipuland_agent.compute_scene_collisions",
+        lambda **_kwargs: [],
+    )
+    agent = object.__new__(StatefulManipulandAgent)
+    agent.scene = scene
+    agent.cfg = SimpleNamespace(
+        physics_validation=SimpleNamespace(
+            object_penetration_threshold_m=0.001,
+            floor_penetration_tolerance_m=0.05,
+        )
+    )
+
+    recovered = agent._recover_dense_library_book_row_deficits()
+
+    assert recovered == 8
+    assert StatefulManipulandAgent._validate_dense_library_book_rows(scene) == 36
+
+
 def test_dense_library_book_row_gate_rejects_physically_invalid_tagged_rows(
     tmp_path: Path,
 ):

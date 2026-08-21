@@ -957,6 +957,46 @@ class StatefulManipulandAgent(BaseStatefulAgent, BaseManipulandAgent):
         }
 
     @staticmethod
+    def _dense_bookcase_story_levels(
+        bookcases: list[SceneObject],
+        *,
+        elevation_tolerance_m: float = 0.05,
+    ) -> dict[UniqueID, float]:
+        """Cluster bounded post-simulation drift into authored story levels."""
+
+        positioned: list[tuple[float, SceneObject]] = []
+        for bookcase in bookcases:
+            try:
+                positioned.append(
+                    (float(bookcase.transform.translation()[2]), bookcase)
+                )
+            except (AttributeError, IndexError, TypeError, ValueError):
+                continue
+        clusters: list[list[tuple[float, SceneObject]]] = []
+        for elevation, bookcase in sorted(
+            positioned,
+            key=lambda item: (item[0], str(item[1].object_id)),
+        ):
+            if (
+                clusters
+                and abs(elevation - clusters[-1][0][0]) <= elevation_tolerance_m
+            ):
+                clusters[-1].append((elevation, bookcase))
+            else:
+                clusters.append([(elevation, bookcase)])
+
+        levels: dict[UniqueID, float] = {}
+        for cluster in clusters:
+            representative = round(
+                sum(elevation for elevation, _ in cluster) / len(cluster),
+                3,
+            )
+            levels.update(
+                {bookcase.object_id: representative for _, bookcase in cluster}
+            )
+        return levels
+
+    @staticmethod
     def _bind_dense_book_row_to_owner_surface(
         row: SceneObject,
         owner: SceneObject,
@@ -1296,14 +1336,15 @@ class StatefulManipulandAgent(BaseStatefulAgent, BaseManipulandAgent):
                 for term in ("shelf", "bookcase")
             )
         ]
+        bookcase_levels = StatefulManipulandAgent._dense_bookcase_story_levels(
+            bookcases
+        )
         support_levels: dict[UniqueID, float] = {}
-        levels: set[float] = set()
+        levels = set(bookcase_levels.values())
         for bookcase in bookcases:
-            try:
-                level = round(float(bookcase.transform.translation()[2]), 3)
-            except (AttributeError, IndexError, TypeError, ValueError):
+            level = bookcase_levels.get(bookcase.object_id)
+            if level is None:
                 continue
-            levels.add(level)
             support_levels.update(
                 {surface.surface_id: level for surface in bookcase.support_surfaces}
             )
@@ -1470,11 +1511,11 @@ class StatefulManipulandAgent(BaseStatefulAgent, BaseManipulandAgent):
                 for term in ("shelf", "bookcase")
             )
         ]
+        bookcase_levels = self._dense_bookcase_story_levels(bookcases)
         bookcases_by_level: dict[float, list[SceneObject]] = {}
         for bookcase in bookcases:
-            try:
-                level = round(float(bookcase.transform.translation()[2]), 3)
-            except (AttributeError, IndexError, TypeError, ValueError):
+            level = bookcase_levels.get(bookcase.object_id)
+            if level is None:
                 continue
             bookcases_by_level.setdefault(level, []).append(bookcase)
         if len(bookcases_by_level) < 2:
