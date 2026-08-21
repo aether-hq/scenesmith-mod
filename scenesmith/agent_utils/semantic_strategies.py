@@ -11,7 +11,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, model_validator
 
 from scenesmith.agent_utils.scene_requirements import (
     FulfillmentStrategy,
@@ -20,6 +20,8 @@ from scenesmith.agent_utils.scene_requirements import (
     SceneRequirementGraph,
     assert_requirement_graph_consistent,
 )
+
+ExecutionStrategy = FulfillmentStrategy | Literal["verification_guard"]
 from scenesmith.agent_utils.semantic_ledger import (
     SemanticObligationLedger,
     transition_requirement,
@@ -55,7 +57,7 @@ class RequirementStrategyPlan(StrategyModel):
     subject: str
     kind: RequirementKind
     ordered_strategies: tuple[StrategyAvailability, ...]
-    selected_strategy: FulfillmentStrategy | None
+    selected_strategy: ExecutionStrategy | None
     selected_provider: str | None
     planned_instances: int
     composition_brief: str
@@ -76,8 +78,42 @@ class SemanticCapabilityManifest(StrategyModel):
         return hashlib.sha256(self.model_dump_json().encode("utf-8")).hexdigest()
 
 
+class StrategyAttempt(StrategyModel):
+    attempt_key: str
+    requirement_id: str
+    strategy: ExecutionStrategy
+    provider_id: str
+    stage: str
+    outcome: Literal["succeeded", "failed"]
+    timestamp_utc: datetime
+    evidence_refs: tuple[str, ...] = ()
+    diagnostic: str = ""
+
+    @model_validator(mode="after")
+    def validate_outcome(self) -> "StrategyAttempt":
+        if self.timestamp_utc.tzinfo is None:
+            raise ValueError("strategy attempt timestamp must be timezone-aware")
+        if self.outcome == "succeeded" and not self.evidence_refs:
+            raise ValueError("successful strategy attempt requires artifact evidence")
+        if self.outcome == "failed" and not self.diagnostic:
+            raise ValueError("failed strategy attempt requires a diagnostic")
+        return self
+
+
+class SemanticStrategyJournal(StrategyModel):
+    schema_version: Literal[1] = 1
+    graph_id: str
+    graph_hash: str
+    manifest_hash: str
+    attempts: tuple[StrategyAttempt, ...] = ()
+
+
 class CapabilityPreflightError(RuntimeError):
     """No configured strategy can fulfill one or more blocking requirements."""
+
+
+class StrategyAttemptError(ValueError):
+    """A strategy attempt contradicts the immutable capability manifest."""
 
 
 def _utc_now() -> datetime:
@@ -256,8 +292,15 @@ def capability_preflight(
         selected = next(
             (item for item in availabilities if item.status == "available"), None
         )
+        selected_strategy: ExecutionStrategy | None = (
+            selected.strategy if selected is not None else None
+        )
+        selected_provider = selected.provider_id if selected is not None else None
+        if requirement.polarity == "forbidden" and requirement.kind != "unclassified":
+            selected_strategy = "verification_guard"
+            selected_provider = "semantic_absence_verifier"
         failure_reason = ""
-        if selected is None:
+        if selected_strategy is None:
             failure_reason = (
                 f"No catalog, composition, or procedural provider can fulfill "
                 f"{requirement.subject!r} ({requirement.requirement_id})."
@@ -270,8 +313,8 @@ def capability_preflight(
                 subject=requirement.subject,
                 kind=requirement.kind,
                 ordered_strategies=availabilities,
-                selected_strategy=(selected.strategy if selected else None),
-                selected_provider=(selected.provider_id if selected else None),
+                selected_strategy=selected_strategy,
+                selected_provider=selected_provider,
                 planned_instances=_planned_instances(requirement),
                 composition_brief=(
                     requirement.composition.arrangement
@@ -357,6 +400,90 @@ def assert_capability_preflight_passed(
         raise CapabilityPreflightError(" ".join(failed))
 
 
+def initialize_strategy_journal(
+    manifest: SemanticCapabilityManifest,
+) -> SemanticStrategyJournal:
+    return SemanticStrategyJournal(
+        graph_id=manifest.graph_id,
+        graph_hash=manifest.graph_hash,
+        manifest_hash=manifest.content_hash,
+    )
+
+
+def record_strategy_attempt(
+    journal: SemanticStrategyJournal,
+    manifest: SemanticCapabilityManifest,
+    *,
+    attempt_key: str,
+    requirement_id: str,
+    strategy: ExecutionStrategy,
+    provider_id: str,
+    stage: str,
+    outcome: Literal["succeeded", "failed"],
+    evidence_refs: tuple[str, ...] = (),
+    diagnostic: str = "",
+    clock: Callable[[], datetime] = _utc_now,
+) -> SemanticStrategyJournal:
+    """Append one idempotent, provider-authenticated fulfillment attempt."""
+
+    if (
+        journal.graph_id != manifest.graph_id
+        or journal.graph_hash != manifest.graph_hash
+        or journal.manifest_hash != manifest.content_hash
+    ):
+        raise StrategyAttemptError(
+            "strategy journal does not match capability manifest"
+        )
+    existing = next(
+        (attempt for attempt in journal.attempts if attempt.attempt_key == attempt_key),
+        None,
+    )
+    proposed = StrategyAttempt(
+        attempt_key=attempt_key,
+        requirement_id=requirement_id,
+        strategy=strategy,
+        provider_id=provider_id,
+        stage=stage,
+        outcome=outcome,
+        timestamp_utc=(existing.timestamp_utc if existing is not None else clock()),
+        evidence_refs=evidence_refs,
+        diagnostic=diagnostic,
+    )
+    if existing is not None:
+        if existing != proposed:
+            raise StrategyAttemptError(
+                f"strategy attempt key {attempt_key!r} was reused with new content"
+            )
+        return journal
+    plan = next(
+        (plan for plan in manifest.plans if plan.requirement_id == requirement_id),
+        None,
+    )
+    if plan is None:
+        raise StrategyAttemptError(f"unknown requirement {requirement_id!r}")
+    verification_guard = (
+        strategy == "verification_guard"
+        and plan.selected_strategy == strategy
+        and provider_id == "semantic_absence_verifier"
+    )
+    availability = next(
+        (
+            item
+            for item in plan.ordered_strategies
+            if item.strategy == strategy and item.provider_id == provider_id
+        ),
+        None,
+    )
+    if not verification_guard and (
+        availability is None or availability.status != "available"
+    ):
+        raise StrategyAttemptError(
+            f"provider {provider_id!r} is not available for {requirement_id} "
+            f"via {strategy}"
+        )
+    return journal.model_copy(update={"attempts": journal.attempts + (proposed,)})
+
+
 def persist_capability_manifest(
     manifest: SemanticCapabilityManifest, output_path: Path
 ) -> None:
@@ -382,3 +509,28 @@ def load_capability_manifest(path: Path) -> SemanticCapabilityManifest:
     return SemanticCapabilityManifest.model_validate_json(
         path.read_text(encoding="utf-8")
     )
+
+
+def persist_strategy_journal(
+    journal: SemanticStrategyJournal, output_path: Path
+) -> None:
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{output_path.name}.", dir=output_path.parent
+    )
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            handle.write(journal.model_dump_json(indent=2) + "\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary_name, output_path)
+    except Exception:
+        try:
+            os.unlink(temporary_name)
+        except FileNotFoundError:
+            pass
+        raise
+
+
+def load_strategy_journal(path: Path) -> SemanticStrategyJournal:
+    return SemanticStrategyJournal.model_validate_json(path.read_text(encoding="utf-8"))

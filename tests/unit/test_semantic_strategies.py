@@ -9,6 +9,8 @@ from scenesmith.agent_utils.scene_requirements import (
     RequirementInterpretationBatch,
     RequirementInterpretationProposal,
     RequirementQuantity,
+    RequirementRelation,
+    RequirementScale,
     SceneCompositionOpinion,
     TopologyOpinion,
     VerificationPolicy,
@@ -16,7 +18,30 @@ from scenesmith.agent_utils.scene_requirements import (
     merge_requirement_interpretations,
     requirement_graph_from_prompt,
 )
+from scenesmith.agent_utils.requirement_blueprint_compiler import (
+    RequirementBlueprintBinding,
+    SpatialCompilationError,
+    SpatialRequirementCompilation,
+    blueprint_with_obligation_brief,
+    load_spatial_compilation,
+    persist_spatial_compilation,
+    validate_spatial_compilation,
+)
+from scenesmith.agent_utils.scene_blueprint import (
+    BlueprintConstraint,
+    FurnitureGroupBlueprint,
+    LevelBlueprint,
+    SceneBlueprint,
+    SpaceBlueprint,
+)
 from scenesmith.agent_utils.semantic_ledger import initialize_semantic_ledger
+from scenesmith.agent_utils.semantic_publication import (
+    RequirementVerificationClaim,
+    SemanticArtifact,
+    SemanticPublicationError,
+    SemanticVerificationBatch,
+    certify_semantic_publication,
+)
 from scenesmith.agent_utils.semantic_strategies import (
     CapabilityPreflightError,
     SemanticCapabilityProfile,
@@ -24,8 +49,13 @@ from scenesmith.agent_utils.semantic_strategies import (
     assert_capability_preflight_passed,
     capability_preflight,
     capability_profile_from_config,
+    initialize_strategy_journal,
     load_capability_manifest,
+    load_strategy_journal,
     persist_capability_manifest,
+    persist_strategy_journal,
+    record_strategy_attempt,
+    StrategyAttemptError,
 )
 
 
@@ -40,8 +70,10 @@ def _graph(
     *,
     kind="hero_object",
     strategy_order=("catalog", "composed", "procedural"),
+    prompt="Exactly 10 velorian assemblies dominate the chamber.",
+    scale=None,
+    relations=(),
 ):
-    prompt = "Exactly 10 velorian assemblies dominate the chamber."
     candidates = literal_candidates_from_prompt(prompt)
     assert len(candidates) == 1
     candidate = candidates[0]
@@ -56,6 +88,8 @@ def _graph(
             value=quantity.value,
             source_quantity_id=quantity.quantity_id,
         ),
+        scale=scale,
+        relations=relations,
         topology=TopologyOpinion(
             role="dominant repeated artifact",
             enclosure="inside the primary chamber",
@@ -180,6 +214,23 @@ def test_unclassified_hard_requirement_never_enters_construction():
     assert all(plan.selected_strategy is None for plan in manifest.plans)
 
 
+def test_forbidden_requirement_uses_absence_guard_not_construction_provider():
+    graph = _graph(prompt="No 10 velorian assemblies may enter the chamber.")
+    manifest = capability_preflight(
+        graph,
+        _profile(
+            catalog_available=False,
+            generated_geometry_available=False,
+            reusable_composition_available=False,
+            structural_compiler_available=False,
+        ),
+    )
+
+    assert manifest.preflight_passed
+    assert manifest.plans[0].selected_strategy == "verification_guard"
+    assert manifest.plans[0].selected_provider == "semantic_absence_verifier"
+
+
 def test_manifest_advances_or_fails_append_only_ledger_idempotently():
     graph = _graph()
     ledger = initialize_semantic_ledger(graph, clock=_clock)
@@ -226,3 +277,317 @@ def test_manifest_persistence_round_trip(tmp_path):
     persist_capability_manifest(manifest, path)
 
     assert load_capability_manifest(path) == manifest
+
+
+def test_strategy_attempts_are_provider_checked_evidenced_and_idempotent(tmp_path):
+    manifest = capability_preflight(_graph(), _profile())
+    journal = initialize_strategy_journal(manifest)
+    plan = manifest.plans[0]
+    recorded = record_strategy_attempt(
+        journal,
+        manifest,
+        attempt_key="construct:velorian:1",
+        requirement_id=plan.requirement_id,
+        strategy=plan.selected_strategy,
+        provider_id=plan.selected_provider,
+        stage="construction",
+        outcome="succeeded",
+        evidence_refs=("artifact:velorian-0",),
+        clock=_clock,
+    )
+    retry = record_strategy_attempt(
+        recorded,
+        manifest,
+        attempt_key="construct:velorian:1",
+        requirement_id=plan.requirement_id,
+        strategy=plan.selected_strategy,
+        provider_id=plan.selected_provider,
+        stage="construction",
+        outcome="succeeded",
+        evidence_refs=("artifact:velorian-0",),
+        clock=_clock,
+    )
+    path = tmp_path / "semantic_strategy_journal.json"
+    persist_strategy_journal(retry, path)
+
+    assert retry == recorded
+    assert load_strategy_journal(path) == recorded
+    with pytest.raises(StrategyAttemptError, match="not available"):
+        record_strategy_attempt(
+            journal,
+            manifest,
+            attempt_key="bad-provider",
+            requirement_id=plan.requirement_id,
+            strategy="catalog",
+            provider_id="missing-provider",
+            stage="construction",
+            outcome="failed",
+            diagnostic="catalog did not contain the required artifact",
+            clock=_clock,
+        )
+
+
+def _spatial_compilation(graph, *, role_count=10, include_constraint=True):
+    requirement = graph.requirements[0]
+    level = LevelBlueprint(
+        level_id="level-primary",
+        name="Primary",
+        elevation_m=0.0,
+        clear_height_m=8.0,
+    )
+    space = SpaceBlueprint(
+        space_id="space-primary",
+        name="Primary chamber",
+        room_type="specialized chamber",
+        level_id=level.level_id,
+        dimensions_m=(20.0, 16.0),
+        prompt=graph.source_prompt,
+    )
+    group = FurnitureGroupBlueprint(
+        group_id="group-velorian",
+        name="Velorian assemblies",
+        space_id=space.space_id,
+        roles={"velorian assembly": role_count},
+        density="layered",
+    )
+    constraint = BlueprintConstraint(
+        constraint_id="constraint-velorian",
+        kind="semantic_obligation",
+        target_ids=(group.group_id,),
+        parameters={
+            "requirement_id": requirement.requirement_id,
+            "planned_instances": 10,
+            "verification_criteria": ["exactly ten instances"],
+            **(
+                {"minimum_dimensions_m": list(requirement.scale.minimum_dimensions_m)}
+                if requirement.scale is not None
+                and requirement.scale.minimum_dimensions_m is not None
+                else {}
+            ),
+            **(
+                {
+                    "relationships": [
+                        relation.model_dump(mode="json")
+                        for relation in requirement.relations
+                    ]
+                }
+                if requirement.relations
+                else {}
+            ),
+        },
+        strength="hard",
+        source="user",
+    )
+    blueprint = SceneBlueprint(
+        blueprint_id="scene-velorian",
+        source_prompt=graph.source_prompt,
+        levels=(level,),
+        spaces=(space,),
+        furniture_groups=(group,),
+        constraints=((constraint,) if include_constraint else ()),
+        locked_ids=(group.group_id,),
+    )
+    return SpatialRequirementCompilation(
+        graph_id=graph.graph_id,
+        graph_hash=graph.content_hash,
+        blueprint=blueprint,
+        bindings=(
+            RequirementBlueprintBinding(
+                requirement_id=requirement.requirement_id,
+                owner_stage="asset",
+                artifact_ids=(group.group_id,),
+                role_key="velorian assembly",
+                planned_instances=10,
+                rationale="The LLM compiled the exact repeated artifact count.",
+            ),
+        ),
+        compilation_summary="A source-bound arbitrary-domain plan.",
+    )
+
+
+def test_spatial_compiler_binding_preserves_exact_count_and_locked_artifact():
+    graph = _graph()
+    compilation = _spatial_compilation(graph)
+
+    validate_spatial_compilation(
+        compilation,
+        graph,
+        maximum_dimension_m=24.0,
+        maximum_height_m=12.0,
+    )
+
+
+def test_spatial_compiler_rejects_count_loss_and_missing_hard_constraint():
+    graph = _graph()
+    with pytest.raises(SpatialCompilationError, match="expected 10"):
+        validate_spatial_compilation(
+            _spatial_compilation(graph, role_count=9),
+            graph,
+            maximum_dimension_m=24.0,
+            maximum_height_m=12.0,
+        )
+    with pytest.raises(SpatialCompilationError, match="no hard blueprint constraint"):
+        validate_spatial_compilation(
+            _spatial_compilation(graph, include_constraint=False),
+            graph,
+            maximum_dimension_m=24.0,
+            maximum_height_m=12.0,
+        )
+
+
+def test_spatial_compilation_persists_and_obligation_brief_reaches_room_prompt(
+    tmp_path,
+):
+    graph = _graph()
+    compilation = _spatial_compilation(graph)
+    path = tmp_path / "semantic_spatial_compilation.json"
+
+    persist_spatial_compilation(compilation, path)
+    blueprint = blueprint_with_obligation_brief(compilation, graph)
+
+    assert load_spatial_compilation(path) == compilation
+    assert graph.requirements[0].requirement_id in blueprint.spaces[0].prompt
+    assert '"planned_instances":10' in blueprint.spaces[0].prompt
+
+
+def _verification(graph, artifact_ids, *, observed_count=None, status="satisfied"):
+    return SemanticVerificationBatch(
+        graph_id=graph.graph_id,
+        graph_hash=graph.content_hash,
+        claims=(
+            RequirementVerificationClaim(
+                requirement_id=graph.requirements[0].requirement_id,
+                status=status,
+                artifact_ids=tuple(artifact_ids),
+                observed_count=(
+                    len(artifact_ids) if observed_count is None else observed_count
+                ),
+                semantic_rationale="The final artifacts implement the arbitrary concept.",
+            ),
+        ),
+        audit_summary="Source-bound final evidence audit.",
+    )
+
+
+def test_publication_certificate_requires_ten_distinct_surviving_artifacts():
+    graph = _graph()
+    compilation = _spatial_compilation(graph)
+    artifacts = tuple(
+        SemanticArtifact(
+            artifact_id=f"velorian-{index}",
+            artifact_class="scene_object",
+            name=f"Velorian assembly {index}",
+            dimensions_m=(2.0, 1.0, 1.5),
+        )
+        for index in range(10)
+    )
+
+    certificate = certify_semantic_publication(
+        graph,
+        compilation,
+        artifacts,
+        _verification(graph, [item.artifact_id for item in artifacts]),
+        physics_verified=True,
+        physics_evidence_refs=("physics:final-scene-zero-violations",),
+    )
+
+    assert certificate.publishable
+    assert certificate.requirements[0].observed_count == 10
+
+
+def test_publication_rejects_nine_artifacts_or_invented_count():
+    graph = _graph()
+    compilation = _spatial_compilation(graph)
+    artifacts = tuple(
+        SemanticArtifact(
+            artifact_id=f"velorian-{index}",
+            artifact_class="scene_object",
+            name=f"Velorian assembly {index}",
+        )
+        for index in range(9)
+    )
+
+    with pytest.raises(SemanticPublicationError, match="expected exact 10"):
+        certify_semantic_publication(
+            graph,
+            compilation,
+            artifacts,
+            _verification(graph, [item.artifact_id for item in artifacts]),
+            physics_verified=True,
+            physics_evidence_refs=("physics:clean",),
+        )
+    with pytest.raises(SemanticPublicationError, match="claimed count 10"):
+        certify_semantic_publication(
+            graph,
+            compilation,
+            artifacts,
+            _verification(
+                graph,
+                [item.artifact_id for item in artifacts],
+                observed_count=10,
+            ),
+            physics_verified=True,
+            physics_evidence_refs=("physics:clean",),
+        )
+
+
+def test_publication_requires_separate_physics_evidence():
+    graph = _graph()
+    with pytest.raises(SemanticPublicationError, match="physics verification"):
+        certify_semantic_publication(
+            graph,
+            _spatial_compilation(graph),
+            (),
+            _verification(graph, (), status="missing"),
+            physics_verified=False,
+            physics_evidence_refs=(),
+        )
+
+
+def test_publication_rejects_undersized_hero_and_unproven_relationship():
+    graph = _graph(
+        scale=RequirementScale(
+            qualitative_label="huge",
+            minimum_dimensions_m=(4.0, 2.0, 1.5),
+            rationale="The LLM judged this minimum from scene context.",
+        ),
+        relations=(
+            RequirementRelation(
+                predicate="centered_in",
+                target="primary chamber",
+                rationale="The source makes it the central focal group.",
+            ),
+        ),
+    )
+    compilation = _spatial_compilation(graph)
+    artifacts = tuple(
+        SemanticArtifact(
+            artifact_id=f"velorian-{index}",
+            artifact_class="scene_object",
+            name=f"Velorian assembly {index}",
+            dimensions_m=(2.0, 1.0, 1.0),
+        )
+        for index in range(10)
+    )
+    with pytest.raises(SemanticPublicationError, match="minimum dimensions"):
+        certify_semantic_publication(
+            graph,
+            compilation,
+            artifacts,
+            _verification(graph, [item.artifact_id for item in artifacts]),
+            physics_verified=True,
+            physics_evidence_refs=("physics:clean",),
+        )
+    full_sized = tuple(
+        artifact.model_copy(update={"dimensions_m": (4.0, 2.0, 1.5)})
+        for artifact in artifacts
+    )
+    with pytest.raises(SemanticPublicationError, match="unmet relationships"):
+        certify_semantic_publication(
+            graph,
+            compilation,
+            full_sized,
+            _verification(graph, [item.artifact_id for item in full_sized]),
+            physics_verified=True,
+            physics_evidence_refs=("physics:clean",),
+        )

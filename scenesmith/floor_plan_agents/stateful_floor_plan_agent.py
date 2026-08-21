@@ -54,6 +54,11 @@ from scenesmith.agent_utils.house import (
 )
 from scenesmith.agent_utils.placement_noise import PlacementNoiseMode
 from scenesmith.agent_utils.rendering import save_directive_as_blend
+from scenesmith.agent_utils.requirement_blueprint_compiler import (
+    blueprint_with_obligation_brief,
+    compile_requirement_blueprint,
+    persist_spatial_compilation,
+)
 from scenesmith.agent_utils.room import AgentType, ObjectType, SceneObject, UniqueID
 from scenesmith.agent_utils.scene_blueprint import (
     BlueprintDesignTokens,
@@ -91,7 +96,9 @@ from scenesmith.agent_utils.semantic_strategies import (
     apply_capability_manifest_to_ledger,
     assert_capability_preflight_passed,
     capability_preflight,
+    initialize_strategy_journal,
     persist_capability_manifest,
+    persist_strategy_journal,
 )
 from scenesmith.agent_utils.workflow_tools import WorkflowTools
 from scenesmith.floor_plan_agents.base_floor_plan_agent import BaseFloorPlanAgent
@@ -827,6 +834,7 @@ class StatefulFloorPlanAgent(BaseStatefulAgent, BaseFloorPlanAgent):
             self.requirement_graph,
         )
         configured_capabilities = getattr(self.cfg, "semantic_capabilities", None)
+        capability_manifest = None
         if configured_capabilities is not None:
             capability_manifest_path = (
                 self.logger.output_dir / "semantic_capability_manifest.json"
@@ -841,6 +849,10 @@ class StatefulFloorPlanAgent(BaseStatefulAgent, BaseFloorPlanAgent):
             persist_capability_manifest(
                 capability_manifest,
                 capability_manifest_path,
+            )
+            persist_strategy_journal(
+                initialize_strategy_journal(capability_manifest),
+                self.logger.output_dir / "semantic_strategy_journal.json",
             )
             self.semantic_ledger = apply_capability_manifest_to_ledger(
                 self.semantic_ledger,
@@ -867,15 +879,39 @@ class StatefulFloorPlanAgent(BaseStatefulAgent, BaseFloorPlanAgent):
             self.requirement_graph.content_hash,
         )
 
-        self.blueprint = blueprint_from_prompt(
-            styled_prompt,
-            mode=self.mode,
-            default_dimensions_m=(
-                min(7.0, float(self.cfg.max_floor_plan_dim_m)),
-                min(7.0, float(self.cfg.max_floor_plan_dim_m)),
-            ),
-            maximum_dimension_m=float(self.cfg.max_floor_plan_dim_m),
-        )
+        if capability_manifest is not None:
+            spatial_compilation, spatial_result = await compile_requirement_blueprint(
+                self.requirement_graph,
+                capability_manifest,
+                model=str(configured_model),
+                mode=self.mode,
+                maximum_dimension_m=float(self.cfg.max_floor_plan_dim_m),
+                maximum_height_m=float(self.cfg.wall_height.max),
+                run_config=self._create_run_config(),
+                model_settings=self._get_model_settings(settings_key="designer"),
+            )
+            log_agent_usage(
+                result=spatial_result,
+                agent_name="SPATIAL AND TOPOLOGICAL COMPILER",
+            )
+            persist_spatial_compilation(
+                spatial_compilation,
+                self.logger.output_dir / "semantic_spatial_compilation.json",
+            )
+            self.blueprint = blueprint_with_obligation_brief(
+                spatial_compilation,
+                self.requirement_graph,
+            )
+        else:
+            self.blueprint = blueprint_from_prompt(
+                styled_prompt,
+                mode=self.mode,
+                default_dimensions_m=(
+                    min(7.0, float(self.cfg.max_floor_plan_dim_m)),
+                    min(7.0, float(self.cfg.max_floor_plan_dim_m)),
+                ),
+                maximum_dimension_m=float(self.cfg.max_floor_plan_dim_m),
+            )
         if style_bible is not None:
             self.blueprint = self.blueprint.model_copy(
                 update={
@@ -890,29 +926,40 @@ class StatefulFloorPlanAgent(BaseStatefulAgent, BaseFloorPlanAgent):
                     )
                 }
             )
-        self.candidate_tournament = create_candidate_tournament(
-            self.blueprint,
-            prompt=prompt,
-            candidate_count=6,
-        )
-        persist_candidate_tournament(
-            self.candidate_tournament,
-            self.logger.output_dir / "scene_candidates.json",
-        )
-        self.blueprint = self.candidate_tournament.winner.blueprint
+        if capability_manifest is None:
+            self.candidate_tournament = create_candidate_tournament(
+                self.blueprint,
+                prompt=prompt,
+                candidate_count=6,
+            )
+            persist_candidate_tournament(
+                self.candidate_tournament,
+                self.logger.output_dir / "scene_candidates.json",
+            )
+            self.blueprint = self.candidate_tournament.winner.blueprint
         persist_scene_blueprint(
             self.blueprint, self.logger.output_dir / "scene_blueprint.json"
         )
         self.house_prompt = self.blueprint.to_prompt_brief()
-        console_logger.info(
-            "Selected proxy candidate %s (score %.2f) as SceneBlueprint %s with "
-            "%d spaces and %d connectors",
-            self.candidate_tournament.winner_id,
-            self.candidate_tournament.winner.scores.total,
-            self.blueprint.blueprint_id,
-            len(self.blueprint.spaces),
-            len(self.blueprint.connectors),
-        )
+        if self.candidate_tournament is not None:
+            console_logger.info(
+                "Selected proxy candidate %s (score %.2f) as SceneBlueprint %s with "
+                "%d spaces and %d connectors",
+                self.candidate_tournament.winner_id,
+                self.candidate_tournament.winner.scores.total,
+                self.blueprint.blueprint_id,
+                len(self.blueprint.spaces),
+                len(self.blueprint.connectors),
+            )
+        else:
+            console_logger.info(
+                "Accepted requirement-bound SceneBlueprint %s with %d spaces, "
+                "%d connectors, and %d hard bindings",
+                self.blueprint.blueprint_id,
+                len(self.blueprint.spaces),
+                len(self.blueprint.connectors),
+                len(spatial_compilation.bindings),
+            )
 
         # Initialize geometry cache for reusing unchanged room geometry.
         cache_dir = house_dir / ".geometry_cache"

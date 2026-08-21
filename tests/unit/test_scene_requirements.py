@@ -473,7 +473,7 @@ def test_structured_analyst_is_the_semantic_authority():
     assert "immutable_candidates" in FakeRunner.call["input"]
 
 
-def test_floor_plan_calls_semantic_llm_before_blueprint_compilation(
+def test_floor_plan_calls_semantic_llm_then_requirement_bound_spatial_compiler(
     tmp_path, monkeypatch
 ):
     events = []
@@ -484,6 +484,7 @@ def test_floor_plan_calls_semantic_llm_before_blueprint_compilation(
     agent.cfg = SimpleNamespace(
         openai=SimpleNamespace(model="semantic-test-model"),
         max_floor_plan_dim_m=20.0,
+        wall_height=SimpleNamespace(max=12.0),
         semantic_capabilities={
             "catalog_available": True,
             "generated_geometry_available": True,
@@ -503,8 +504,8 @@ def test_floor_plan_calls_semantic_llm_before_blueprint_compilation(
     class BlueprintBoundary(RuntimeError):
         pass
 
-    def stop_at_blueprint(*_args, **_kwargs):
-        events.append(("blueprint",))
+    async def stop_at_spatial_compiler(graph, manifest, **kwargs):
+        events.append(("spatial", graph.graph_id, manifest.graph_id, kwargs["model"]))
         raise BlueprintBoundary
 
     monkeypatch.setattr(floor_plan_module, "load_design_system_from_env", lambda: None)
@@ -512,12 +513,16 @@ def test_floor_plan_calls_semantic_llm_before_blueprint_compilation(
         floor_plan_module, "analyze_requirement_candidates", fake_analysis
     )
     monkeypatch.setattr(floor_plan_module, "log_agent_usage", lambda **_kwargs: None)
-    monkeypatch.setattr(floor_plan_module, "blueprint_from_prompt", stop_at_blueprint)
+    monkeypatch.setattr(
+        floor_plan_module,
+        "compile_requirement_blueprint",
+        stop_at_spatial_compiler,
+    )
 
     with pytest.raises(BlueprintBoundary):
         asyncio.run(agent.generate_house_layout("A novel chamber.", tmp_path / "floor"))
 
-    assert [event[0] for event in events] == ["analyze", "blueprint"]
+    assert [event[0] for event in events] == ["analyze", "spatial"]
     persisted = load_requirement_graph(tmp_path / "scene_requirement_graph.json")
     assert persisted.analysis_status == "complete"
     assert persisted.analysis_model == "semantic-test-model"
@@ -525,6 +530,7 @@ def test_floor_plan_calls_semantic_llm_before_blueprint_compilation(
     assert (tmp_path / "semantic_obligation_summary.json").is_file()
     manifest = load_capability_manifest(tmp_path / "semantic_capability_manifest.json")
     assert manifest.preflight_passed
+    assert (tmp_path / "semantic_strategy_journal.json").is_file()
     ledger = load_semantic_ledger(tmp_path / "semantic_obligation_ledger.json")
     assert all(entry.current_status == "strategy_assigned" for entry in ledger.entries)
 

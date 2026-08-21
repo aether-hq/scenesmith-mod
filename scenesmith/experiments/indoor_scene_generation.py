@@ -51,6 +51,9 @@ from scenesmith.agent_utils.objaverse_retrieval_server import ObjaverseRetrieval
 from scenesmith.agent_utils.physical_feasibility import (
     apply_physical_feasibility_postprocessing,
 )
+from scenesmith.agent_utils.requirement_blueprint_compiler import (
+    load_spatial_compilation,
+)
 from scenesmith.agent_utils.room import AgentType, ObjectType, RoomScene
 from scenesmith.agent_utils.scene_blueprint import SceneBlueprint
 from scenesmith.agent_utils.scene_requirements import (
@@ -60,7 +63,22 @@ from scenesmith.agent_utils.scene_requirements import (
 )
 from scenesmith.agent_utils.semantic_ledger import (
     load_or_initialize_semantic_ledger,
+    persist_semantic_ledger,
     persist_semantic_ledger_summary,
+    transition_requirement,
+)
+from scenesmith.agent_utils.semantic_publication import (
+    SemanticPublicationError,
+    analyze_final_semantics,
+    certify_semantic_publication,
+    persist_publication_artifact,
+    semantic_artifact_inventory,
+)
+from scenesmith.agent_utils.semantic_strategies import (
+    load_capability_manifest,
+    load_strategy_journal,
+    persist_strategy_journal,
+    record_strategy_attempt,
 )
 from scenesmith.agent_utils.sceneeval_exporter import (
     SceneEvalExportConfig,
@@ -71,6 +89,7 @@ from scenesmith.experiments.base_experiment import BaseExperiment
 from scenesmith.floor_plan_agents.stateful_floor_plan_agent import (
     StatefulFloorPlanAgent,
 )
+from scenesmith.agent_utils.base_stateful_agent import log_agent_usage
 from scenesmith.furniture_agents.stateful_furniture_agent import (
     StatefulFurnitureAgent,
     _validate_room_kit_completion,
@@ -609,6 +628,18 @@ def _copy_checkpoint_for_stage(
             capability_manifest,
             target_scene_dir / "semantic_capability_manifest.json",
         )
+    strategy_journal = source_scene_dir / "semantic_strategy_journal.json"
+    if strategy_journal.exists():
+        shutil.copy(
+            strategy_journal,
+            target_scene_dir / "semantic_strategy_journal.json",
+        )
+    spatial_compilation = source_scene_dir / "semantic_spatial_compilation.json"
+    if spatial_compilation.exists():
+        shutil.copy(
+            spatial_compilation,
+            target_scene_dir / "semantic_spatial_compilation.json",
+        )
 
     checkpoint_name = STAGE_CHECKPOINTS[start_stage]
     asset_dirs = STAGE_ASSET_DIRS[start_stage]
@@ -1038,6 +1069,12 @@ def _generate_room(
             f"{timedelta(seconds=end_time - start_time)}"
         )
 
+    # Every preceding stage has already run its own physics gate. The final
+    # projection/simulation result becomes the publication certificate's
+    # independent physics boundary when enabled.
+    final_physics_verified = True
+    final_physics_evidence_refs = ("physics:all-stage-gates-passed",)
+
     # Final post-processing (projection + simulation).
     if projection_cfg["enabled"] and projection_cfg["final"]["enabled"]:
         final_cfg = projection_cfg["final"]
@@ -1104,15 +1141,251 @@ def _generate_room(
                 f"Final post-processing completed for room {room_id} in "
                 f"{end_time - start_time:.2f} seconds"
             )
+        final_physics_verified = bool(projection_success)
+        final_physics_evidence_refs = (
+            "physics:all-stage-gates-passed",
+            "physics:final-projection-and-simulation",
+        )
 
     _validate_final_dense_library_book_rows(scene, manipuland_agent)
 
-    # This audit is intentionally observational until its requirement extraction
-    # has been calibrated against the regression corpus. It exposes silent prompt
-    # loss without changing the current build verdict.
     requirement_graph_path = room_dir.parent / "scene_requirement_graph.json"
     scene_blueprint_path = room_dir.parent / "scene_blueprint.json"
-    if requirement_graph_path.is_file() and scene_blueprint_path.is_file():
+    spatial_compilation_path = room_dir.parent / "semantic_spatial_compilation.json"
+    capability_manifest_path = room_dir.parent / "semantic_capability_manifest.json"
+    strategy_journal_path = room_dir.parent / "semantic_strategy_journal.json"
+    if (
+        requirement_graph_path.is_file()
+        and scene_blueprint_path.is_file()
+        and spatial_compilation_path.is_file()
+        and capability_manifest_path.is_file()
+        and strategy_journal_path.is_file()
+    ):
+        requirement_graph = load_requirement_graph(requirement_graph_path)
+        scene_blueprint = SceneBlueprint.model_validate_json(
+            scene_blueprint_path.read_text(encoding="utf-8")
+        )
+        spatial_compilation = load_spatial_compilation(spatial_compilation_path)
+        artifacts = semantic_artifact_inventory(
+            scene_blueprint,
+            scene,
+            house_layout=house_layout,
+        )
+        configured_model = str(
+            cfg_dict["floor_plan_agent"].get("openai", {}).get("model") or ""
+        )
+        if not configured_model:
+            raise RuntimeError(
+                "Semantic publication verifier model is not configured; "
+                "the scene cannot publish."
+            )
+        verification, verification_result = asyncio.run(
+            analyze_final_semantics(
+                requirement_graph,
+                spatial_compilation,
+                artifacts,
+                model=configured_model,
+                run_config=manipuland_agent._create_run_config(),
+                model_settings=manipuland_agent._get_model_settings(
+                    settings_key="designer"
+                ),
+            )
+        )
+        log_agent_usage(
+            result=verification_result,
+            agent_name="SEMANTIC PUBLICATION VERIFIER",
+        )
+        verification_path = room_dir / "semantic_verification.json"
+        persist_publication_artifact(verification, verification_path)
+        semantic_ledger = load_or_initialize_semantic_ledger(
+            room_dir.parent / "semantic_obligation_ledger.json",
+            requirement_graph,
+        )
+        capability_manifest = load_capability_manifest(capability_manifest_path)
+        strategy_journal = load_strategy_journal(strategy_journal_path)
+        try:
+            certificate = certify_semantic_publication(
+                requirement_graph,
+                spatial_compilation,
+                artifacts,
+                verification,
+                physics_verified=final_physics_verified,
+                physics_evidence_refs=final_physics_evidence_refs,
+            )
+        except SemanticPublicationError as exc:
+            failure_path = room_dir / "semantic_publication_failure.json"
+            failure_path.write_text(
+                json.dumps(
+                    {
+                        "graph_id": requirement_graph.graph_id,
+                        "error": str(exc),
+                        "failures": list(exc.failures),
+                        "physics_verified": final_physics_verified,
+                    },
+                    indent=2,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            for requirement in requirement_graph.requirements:
+                if requirement.strength != "hard" or requirement.enforcement not in {
+                    "blocking",
+                    "unresolved_blocking",
+                }:
+                    continue
+                matching_failures = tuple(
+                    failure
+                    for failure in exc.failures
+                    if requirement.requirement_id in failure
+                )
+                if exc.failures and not matching_failures:
+                    continue
+                diagnostic = (
+                    "; ".join(matching_failures) if matching_failures else str(exc)
+                )
+                plan = next(
+                    item
+                    for item in capability_manifest.plans
+                    if item.requirement_id == requirement.requirement_id
+                )
+                if (
+                    plan.selected_strategy is not None
+                    and plan.selected_provider is not None
+                ):
+                    strategy_journal = record_strategy_attempt(
+                        strategy_journal,
+                        capability_manifest,
+                        attempt_key=f"final-failed:{requirement.requirement_id}",
+                        requirement_id=requirement.requirement_id,
+                        strategy=plan.selected_strategy,
+                        provider_id=plan.selected_provider,
+                        stage="construction_to_semantic",
+                        outcome="failed",
+                        diagnostic=diagnostic,
+                    )
+                semantic_ledger = transition_requirement(
+                    semantic_ledger,
+                    requirement.requirement_id,
+                    "failed",
+                    event_key=f"semantic-final:failed:{requirement.requirement_id}",
+                    actor="semantic_publication_gate",
+                    stage="semantic",
+                    evidence_refs=(str(verification_path), str(failure_path)),
+                    failure_reason=diagnostic,
+                )
+            persist_strategy_journal(strategy_journal, strategy_journal_path)
+            persist_semantic_ledger(
+                semantic_ledger,
+                room_dir.parent / "semantic_obligation_ledger.json",
+            )
+            persist_semantic_ledger_summary(
+                semantic_ledger,
+                room_dir / "semantic_obligation_summary.json",
+            )
+            raise
+        certificate_path = room_dir / "semantic_publication_certificate.json"
+        persist_publication_artifact(certificate, certificate_path)
+
+        certified_by_id = {
+            item.requirement_id: item for item in certificate.requirements
+        }
+        claims_by_id = {item.requirement_id: item for item in verification.claims}
+        for requirement in requirement_graph.requirements:
+            if requirement.strength != "hard":
+                continue
+            plan = next(
+                item
+                for item in capability_manifest.plans
+                if item.requirement_id == requirement.requirement_id
+            )
+            certified_requirement = certified_by_id.get(requirement.requirement_id)
+            if certified_requirement is None:
+                claim = claims_by_id.get(requirement.requirement_id)
+                failure_reason = (
+                    f"Advisory semantic verification did not pass: "
+                    f"{claim.semantic_rationale if claim is not None else 'missing claim'}"
+                )
+                semantic_ledger = transition_requirement(
+                    semantic_ledger,
+                    requirement.requirement_id,
+                    "failed",
+                    event_key=f"semantic-final:failed:{requirement.requirement_id}",
+                    actor="semantic_publication_gate",
+                    stage="semantic",
+                    evidence_refs=(str(verification_path),),
+                    failure_reason=failure_reason,
+                )
+                continue
+            evidence_refs = tuple(
+                f"artifact:{artifact_id}"
+                for artifact_id in certified_requirement.artifact_ids
+            )
+            if (
+                plan.selected_strategy is not None
+                and plan.selected_provider is not None
+            ):
+                strategy_journal = record_strategy_attempt(
+                    strategy_journal,
+                    capability_manifest,
+                    attempt_key=f"final:{requirement.requirement_id}",
+                    requirement_id=requirement.requirement_id,
+                    strategy=plan.selected_strategy,
+                    provider_id=plan.selected_provider,
+                    stage="construction_to_semantic",
+                    outcome="succeeded",
+                    evidence_refs=evidence_refs or (str(verification_path),),
+                )
+            semantic_ledger = transition_requirement(
+                semantic_ledger,
+                requirement.requirement_id,
+                "constructed",
+                event_key=f"semantic-final:constructed:{requirement.requirement_id}",
+                actor="semantic_publication_gate",
+                stage="construction",
+                evidence_refs=evidence_refs or (str(verification_path),),
+            )
+            semantic_ledger = transition_requirement(
+                semantic_ledger,
+                requirement.requirement_id,
+                "verified",
+                event_key=f"semantic-final:verified:{requirement.requirement_id}",
+                actor="semantic_publication_gate",
+                stage="semantic",
+                evidence_refs=(str(verification_path),),
+            )
+            semantic_ledger = transition_requirement(
+                semantic_ledger,
+                requirement.requirement_id,
+                "fulfilled",
+                event_key=f"semantic-final:fulfilled:{requirement.requirement_id}",
+                actor="semantic_publication_gate",
+                stage="publication",
+                evidence_refs=(str(certificate_path),),
+            )
+        persist_strategy_journal(strategy_journal, strategy_journal_path)
+        persist_semantic_ledger(
+            semantic_ledger,
+            room_dir.parent / "semantic_obligation_ledger.json",
+        )
+        ledger_summary = persist_semantic_ledger_summary(
+            semantic_ledger,
+            room_dir / "semantic_obligation_summary.json",
+        )
+        if not ledger_summary.publishable or not ledger_summary.closed:
+            raise RuntimeError(
+                "Semantic publication certificate was created but the immutable "
+                "obligation ledger did not close publishably."
+            )
+        console_logger.info(
+            "Semantic publication gate passed: %d requirements certified, "
+            "physics_verified=%s, ledger_revision=%d",
+            len(certificate.requirements),
+            certificate.physics_verified,
+            ledger_summary.revision,
+        )
+    elif requirement_graph_path.is_file() and scene_blueprint_path.is_file():
+        # Compatibility observation for legacy checkpoints created before the
+        # enforced spatial compilation/certificate contract existed.
         try:
             requirement_graph = load_requirement_graph(requirement_graph_path)
             scene_blueprint = SceneBlueprint.model_validate_json(
@@ -1144,12 +1417,10 @@ def _generate_room(
             )
         except Exception as exc:
             console_logger.warning(
-                "Semantic shadow audit could not be completed; build verdict is "
-                "unchanged in shadow mode: %s",
+                "Legacy semantic shadow audit could not be completed: %s",
                 exc,
             )
-
-    if requirement_graph_path.is_file():
+    if requirement_graph_path.is_file() and not spatial_compilation_path.is_file():
         try:
             requirement_graph = load_requirement_graph(requirement_graph_path)
             semantic_ledger = load_or_initialize_semantic_ledger(
