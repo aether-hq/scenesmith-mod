@@ -8,9 +8,12 @@ import time
 import pytest
 
 from pathlib import Path
+from urllib.parse import urljoin
+from urllib.request import urlopen
 
 from scenesmith.agent_utils.cli_llm_proxy import (
     DEFAULT_SUBSCRIPTION_HARD_TIMEOUT_SECONDS,
+    OpenAIChatProxy,
     SubscriptionCommandCancelled,
     SubscriptionCommandTimeout,
     SubscriptionQueueBusy,
@@ -24,6 +27,22 @@ from scenesmith.agent_utils.cli_llm_proxy import (
 
 def test_subscription_absolute_safety_ceiling_allows_long_active_streams():
     assert DEFAULT_SUBSCRIPTION_HARD_TIMEOUT_SECONDS == 300.0
+
+
+def test_proxy_reports_active_subscription_turn_status():
+    class FakeExecutor:
+        def is_active(self):
+            return True
+
+    proxy = OpenAIChatProxy(FakeExecutor(), "test-cli")
+    base_url = proxy.start()
+    try:
+        with urlopen(urljoin(base_url, "status"), timeout=1.0) as response:
+            payload = json.loads(response.read())
+    finally:
+        proxy.stop()
+
+    assert payload == {"status": "active", "provider": "test-cli"}
 
 
 def test_data_url_images_are_materialized(tmp_path: Path):

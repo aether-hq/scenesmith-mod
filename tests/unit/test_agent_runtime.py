@@ -16,6 +16,11 @@ async def _stuck_run(*args, **kwargs):
     await asyncio.sleep(10)
 
 
+async def _slow_but_healthy_run(*args, **kwargs):
+    await asyncio.sleep(0.04)
+    return "completed"
+
+
 def test_bounded_runner_cancels_stuck_workflow(monkeypatch):
     with patch(
         "scenesmith.agent_utils.agent_runtime.OpenAIRunner.run",
@@ -74,3 +79,56 @@ def test_workflow_timeout_does_not_expand_into_route_retry_product(monkeypatch):
 
     assert minimum >= 370
     assert agent_run_timeout_seconds("designer", max_turns=2) == 5
+
+
+def test_bounded_runner_allows_active_subscription_turn_to_finish():
+    with (
+        patch(
+            "scenesmith.agent_utils.agent_runtime.OpenAIRunner.run",
+            side_effect=_slow_but_healthy_run,
+        ),
+        patch(
+            "scenesmith.agent_utils.agent_runtime.subscription_turn_active",
+            return_value=True,
+            create=True,
+        ),
+        patch(
+            "scenesmith.agent_utils.agent_runtime.cancel_subscription_turn"
+        ) as cancel,
+    ):
+        result = asyncio.run(
+            BoundedRunner.run(
+                timeout_seconds=0.01,
+                active_stream_hard_timeout_seconds=0.08,
+            )
+        )
+
+    assert result == "completed"
+    cancel.assert_not_called()
+
+
+def test_bounded_runner_still_stops_active_turn_at_hard_ceiling():
+    with (
+        patch(
+            "scenesmith.agent_utils.agent_runtime.OpenAIRunner.run",
+            side_effect=_stuck_run,
+        ),
+        patch(
+            "scenesmith.agent_utils.agent_runtime.subscription_turn_active",
+            return_value=True,
+            create=True,
+        ),
+        patch(
+            "scenesmith.agent_utils.agent_runtime.cancel_subscription_turn",
+            return_value=True,
+        ) as cancel,
+    ):
+        with pytest.raises(AgentWorkflowTimeout, match="exceeded 0.03s"):
+            asyncio.run(
+                BoundedRunner.run(
+                    timeout_seconds=0.01,
+                    active_stream_hard_timeout_seconds=0.03,
+                )
+            )
+
+    cancel.assert_called_once_with()

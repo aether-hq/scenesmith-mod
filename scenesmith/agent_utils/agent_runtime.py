@@ -1,6 +1,7 @@
 """Bounded adapter for complete OpenAI Agents SDK workflows."""
 
 import asyncio
+import json
 import logging
 import os
 
@@ -19,6 +20,21 @@ DEFAULT_AGENT_RUN_TIMEOUT_SECONDS = 120.0
 
 class AgentWorkflowTimeout(TimeoutError):
     """A recoverable wall-clock limit for an agent workflow."""
+
+
+def subscription_turn_active() -> bool:
+    """Return whether the local subscription proxy is executing a model turn."""
+    base_url = os.environ.get("SCENESMITH_CLI_PROXY_URL")
+    if not base_url:
+        return False
+    request = Request(urljoin(base_url, "status"), method="GET")
+    try:
+        with urlopen(request, timeout=0.5) as response:
+            payload = json.loads(response.read())
+        return payload.get("status") == "active"
+    except Exception as exc:
+        console_logger.warning("Could not read subscription CLI status: %s", exc)
+        return False
 
 
 def cancel_subscription_turn() -> bool:
@@ -93,25 +109,61 @@ class BoundedRunner:
     async def run(*args: Any, **kwargs: Any) -> Any:
         # This is a facade-only argument and must not reach the Agents SDK.
         timeout = float(kwargs.pop("timeout_seconds", agent_run_timeout_seconds()))
+        configured_active_stream_hard_timeout = float(
+            kwargs.pop(
+                "active_stream_hard_timeout_seconds",
+                os.environ.get(
+                    "SCENESMITH_AGENT_ACTIVE_STREAM_HARD_TIMEOUT_SECONDS",
+                    os.environ.get("SCENESMITH_LLM_HARD_TIMEOUT_SECONDS", "300"),
+                ),
+            )
+        )
+        active_stream_hard_timeout = max(timeout, configured_active_stream_hard_timeout)
         if timeout <= 0:
             raise ValueError("timeout_seconds must be positive")
+        if configured_active_stream_hard_timeout <= 0:
+            raise ValueError("active_stream_hard_timeout_seconds must be positive")
         started = asyncio.get_running_loop().time()
+        task = asyncio.create_task(OpenAIRunner.run(*args, **kwargs))
+        limit = timeout
         try:
-            result = await asyncio.wait_for(
-                OpenAIRunner.run(*args, **kwargs), timeout=timeout
-            )
+            done, _ = await asyncio.wait({task}, timeout=timeout)
+            if not done and await asyncio.to_thread(subscription_turn_active):
+                limit = active_stream_hard_timeout
+                console_logger.info(
+                    "Agent workflow reached %.1fs with an active subscription turn; "
+                    "allowing it to continue to the %.1fs hard ceiling",
+                    timeout,
+                    active_stream_hard_timeout,
+                )
+                remaining = max(
+                    0.0,
+                    active_stream_hard_timeout
+                    - (asyncio.get_running_loop().time() - started),
+                )
+                done, _ = await asyncio.wait({task}, timeout=remaining)
+            if done:
+                result = await task
+            else:
+                raise asyncio.TimeoutError
+        except asyncio.CancelledError:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+            raise
         except TimeoutError as exc:
             elapsed = asyncio.get_running_loop().time() - started
             console_logger.error(
                 "Agent workflow exceeded %.1fs after %.1fs; cancelling",
-                timeout,
+                limit,
                 elapsed,
             )
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
             # Cancelling the async HTTP client does not stop the proxy's worker
             # thread. Explicitly terminate its active CLI process so the next
             # planner turn cannot queue behind an orphan.
             await asyncio.to_thread(cancel_subscription_turn)
-            raise AgentWorkflowTimeout(f"Agent workflow exceeded {timeout:g}s") from exc
+            raise AgentWorkflowTimeout(f"Agent workflow exceeded {limit:g}s") from exc
         console_logger.info(
             "Agent workflow completed in %.3fs",
             asyncio.get_running_loop().time() - started,

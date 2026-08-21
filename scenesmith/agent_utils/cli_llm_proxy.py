@@ -676,6 +676,10 @@ class _CodexExecutor:
         """Cancel the currently running serialized CLI request, if any."""
         self._cancel_event.set()
 
+    def is_active(self) -> bool:
+        """Return whether a serialized subscription turn owns the worker."""
+        return self._lock.locked()
+
     def wait_until_idle(self, timeout_seconds: float = 4.0) -> bool:
         """Wait until cancellation has released the serialized CLI lock."""
         acquired = self._lock.acquire(timeout=timeout_seconds)
@@ -796,6 +800,15 @@ class OpenAIChatProxy:
                     )
 
             def do_GET(self) -> None:  # noqa: N802
+                if self.path.rstrip("/") == "/v1/status":
+                    self._json(
+                        200,
+                        {
+                            "status": "active" if executor.is_active() else "idle",
+                            "provider": provider,
+                        },
+                    )
+                    return
                 if self.path.rstrip("/") in {"", "/health", "/v1/models"}:
                     self._json(200, {"status": "ok", "provider": provider})
                 else:
