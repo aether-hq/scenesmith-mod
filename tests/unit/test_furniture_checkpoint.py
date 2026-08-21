@@ -291,6 +291,27 @@ class TestCopyCheckpointForStage(unittest.TestCase):
         """Test copying scene for wall_mounted stage copies furniture checkpoint."""
         source_scene = self._create_source_scene(with_furniture_assets=True)
         source_room = source_scene / "room_main"
+        external_asset = (
+            self.source_dir
+            / "prior_run"
+            / "scene_000"
+            / "room_main"
+            / "generated_assets"
+            / "furniture"
+            / "shared_chair.sdf"
+        )
+        external_asset.parent.mkdir(parents=True)
+        external_asset.write_text("<sdf>shared chair</sdf>")
+        source_checkpoint = source_room / "scene_states" / "scene_after_furniture"
+        state = json.loads((source_checkpoint / "scene_state.json").read_text())
+        state["objects"].append({"id": "shared_chair", "sdf_path": str(external_asset)})
+        (source_checkpoint / "scene_state.json").write_text(json.dumps(state))
+        with (source_checkpoint / "scene.dmd.yaml").open("a") as directives:
+            directives.write(
+                "- add_model:\n"
+                "    name: shared_chair\n"
+                f"    file: file://{external_asset}\n"
+            )
         target_scene = self.target_dir / "scene_000"
         target_scene.mkdir(parents=True)
 
@@ -319,11 +340,13 @@ class TestCopyCheckpointForStage(unittest.TestCase):
         table_sdf = state["objects"][0]["sdf_path"]
         self.assertIn(str(target_room), table_sdf)
         self.assertNotIn(str(source_room), table_sdf)
+        self.assertEqual(state["objects"][1]["sdf_path"], str(external_asset))
 
         # Verify paths were fixed in scene.dmd.yaml.
         dmd_content = (checkpoint_dir / "scene.dmd.yaml").read_text()
         self.assertIn(str(target_room), dmd_content)
         self.assertNotIn(str(source_room), dmd_content)
+        self.assertIn(f"file://{external_asset}", dmd_content)
 
         # Verify session DB was NOT copied.
         self.assertFalse((target_room / "furniture_agent.db").exists())

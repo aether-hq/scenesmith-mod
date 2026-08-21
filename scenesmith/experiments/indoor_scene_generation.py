@@ -375,7 +375,11 @@ def _export_scene_blend_file(
 
 
 def _fix_paths_in_json_file(
-    json_path: Path, new_room_dir: Path, new_scene_dir: Path | None = None
+    json_path: Path,
+    new_room_dir: Path,
+    new_scene_dir: Path | None = None,
+    source_room_dir: Path | None = None,
+    source_scene_dir: Path | None = None,
 ) -> None:
     """Fix absolute paths in a JSON file to point to new directories.
 
@@ -402,6 +406,21 @@ def _fix_paths_in_json_file(
         """Fix a single path string if it's an absolute path."""
         if not value.startswith("/"):
             return value  # Already relative, no fix needed.
+
+        path = Path(value)
+        if source_room_dir is not None:
+            try:
+                return str(new_room_dir / path.relative_to(source_room_dir))
+            except ValueError:
+                pass
+            if source_scene_dir is not None:
+                try:
+                    return str(new_scene_dir / path.relative_to(source_scene_dir))
+                except ValueError:
+                    pass
+            # References to shared assets or prior runs were not copied into the
+            # target checkpoint and must retain their existing absolute paths.
+            return value
 
         # Room-level paths (relative to room directory).
         room_markers = ["generated_assets/", "scene_renders/", "scene_states/"]
@@ -438,7 +457,11 @@ def _fix_paths_in_json_file(
 
 
 def _fix_paths_in_yaml_file(
-    yaml_path: Path, new_room_dir: Path, new_scene_dir: Path | None = None
+    yaml_path: Path,
+    new_room_dir: Path,
+    new_scene_dir: Path | None = None,
+    source_room_dir: Path | None = None,
+    source_scene_dir: Path | None = None,
 ) -> None:
     """Fix absolute paths in YAML file (e.g., scene.dmd.yaml Drake directives).
 
@@ -463,6 +486,21 @@ def _fix_paths_in_yaml_file(
     def replace_path(match: re.Match) -> str:
         """Replace a file:// URI with the correct new path."""
         old_path = match.group(1)
+        path = Path(old_path)
+        if source_room_dir is not None:
+            try:
+                return f"file://{new_room_dir / path.relative_to(source_room_dir)}"
+            except ValueError:
+                pass
+            if source_scene_dir is not None:
+                try:
+                    return (
+                        f"file://{new_scene_dir / path.relative_to(source_scene_dir)}"
+                    )
+                except ValueError:
+                    pass
+            return match.group(0)
+
         # Determine if room-level or scene-level path.
         if "/generated_assets/" in old_path or "/scene_renders/" in old_path:
             # Room-level: extract relative part after room_*/.
@@ -567,6 +605,8 @@ def _copy_checkpoint_for_stage(
                     json_path=target_state / "scene_state.json",
                     new_room_dir=target_room,
                     new_scene_dir=target_scene_dir,
+                    source_room_dir=room_dir,
+                    source_scene_dir=source_scene_dir,
                 )
 
                 # Fix absolute paths in scene.dmd.yaml (Drake directives).
@@ -574,6 +614,8 @@ def _copy_checkpoint_for_stage(
                     yaml_path=target_state / "scene.dmd.yaml",
                     new_room_dir=target_room,
                     new_scene_dir=target_scene_dir,
+                    source_room_dir=room_dir,
+                    source_scene_dir=source_scene_dir,
                 )
 
         # Copy required asset directories.
@@ -590,6 +632,8 @@ def _copy_checkpoint_for_stage(
                         json_path=asset_registry,
                         new_room_dir=target_room,
                         new_scene_dir=target_scene_dir,
+                        source_room_dir=room_dir,
+                        source_scene_dir=source_scene_dir,
                     )
 
     console_logger.info(
