@@ -67,6 +67,9 @@ _FAMILY_TERMS: dict[str, frozenset[str]] = {
     "artwork": frozenset(
         {"art", "artwork", "canvas", "painting", "picture", "poster", "print"}
     ),
+    "sculpture": frozenset(
+        {"bust", "busts", "figurine", "figurines", "sculpture", "statue", "statues"}
+    ),
     "plant": frozenset({"flower", "flowers", "plant", "plants", "tree"}),
     "clock": frozenset({"clock", "timepiece"}),
     "rug": frozenset({"carpet", "mat", "rug", "runner"}),
@@ -233,6 +236,10 @@ def catalog_candidate_is_compatible(
             + ", ".join(sorted(candidate)),
         )
     unexpected = candidate - requested
+    if "sculpture" in requested:
+        # Catalog taxonomies commonly nest sculpture under "Decor & Art". The
+        # broad parent label does not make a statue a composite artwork object.
+        unexpected = unexpected - {"artwork"}
     if unexpected:
         return (
             False,

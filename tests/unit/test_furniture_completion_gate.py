@@ -332,6 +332,88 @@ def test_library_recovery_fills_expanded_statue_count():
     assert placements[0]["asset_id"] == "classical_statue_asset"
 
 
+def test_library_recovery_acquires_missing_required_statue_once():
+    statue_slot = SimpleNamespace(
+        role="classical_statue",
+        aliases=("statue", "sculpture"),
+        query="classical Renaissance marble statue on pedestal",
+        nominal_dimensions_m=(0.7, 0.7, 2.0),
+        required=True,
+        minimum_count=2,
+        placement_class="floor",
+        facing_target="room_center",
+    )
+    room_kit = SimpleNamespace(
+        kit_id="library-reading-hall-v1",
+        slot_counts={"classical_statue": 3},
+        slots=(statue_slot,),
+    )
+    acquired_assets = []
+    acquisition_requests = []
+
+    class FakeAssetManager:
+        def list_available_assets(self):
+            return list(acquired_assets)
+
+        def generate_assets(self, request):
+            acquisition_requests.append(request)
+            asset = SimpleNamespace(
+                object_id="classical_statue_asset",
+                object_type=ObjectType.FURNITURE,
+                name="classical_statue",
+                description="classical Renaissance marble statue on pedestal",
+                metadata={
+                    "asset_quality_score": 1.0,
+                    "catalog_semantics": (
+                        "Gothic Statue polyhaven/Decor & Art/Sculptures & "
+                        "Figurines/Busts & Human Figures"
+                    ),
+                },
+            )
+            acquired_assets.append(asset)
+            return SimpleNamespace(successful_assets=[asset], failed_assets=[])
+
+    placements = []
+
+    class FakeTools:
+        def set_noise_profile(self, _mode):
+            pass
+
+        def _major_support_elevations(self):
+            return (0.0, 4.0, 8.0)
+
+        def _add_furniture_to_scene_impl(self, **kwargs):
+            placements.append(kwargs)
+            return json.dumps({"success": True})
+
+    agent = object.__new__(StatefulFurnitureAgent)
+    agent.scene = SimpleNamespace(
+        objects={
+            f"classical_statue_{index}": SimpleNamespace(
+                object_id=f"classical_statue_{index}",
+                object_type=ObjectType.FURNITURE,
+                name="classical_statue",
+                description="classical Renaissance marble statue on pedestal",
+                metadata={"asset_quality_score": 1.0},
+                transform=RigidTransform([0.0, 0.0, elevation]),
+            )
+            for index, elevation in enumerate((0.0, 4.0))
+        },
+        room_geometry=SimpleNamespace(length=13.0, width=13.0),
+        text_description="large multi-level Renaissance library with statues",
+        scene_dir=SimpleNamespace(name="room_room"),
+    )
+    agent.asset_manager = FakeAssetManager()
+    agent.furniture_tools = FakeTools()
+
+    placed = agent._place_room_kit_minimums_deterministically(room_kit)
+
+    assert placed == 1
+    assert len(acquisition_requests) == 1
+    assert acquisition_requests[0].short_names == ["classical_statue"]
+    assert len(placements) == 1
+
+
 _EXACT_MULTILEVEL_LIBRARY_PROMPT = (
     "a large, multi-level library with thousands of books and a bunch of "
     "tables and chairs for patrons"

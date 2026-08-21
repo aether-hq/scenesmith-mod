@@ -246,3 +246,50 @@ def test_curated_candidate_beats_low_quality_literal_match_for_known_family() ->
         )
 
     assert [candidate.uid for candidate in candidates] == ["curated"]
+
+
+def test_curated_sculpture_beats_low_quality_literal_statue_match() -> None:
+    metadata = {
+        "literal": ObjaverseMeshMetadata(
+            uid="literal",
+            name="Unknown",
+            description="A statue of a man standing on a pedestal",
+            category="large_objects",
+            bounding_box=(0.7, 0.7, 2.0),
+            ontology_path="objaverse/large_objects",
+            quality_score=0.66,
+            deferred_loading=True,
+        ),
+        "curated": ObjaverseMeshMetadata(
+            uid="curated",
+            name="Gothic Statue",
+            description="Ornate classical stone human figure",
+            category="large_objects",
+            bounding_box=(1.48, 1.56, 1.74),
+            ontology_path=(
+                "polyhaven/Decor & Art/Sculptures & Figurines/Busts & Human Figures"
+            ),
+            quality_score=1.0,
+            deferred_loading=True,
+        ),
+    }
+    retriever = object.__new__(ObjaverseRetriever)
+    retriever.config = SimpleNamespace(
+        object_type_mapping={"FURNITURE": "large_objects"}, use_top_k=50
+    )
+    retriever.clip_device = "cpu"
+    retriever.preprocessed_data = MagicMock()
+    retriever.preprocessed_data.get_metadata.side_effect = metadata.get
+
+    with patch(
+        "scenesmith.agent_utils.objaverse_retrieval.retrieval.get_top_k_similar_meshes",
+        return_value=[("literal", 1.0), ("curated", 0.9)],
+    ):
+        candidates = retriever.retrieve_multiple(
+            description="classical Renaissance marble statue on pedestal",
+            object_type="furniture",
+            desired_dimensions=np.array([0.7, 0.7, 2.0]),
+            max_candidates=2,
+        )
+
+    assert [candidate.uid for candidate in candidates] == ["curated"]

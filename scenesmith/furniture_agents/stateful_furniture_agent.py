@@ -22,6 +22,7 @@ from scenesmith.agent_utils.asset_semantics import (
     catalog_candidate_satisfies_request_details,
     tall_furniture_dimensions_are_compatible,
 )
+from scenesmith.agent_utils.asset_manager import AssetGenerationRequest
 from scenesmith.agent_utils.base_stateful_agent import BaseStatefulAgent
 from scenesmith.agent_utils.blender.process_provider import RenderAllocation
 from scenesmith.agent_utils.placement_noise import PlacementNoiseMode
@@ -740,8 +741,6 @@ class StatefulFurnitureAgent(BaseStatefulAgent, BaseFurnitureAgent):
             for asset in self.asset_manager.list_available_assets()
             if asset.object_type == ObjectType.FURNITURE
         ]
-        if not assets:
-            return 0
 
         self.furniture_tools.set_noise_profile(PlacementNoiseMode.PERFECT)
         support_elevations = self.furniture_tools._major_support_elevations()
@@ -818,6 +817,57 @@ class StatefulFurnitureAgent(BaseStatefulAgent, BaseFurnitureAgent):
                 key=lambda asset: self._slot_relevance(asset, slot),
                 reverse=True,
             )
+            if not ranked or self._slot_relevance(ranked[0], slot)[0] <= 0:
+                try:
+                    result = self.asset_manager.generate_assets(
+                        AssetGenerationRequest(
+                            object_descriptions=[
+                                str(getattr(slot, "query", slot.role))
+                            ],
+                            short_names=[slot.role],
+                            object_type=ObjectType.FURNITURE,
+                            desired_dimensions=[
+                                list(
+                                    getattr(
+                                        slot,
+                                        "nominal_dimensions_m",
+                                        (1.0, 1.0, 1.0),
+                                    )
+                                )
+                            ],
+                            style_context=str(
+                                getattr(self.scene, "text_description", "")
+                            ),
+                            scene_id=getattr(
+                                getattr(self.scene, "scene_dir", None),
+                                "name",
+                                None,
+                            ),
+                        )
+                    )
+                    console_logger.info(
+                        "Deterministic recovery acquired %d asset(s) for missing "
+                        "room-kit role %s",
+                        len(result.successful_assets),
+                        slot.role,
+                    )
+                except Exception as exc:
+                    console_logger.warning(
+                        "Deterministic recovery could not acquire missing room-kit "
+                        "role %s: %s",
+                        slot.role,
+                        exc,
+                    )
+                assets = [
+                    asset
+                    for asset in self.asset_manager.list_available_assets()
+                    if asset.object_type == ObjectType.FURNITURE
+                ]
+                ranked = sorted(
+                    assets,
+                    key=lambda asset: self._slot_relevance(asset, slot),
+                    reverse=True,
+                )
             if not ranked or self._slot_relevance(ranked[0], slot)[0] <= 0:
                 console_logger.warning(
                     "No cached furniture asset matched required room-kit role %s",
