@@ -235,6 +235,85 @@ def _patron_ensemble_level_counts(
     }
 
 
+def _bookcase_wall_run_level_counts(
+    objects: Any,
+    bookshelf_slot: Any,
+    support_elevations: tuple[float, ...],
+) -> dict[float, int]:
+    """Return the largest contiguous, consistently oriented bookcase run/story."""
+
+    by_level = {elevation: [] for elevation in support_elevations}
+    for obj in objects:
+        if getattr(
+            obj, "object_type", None
+        ) != ObjectType.FURNITURE or not _object_matches_room_kit_slot(
+            obj, bookshelf_slot
+        ):
+            continue
+        level = _nearest_level(obj, support_elevations)
+        if level is not None:
+            by_level[level].append(obj)
+
+    def pose_and_footprint(obj: Any) -> tuple[float, float, float, float, float] | None:
+        try:
+            translation = obj.transform.translation()
+            yaw = float(obj.transform.rotation().ToRollPitchYaw().yaw_angle())
+            x_size = abs(float(obj.bbox_max[0]) - float(obj.bbox_min[0]))
+            y_size = abs(float(obj.bbox_max[1]) - float(obj.bbox_min[1]))
+        except (AttributeError, IndexError, TypeError, ValueError):
+            return None
+        return (
+            float(translation[0]),
+            float(translation[1]),
+            yaw,
+            max(x_size, y_size, 0.5),
+            max(min(x_size, y_size), 0.15),
+        )
+
+    largest_runs: dict[float, int] = {}
+    for elevation, level_objects in by_level.items():
+        posed = [
+            (obj, pose)
+            for obj in level_objects
+            if (pose := pose_and_footprint(obj)) is not None
+        ]
+        adjacency: dict[int, set[int]] = {index: set() for index in range(len(posed))}
+        for left_index, (_left_obj, left) in enumerate(posed):
+            for right_index in range(left_index + 1, len(posed)):
+                _right_obj, right = posed[right_index]
+                yaw_delta = abs(
+                    (left[2] - right[2] + math.pi) % (2.0 * math.pi) - math.pi
+                )
+                if yaw_delta > math.radians(15.0):
+                    continue
+                dx = right[0] - left[0]
+                dy = right[1] - left[1]
+                along = abs(math.cos(left[2]) * dx + math.sin(left[2]) * dy)
+                across = abs(-math.sin(left[2]) * dx + math.cos(left[2]) * dy)
+                if (
+                    along >= 0.45 * min(left[3], right[3])
+                    and along <= (left[3] + right[3]) / 2.0 + 0.35
+                    and across <= (left[4] + right[4]) / 2.0 + 0.15
+                ):
+                    adjacency[left_index].add(right_index)
+                    adjacency[right_index].add(left_index)
+
+        largest = 0
+        remaining = set(adjacency)
+        while remaining:
+            stack = [remaining.pop()]
+            component_size = 0
+            while stack:
+                current = stack.pop()
+                component_size += 1
+                neighbors = adjacency[current] & remaining
+                remaining.difference_update(neighbors)
+                stack.extend(neighbors)
+            largest = max(largest, component_size)
+        largest_runs[elevation] = largest
+    return largest_runs
+
+
 def _required_room_kit_role_count(room_kit: Any, slot: Any) -> int:
     """Return the room-sized required count, falling back to the slot minimum."""
 
@@ -360,6 +439,30 @@ def _validate_room_kit_completion(
             f"Semantic room kit {room_kit.kit_id} has required level coverage "
             f"deficits: {details}. The furniture stage cannot publish this checkpoint."
         )
+    bookshelf_slot = next(
+        (slot for slot in room_kit.slots if slot.role == "bookshelf"), None
+    )
+    if bookshelf_slot is not None and "bookshelf" in level_requirements:
+        wall_run_counts = _bookcase_wall_run_level_counts(
+            furniture,
+            bookshelf_slot,
+            support_elevations,
+        )
+        wall_run_deficits = [
+            (elevation, wall_run_counts[elevation])
+            for elevation in support_elevations
+            if wall_run_counts[elevation] < 3
+        ]
+        if wall_run_deficits:
+            details = "; ".join(
+                f"bookshelf wall run at {elevation:.3f}m has {placed}, required 3"
+                for elevation, placed in wall_run_deficits
+            )
+            raise ModelBehaviorError(
+                f"Semantic room kit {room_kit.kit_id} has sparse bookcase "
+                f"grouping: {details}. The furniture stage cannot publish this "
+                "checkpoint."
+            )
     table_slot = next(
         (slot for slot in room_kit.slots if slot.role == "reading_table"), None
     )
@@ -759,6 +862,107 @@ class StatefulFurnitureAgent(BaseStatefulAgent, BaseFurnitureAgent):
             (0.72 * half_x, 0.0, 90.0),
         ]
 
+    def _bookcase_wall_run_candidates(
+        self, asset: Any
+    ) -> list[list[tuple[float, float, float]]]:
+        """Return bounded three-case runs along each wall, away from corners."""
+
+        try:
+            width = max(
+                abs(float(asset.bbox_max[0]) - float(asset.bbox_min[0])),
+                abs(float(asset.bbox_max[1]) - float(asset.bbox_min[1])),
+            )
+        except (AttributeError, IndexError, TypeError, ValueError):
+            width = 1.0
+        spacing = min(1.45, max(0.8, width + 0.12))
+        half_x = max(0.5, float(self.scene.room_geometry.length) / 2.0 - 0.65)
+        half_y = max(0.5, float(self.scene.room_geometry.width) / 2.0 - 0.65)
+        wall_x = 0.88 * half_x
+        wall_y = 0.88 * half_y
+        centers = (-2.0 * spacing, 0.0, 2.0 * spacing)
+        runs: list[list[tuple[float, float, float]]] = []
+        for center in centers:
+            offsets = (center - spacing, center, center + spacing)
+            if max(abs(offset) for offset in offsets) <= half_x - 0.4:
+                runs.append([(offset, wall_y, 180.0) for offset in offsets])
+                runs.append([(offset, -wall_y, 0.0) for offset in offsets])
+            if max(abs(offset) for offset in offsets) <= half_y - 0.4:
+                runs.append([(-wall_x, offset, -90.0) for offset in offsets])
+                runs.append([(wall_x, offset, 90.0) for offset in offsets])
+        return runs
+
+    def _place_bookcase_wall_run_deterministically(
+        self,
+        asset: Any,
+        slot: Any,
+        elevation: float,
+        support_elevations: tuple[float, ...],
+    ) -> int:
+        """Place one complete collision-validated wall run or leave no partial run."""
+
+        if (
+            _bookcase_wall_run_level_counts(
+                self.scene.objects.values(), slot, support_elevations
+            )[elevation]
+            >= 3
+        ):
+            return 0
+        for candidate_run in self._bookcase_wall_run_candidates(asset):
+            added_ids: list[str] = []
+            complete = True
+            for x, y, yaw in candidate_run:
+                before_ids = set(self.scene.objects)
+                raw_result = self.furniture_tools._add_furniture_to_scene_impl(
+                    asset_id=str(asset.object_id),
+                    x=x,
+                    y=y,
+                    z=elevation,
+                    roll=0.0,
+                    pitch=0.0,
+                    yaw=yaw,
+                )
+                try:
+                    result_payload = json.loads(raw_result)
+                    success = bool(result_payload.get("success"))
+                except (json.JSONDecodeError, AttributeError, TypeError):
+                    result_payload = {}
+                    success = False
+                object_id = str(result_payload.get("object_id") or "")
+                if success and not object_id:
+                    new_ids = sorted(set(self.scene.objects) - before_ids)
+                    object_id = new_ids[0] if len(new_ids) == 1 else ""
+                placed_object = self.scene.objects.get(object_id)
+                actual_level = (
+                    _nearest_level(placed_object, support_elevations)
+                    if placed_object is not None
+                    else None
+                )
+                if not success or not object_id or actual_level != elevation:
+                    if object_id and object_id in self.scene.objects:
+                        self.furniture_tools._remove_furniture_impl(object_id)
+                    complete = False
+                    break
+                added_ids.append(object_id)
+            if complete and len(added_ids) == 3:
+                run_size = _bookcase_wall_run_level_counts(
+                    self.scene.objects.values(), slot, support_elevations
+                )[elevation]
+                if run_size >= 3:
+                    console_logger.info(
+                        "Deterministic recovery placed a contiguous 3-case "
+                        "bookshelf wall run at %.3fm",
+                        elevation,
+                    )
+                    return 3
+            for object_id in reversed(added_ids):
+                self.furniture_tools._remove_furniture_impl(object_id)
+        console_logger.warning(
+            "Deterministic recovery could not place a complete bookshelf wall "
+            "run at %.3fm without violating placement constraints",
+            elevation,
+        )
+        return 0
+
     def _place_room_kit_minimums_deterministically(
         self, room_kit: RoomKitSelection
     ) -> int:
@@ -816,6 +1020,7 @@ class StatefulFurnitureAgent(BaseStatefulAgent, BaseFurnitureAgent):
                 _required_room_kit_role_count(room_kit, slot) - existing,
             )
             level_targets: list[float] = []
+            wall_run_targets: list[float] = []
             required_per_level = level_requirements.get(slot.role)
             if required_per_level is not None:
                 if (
@@ -840,7 +1045,20 @@ class StatefulFurnitureAgent(BaseStatefulAgent, BaseFurnitureAgent):
                         [elevation]
                         * max(0, required_per_level - role_level_counts[elevation])
                     )
-            missing = max(aggregate_missing, len(level_targets))
+                if slot.role == "bookshelf":
+                    wall_run_counts = _bookcase_wall_run_level_counts(
+                        self.scene.objects.values(), slot, support_elevations
+                    )
+                    wall_run_targets = [
+                        elevation
+                        for elevation in support_elevations
+                        if wall_run_counts[elevation] < 3
+                    ]
+            missing = max(
+                aggregate_missing,
+                len(level_targets),
+                3 * len(wall_run_targets),
+            )
             if missing == 0:
                 continue
 
@@ -907,6 +1125,41 @@ class StatefulFurnitureAgent(BaseStatefulAgent, BaseFurnitureAgent):
                 )
                 continue
             asset = ranked[0]
+            if slot.role == "bookshelf" and wall_run_targets:
+                for elevation in wall_run_targets:
+                    placed += self._place_bookcase_wall_run_deterministically(
+                        asset,
+                        slot,
+                        elevation,
+                        support_elevations,
+                    )
+                existing = sum(
+                    obj.object_type == ObjectType.FURNITURE
+                    and _object_matches_room_kit_slot(obj, slot)
+                    for obj in self.scene.objects.values()
+                )
+                aggregate_missing = max(
+                    0,
+                    _required_room_kit_role_count(room_kit, slot) - existing,
+                )
+                role_level_counts = _room_kit_role_level_counts(
+                    self.scene.objects.values(),
+                    slot,
+                    support_elevations,
+                )
+                level_targets = []
+                if required_per_level is not None:
+                    for elevation in support_elevations:
+                        level_targets.extend(
+                            [elevation]
+                            * max(
+                                0,
+                                required_per_level - role_level_counts[elevation],
+                            )
+                        )
+                missing = max(aggregate_missing, len(level_targets))
+                if missing == 0:
+                    continue
             positions = self._deterministic_room_positions(
                 wall=getattr(slot, "placement_class", "floor") == "wall"
             )

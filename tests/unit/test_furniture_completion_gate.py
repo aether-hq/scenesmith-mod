@@ -458,7 +458,14 @@ _EXACT_MULTILEVEL_LIBRARY_PROMPT = (
 )
 
 
-def _full_height_bookshelf(index: int, elevation: float):
+def _full_height_bookshelf(
+    index: int,
+    elevation: float,
+    *,
+    x: float | None = None,
+    y: float = 0.0,
+    yaw: float = 0.0,
+):
     return SimpleNamespace(
         object_id=f"renaissance_bookshelf_{index}",
         object_type=ObjectType.FURNITURE,
@@ -470,7 +477,10 @@ def _full_height_bookshelf(index: int, elevation: float):
             "asset_quality_score": 0.76,
             "catalog_semantics": ("Reproduction Bookcase hssd/wordnet/bookcase.n.01"),
         },
-        transform=SimpleNamespace(translation=lambda: (0.0, 0.0, elevation)),
+        transform=RigidTransform(
+            RollPitchYaw(0.0, 0.0, math.radians(yaw)),
+            ((-2.0 + index % 5) * 1.05 if x is None else x, y, elevation),
+        ),
     )
 
 
@@ -851,11 +861,233 @@ def test_large_multilevel_library_gate_rejects_sparse_upper_bookshelves():
         )
 
 
+def test_large_multilevel_library_gate_rejects_isolated_bookcase_pillars():
+    shelves = []
+    isolated_poses = (
+        (-4.8, 5.5, 180.0),
+        (-1.8, 5.5, 180.0),
+        (1.8, 5.5, 180.0),
+        (4.8, 5.5, 180.0),
+        (5.5, -2.0, 90.0),
+    )
+    for level_index, elevation in enumerate((0.0, 4.0, 8.0)):
+        shelves.extend(
+            _full_height_bookshelf(
+                level_index * len(isolated_poses) + pose_index,
+                elevation,
+                x=x,
+                y=y,
+                yaw=yaw,
+            )
+            for pose_index, (x, y, yaw) in enumerate(isolated_poses)
+        )
+    scene = SimpleNamespace(
+        text_description=_EXACT_MULTILEVEL_LIBRARY_PROMPT,
+        objects={shelf.object_id: shelf for shelf in shelves},
+    )
+
+    with pytest.raises(
+        ModelBehaviorError,
+        match=r"bookshelf wall run at 0\.000m.*1.*3",
+    ):
+        _validate_room_kit_completion(
+            scene,
+            _dense_multilevel_bookshelf_kit(),
+            support_elevations=(0.0, 4.0, 8.0),
+        )
+
+
+def test_large_multilevel_library_gate_accepts_contiguous_bookcase_wall_runs():
+    shelves = []
+    for level_index, elevation in enumerate((0.0, 4.0, 8.0)):
+        shelves.extend(
+            _full_height_bookshelf(
+                level_index * 5 + position_index,
+                elevation,
+                x=-1.05 + position_index * 1.05,
+                y=5.5,
+                yaw=180.0,
+            )
+            for position_index in range(5)
+        )
+    scene = SimpleNamespace(
+        text_description=_EXACT_MULTILEVEL_LIBRARY_PROMPT,
+        objects={shelf.object_id: shelf for shelf in shelves},
+    )
+
+    assert (
+        _validate_room_kit_completion(
+            scene,
+            _dense_multilevel_bookshelf_kit(),
+            support_elevations=(0.0, 4.0, 8.0),
+        )
+        == 15
+    )
+
+
+def test_large_multilevel_library_recovery_builds_atomic_bookcase_wall_runs():
+    shelves = []
+    isolated_poses = (
+        (-4.8, 5.5, 180.0),
+        (-1.8, 5.5, 180.0),
+        (1.8, 5.5, 180.0),
+        (4.8, 5.5, 180.0),
+        (5.5, -2.0, 90.0),
+    )
+    for level_index, elevation in enumerate((0.0, 4.0, 8.0)):
+        shelves.extend(
+            _full_height_bookshelf(
+                level_index * len(isolated_poses) + pose_index,
+                elevation,
+                x=x,
+                y=y,
+                yaw=yaw,
+            )
+            for pose_index, (x, y, yaw) in enumerate(isolated_poses)
+        )
+    scene = SimpleNamespace(
+        text_description=_EXACT_MULTILEVEL_LIBRARY_PROMPT,
+        objects={shelf.object_id: shelf for shelf in shelves},
+        room_geometry=SimpleNamespace(length=13.8, width=13.8),
+    )
+    placements = []
+    removed = []
+
+    class FakeTools:
+        def set_noise_profile(self, _mode):
+            pass
+
+        def _major_support_elevations(self):
+            return (0.0, 4.0, 8.0)
+
+        def _add_furniture_to_scene_impl(self, **kwargs):
+            placements.append(kwargs)
+            object_id = f"recovered_wall_case_{len(placements)}"
+            recovered = _full_height_bookshelf(
+                100 + len(placements),
+                kwargs["z"],
+                x=kwargs["x"],
+                y=kwargs["y"],
+                yaw=kwargs["yaw"],
+            )
+            recovered.object_id = object_id
+            scene.objects[object_id] = recovered
+            return json.dumps({"success": True, "object_id": object_id})
+
+        def _remove_furniture_impl(self, object_id):
+            removed.append(object_id)
+            scene.objects.pop(object_id, None)
+            return json.dumps({"success": True})
+
+    agent = object.__new__(StatefulFurnitureAgent)
+    agent.scene = scene
+    agent.asset_manager = SimpleNamespace(list_available_assets=lambda: [shelves[0]])
+    agent.furniture_tools = FakeTools()
+
+    assert (
+        agent._place_room_kit_minimums_deterministically(
+            _dense_multilevel_bookshelf_kit()
+        )
+        == 9
+    )
+    assert removed == []
+    assert [call["z"] for call in placements] == [0.0] * 3 + [4.0] * 3 + [8.0] * 3
+    assert (
+        _validate_room_kit_completion(
+            scene,
+            _dense_multilevel_bookshelf_kit(),
+            support_elevations=(0.0, 4.0, 8.0),
+        )
+        == 24
+    )
+
+
+def test_large_multilevel_library_recovery_rolls_back_incomplete_bookcase_run():
+    shelves = [
+        *(
+            _full_height_bookshelf(
+                index,
+                0.0,
+                x=-4.8 + index * 2.4,
+                y=5.5,
+                yaw=180.0,
+            )
+            for index in range(5)
+        ),
+        *(
+            _full_height_bookshelf(
+                level_index * 5 + index,
+                elevation,
+                x=-2.1 + index * 1.05,
+                y=5.5,
+                yaw=180.0,
+            )
+            for level_index, elevation in ((1, 4.0), (2, 8.0))
+            for index in range(5)
+        ),
+    ]
+    scene = SimpleNamespace(
+        text_description=_EXACT_MULTILEVEL_LIBRARY_PROMPT,
+        objects={shelf.object_id: shelf for shelf in shelves},
+        room_geometry=SimpleNamespace(length=13.8, width=13.8),
+    )
+    attempts = []
+    removed = []
+
+    class FakeTools:
+        def set_noise_profile(self, _mode):
+            pass
+
+        def _major_support_elevations(self):
+            return (0.0, 4.0, 8.0)
+
+        def _add_furniture_to_scene_impl(self, **kwargs):
+            attempts.append(kwargs)
+            if len(attempts) <= 2:
+                object_id = f"partial_wall_case_{len(attempts)}"
+                recovered = _full_height_bookshelf(
+                    100 + len(attempts),
+                    kwargs["z"],
+                    x=kwargs["x"],
+                    y=kwargs["y"],
+                    yaw=kwargs["yaw"],
+                )
+                recovered.object_id = object_id
+                scene.objects[object_id] = recovered
+                return json.dumps({"success": True, "object_id": object_id})
+            return json.dumps({"success": False})
+
+        def _remove_furniture_impl(self, object_id):
+            removed.append(object_id)
+            scene.objects.pop(object_id, None)
+            return json.dumps({"success": True})
+
+    agent = object.__new__(StatefulFurnitureAgent)
+    agent.scene = scene
+    agent.asset_manager = SimpleNamespace(list_available_assets=lambda: [shelves[0]])
+    agent.furniture_tools = FakeTools()
+
+    assert (
+        agent._place_room_kit_minimums_deterministically(
+            _dense_multilevel_bookshelf_kit()
+        )
+        == 0
+    )
+    assert removed == ["partial_wall_case_2", "partial_wall_case_1"]
+    assert set(scene.objects) == {shelf.object_id for shelf in shelves}
+
+
 def test_large_multilevel_library_recovery_fills_sparse_upper_bookshelves():
     shelves = [
         *(_full_height_bookshelf(index, 0.0) for index in range(16)),
-        *(_full_height_bookshelf(index + 16, 4.0) for index in range(3)),
-        *(_full_height_bookshelf(index + 19, 8.0) for index in range(3)),
+        *(
+            _full_height_bookshelf(index + 16, 4.0, x=-1.05 + index * 1.05)
+            for index in range(3)
+        ),
+        *(
+            _full_height_bookshelf(index + 19, 8.0, x=-1.05 + index * 1.05)
+            for index in range(3)
+        ),
     ]
     placements = []
 
@@ -901,6 +1133,20 @@ def test_large_multilevel_library_recovery_fills_bookshelves_on_every_story():
 
         def _add_furniture_to_scene_impl(self, **kwargs):
             placements.append(kwargs)
+            object_id = f"recovered_bookshelf_{len(placements)}"
+            recovered = _full_height_bookshelf(
+                100 + len(placements),
+                kwargs["z"],
+                x=kwargs["x"],
+                y=kwargs["y"],
+                yaw=kwargs["yaw"],
+            )
+            recovered.object_id = object_id
+            agent.scene.objects[object_id] = recovered
+            return json.dumps({"success": True, "object_id": object_id})
+
+        def _remove_furniture_impl(self, object_id):
+            agent.scene.objects.pop(object_id, None)
             return json.dumps({"success": True})
 
     agent = object.__new__(StatefulFurnitureAgent)
