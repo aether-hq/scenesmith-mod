@@ -603,6 +603,12 @@ def _copy_checkpoint_for_stage(
             semantic_ledger,
             target_scene_dir / "semantic_obligation_ledger.json",
         )
+    capability_manifest = source_scene_dir / "semantic_capability_manifest.json"
+    if capability_manifest.exists():
+        shutil.copy(
+            capability_manifest,
+            target_scene_dir / "semantic_capability_manifest.json",
+        )
 
     checkpoint_name = STAGE_CHECKPOINTS[start_stage]
     asset_dirs = STAGE_ASSET_DIRS[start_stage]

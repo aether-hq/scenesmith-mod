@@ -32,6 +32,8 @@ from scenesmith.agent_utils.scene_requirements import (
     persist_shadow_audit,
     requirement_graph_from_prompt,
 )
+from scenesmith.agent_utils.semantic_ledger import load_semantic_ledger
+from scenesmith.agent_utils.semantic_strategies import load_capability_manifest
 
 
 DOCK_PROMPT = (
@@ -482,6 +484,12 @@ def test_floor_plan_calls_semantic_llm_before_blueprint_compilation(
     agent.cfg = SimpleNamespace(
         openai=SimpleNamespace(model="semantic-test-model"),
         max_floor_plan_dim_m=20.0,
+        semantic_capabilities={
+            "catalog_available": True,
+            "generated_geometry_available": True,
+            "reusable_composition_available": True,
+            "structural_compiler_available": True,
+        },
     )
     agent.logger = SimpleNamespace(output_dir=tmp_path)
     agent._reset_workflow_budget = lambda: None
@@ -515,6 +523,10 @@ def test_floor_plan_calls_semantic_llm_before_blueprint_compilation(
     assert persisted.analysis_model == "semantic-test-model"
     assert (tmp_path / "semantic_obligation_ledger.json").is_file()
     assert (tmp_path / "semantic_obligation_summary.json").is_file()
+    manifest = load_capability_manifest(tmp_path / "semantic_capability_manifest.json")
+    assert manifest.preflight_passed
+    ledger = load_semantic_ledger(tmp_path / "semantic_obligation_ledger.json")
+    assert all(entry.current_status == "strategy_assigned" for entry in ledger.entries)
 
 
 def test_subjective_style_is_retained_but_advisory_until_calibrated():

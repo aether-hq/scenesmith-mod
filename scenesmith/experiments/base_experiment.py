@@ -10,6 +10,7 @@ from scenesmith.ceiling_agents.base_ceiling_agent import BaseCeilingAgent
 from scenesmith.floor_plan_agents.base_floor_plan_agent import BaseFloorPlanAgent
 from scenesmith.furniture_agents.base_furniture_agent import BaseFurnitureAgent
 from scenesmith.manipuland_agents.base_manipuland_agent import BaseManipulandAgent
+from scenesmith.agent_utils.semantic_strategies import capability_profile_from_config
 from scenesmith.utils.logging import BaseLogger
 from scenesmith.wall_agents.base_wall_agent import BaseWallAgent
 
@@ -93,6 +94,9 @@ class BaseExperiment(ABC):
         )
 
         agent_config = BaseExperiment._agent_config(config_dict, "floor_plan_agent")
+        agent_config["semantic_capabilities"] = capability_profile_from_config(
+            config_dict
+        ).model_dump()
         agent_name = agent_config["_name"]
 
         if agent_name not in compatible_agents:

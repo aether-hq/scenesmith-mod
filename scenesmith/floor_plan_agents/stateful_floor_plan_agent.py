@@ -83,7 +83,15 @@ from scenesmith.agent_utils.scoring import (
 )
 from scenesmith.agent_utils.semantic_ledger import (
     load_or_initialize_semantic_ledger,
+    persist_semantic_ledger,
     persist_semantic_ledger_summary,
+)
+from scenesmith.agent_utils.semantic_strategies import (
+    SemanticCapabilityProfile,
+    apply_capability_manifest_to_ledger,
+    assert_capability_preflight_passed,
+    capability_preflight,
+    persist_capability_manifest,
 )
 from scenesmith.agent_utils.workflow_tools import WorkflowTools
 from scenesmith.floor_plan_agents.base_floor_plan_agent import BaseFloorPlanAgent
@@ -818,6 +826,33 @@ class StatefulFloorPlanAgent(BaseStatefulAgent, BaseFloorPlanAgent):
             self.logger.output_dir / "semantic_obligation_ledger.json",
             self.requirement_graph,
         )
+        configured_capabilities = getattr(self.cfg, "semantic_capabilities", None)
+        if configured_capabilities is not None:
+            capability_manifest_path = (
+                self.logger.output_dir / "semantic_capability_manifest.json"
+            )
+            capability_profile = SemanticCapabilityProfile.model_validate(
+                dict(configured_capabilities)
+            )
+            capability_manifest = capability_preflight(
+                self.requirement_graph,
+                capability_profile,
+            )
+            persist_capability_manifest(
+                capability_manifest,
+                capability_manifest_path,
+            )
+            self.semantic_ledger = apply_capability_manifest_to_ledger(
+                self.semantic_ledger,
+                self.requirement_graph,
+                capability_manifest,
+                manifest_ref=str(capability_manifest_path),
+            )
+            persist_semantic_ledger(
+                self.semantic_ledger,
+                self.logger.output_dir / "semantic_obligation_ledger.json",
+            )
+            assert_capability_preflight_passed(capability_manifest)
         persist_semantic_ledger_summary(
             self.semantic_ledger,
             self.logger.output_dir / "semantic_obligation_summary.json",
