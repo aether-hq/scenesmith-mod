@@ -712,6 +712,12 @@ def _generate_room(
                     fallen_tilt_threshold_degrees=physics_val_cfg[
                         "fallen_tilt_threshold_degrees"
                     ],
+                    validation_object_penetration_threshold_m=physics_val_cfg[
+                        "object_penetration_threshold_m"
+                    ],
+                    validation_floor_penetration_tolerance_m=physics_val_cfg[
+                        "floor_penetration_tolerance_m"
+                    ],
                 )
             )
             end_time = time.time()

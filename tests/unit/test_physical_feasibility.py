@@ -684,6 +684,96 @@ class TestApplyPhysicalFeasibilityPostprocessing(PhysicalFeasibilityTestCase):
                 np.allclose(box1_after.transform.translation(), initial_pos)
             )
 
+    def test_failed_projection_accepts_only_clean_bounded_simulation(self) -> None:
+        """A repair-solver failure is not a dirty-scene publication verdict."""
+
+        def settle_scene(*, scene, **_kwargs):
+            box = scene.get_object(UniqueID("box_1"))
+            position = box.transform.translation().copy()
+            position[0] += 0.03
+            box.transform = RigidTransform(p=position)
+            return scene, []
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            scene = self._create_non_overlapping_boxes_scene(Path(tmp_dir))
+            with (
+                patch(
+                    "scenesmith.agent_utils.physical_feasibility."
+                    "apply_non_penetration_projection",
+                    side_effect=lambda *, scene, **_kwargs: (scene, False),
+                ),
+                patch(
+                    "scenesmith.agent_utils.physical_feasibility."
+                    "_apply_floor_penetration_fallback",
+                    side_effect=lambda scene, **_kwargs: (scene, 0),
+                ),
+                patch(
+                    "scenesmith.agent_utils.physical_feasibility."
+                    "apply_forward_simulation",
+                    side_effect=settle_scene,
+                ),
+                patch(
+                    "scenesmith.agent_utils.physical_feasibility."
+                    "compute_scene_collisions",
+                    return_value=[],
+                ),
+            ):
+                _, success, removed = apply_physical_feasibility_postprocessing(
+                    scene=scene,
+                    weld_furniture=False,
+                    projection_enabled=True,
+                    simulation_enabled=True,
+                )
+
+        self.assertTrue(success)
+        self.assertEqual(removed, [])
+
+    def test_failed_projection_rejects_dirty_or_excessive_simulation(self) -> None:
+        """Fallback recovery stays false for collisions or unstable motion."""
+
+        for displacement, collisions in ((0.03, [object()]), (0.06, [])):
+            with self.subTest(displacement=displacement, collisions=collisions):
+                with tempfile.TemporaryDirectory() as tmp_dir:
+                    scene = self._create_non_overlapping_boxes_scene(Path(tmp_dir))
+
+                    def settle_scene(*, scene, **_kwargs):
+                        box = scene.get_object(UniqueID("box_1"))
+                        position = box.transform.translation().copy()
+                        position[0] += displacement
+                        box.transform = RigidTransform(p=position)
+                        return scene, []
+
+                    with (
+                        patch(
+                            "scenesmith.agent_utils.physical_feasibility."
+                            "apply_non_penetration_projection",
+                            side_effect=lambda *, scene, **_kwargs: (scene, False),
+                        ),
+                        patch(
+                            "scenesmith.agent_utils.physical_feasibility."
+                            "_apply_floor_penetration_fallback",
+                            side_effect=lambda scene, **_kwargs: (scene, 0),
+                        ),
+                        patch(
+                            "scenesmith.agent_utils.physical_feasibility."
+                            "apply_forward_simulation",
+                            side_effect=settle_scene,
+                        ),
+                        patch(
+                            "scenesmith.agent_utils.physical_feasibility."
+                            "compute_scene_collisions",
+                            return_value=collisions,
+                        ),
+                    ):
+                        _, success, _ = apply_physical_feasibility_postprocessing(
+                            scene=scene,
+                            weld_furniture=False,
+                            projection_enabled=True,
+                            simulation_enabled=True,
+                        )
+
+                self.assertFalse(success)
+
     def test_ejected_projection_is_restored_and_simulation_is_skipped(self) -> None:
         """A closed room collider cannot replace the valid placement checkpoint."""
         with tempfile.TemporaryDirectory() as tmp_dir:

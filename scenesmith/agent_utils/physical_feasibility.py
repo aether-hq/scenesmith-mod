@@ -1568,6 +1568,10 @@ def apply_physical_feasibility_postprocessing(
     fallen_manipuland_floor_z: float = -0.5,
     fallen_manipuland_near_floor_z: float = 0.02,
     fallen_manipuland_z_displacement: float = 0.3,
+    validation_object_penetration_threshold_m: float = 0.001,
+    validation_floor_penetration_tolerance_m: float = 0.05,
+    fallback_max_translation_m: float = 0.05,
+    fallback_max_tilt_delta_degrees: float = 5.0,
 ) -> tuple[RoomScene, bool, list[UniqueID]]:
     """Apply complete physical feasibility post-processing pipeline.
 
@@ -1601,6 +1605,14 @@ def apply_physical_feasibility_postprocessing(
         fallen_manipuland_floor_z: Absolute Z threshold for floor penetration.
         fallen_manipuland_near_floor_z: Object bottom below this Z is on floor.
         fallen_manipuland_z_displacement: Z drop threshold for detecting falling.
+        validation_object_penetration_threshold_m: Collision threshold used to
+            validate a simulated fallback after a projection-solver failure.
+        validation_floor_penetration_tolerance_m: Allowed support settling depth
+            during simulated-fallback validation.
+        fallback_max_translation_m: Maximum furniture displacement allowed when
+            recovering from a projection-solver failure.
+        fallback_max_tilt_delta_degrees: Maximum furniture tilt change allowed
+            when recovering from a projection-solver failure.
 
     Returns:
         Tuple of (processed_scene, projection_success, removed_ids).
@@ -1684,6 +1696,7 @@ def apply_physical_feasibility_postprocessing(
             )
 
     projection_success = True
+    projection_attempt_failed = False
     removed_ids: list[UniqueID] = []
     # Stage 1: Projection.
     if projection_enabled:
@@ -1699,6 +1712,7 @@ def apply_physical_feasibility_postprocessing(
             large_scene_optimization_threshold=large_scene_optimization_threshold,
             collision_penetration_threshold_m=collision_penetration_threshold_m,
         )
+        projection_attempt_failed = not projection_success
 
         if not projection_success and not weld_furniture:
             # Only apply floor fallback when furniture is free to move.
@@ -1781,6 +1795,64 @@ def apply_physical_feasibility_postprocessing(
             "Rejected invalid simulation output for %d furniture item(s)",
             simulation_restored,
         )
+
+    if (
+        projection_attempt_failed
+        and not weld_furniture
+        and simulation_enabled
+        and not projection_restored
+    ):
+        post_simulation_collisions = compute_scene_collisions(
+            scene=scene,
+            penetration_threshold=validation_object_penetration_threshold_m,
+            floor_penetration_tolerance=validation_floor_penetration_tolerance_m,
+            current_furniture_id=None,
+        )
+        max_translation = 0.0
+        max_tilt_delta = 0.0
+        for object_id, original_transform in original_furniture_transforms.items():
+            obj = scene.get_object(object_id)
+            if obj is None:
+                continue
+            translation = float(
+                np.linalg.norm(
+                    obj.transform.translation() - original_transform.translation()
+                )
+            )
+            tilt_delta = abs(
+                compute_tilt_angle_degrees(obj.transform)
+                - compute_tilt_angle_degrees(original_transform)
+            )
+            max_translation = max(max_translation, translation)
+            max_tilt_delta = max(max_tilt_delta, tilt_delta)
+
+        clean_bounded_simulation = (
+            not post_simulation_collisions
+            and not removed_ids
+            and not simulation_ejected
+            and max_translation <= fallback_max_translation_m
+            and max_tilt_delta <= fallback_max_tilt_delta_degrees
+        )
+        if clean_bounded_simulation:
+            projection_success = True
+            console_logger.warning(
+                "Projection solver failed, but clean bounded simulation recovered "
+                "the furniture checkpoint (max translation %.3fm, max tilt %.2f°)",
+                max_translation,
+                max_tilt_delta,
+            )
+        else:
+            projection_success = False
+            console_logger.error(
+                "Projection solver failure remains unrecovered after simulation: "
+                "%d collision(s), %d removed, %d ejected, max translation %.3fm, "
+                "max tilt %.2f°",
+                len(post_simulation_collisions),
+                len(removed_ids),
+                len(simulation_ejected),
+                max_translation,
+                max_tilt_delta,
+            )
 
     return scene, projection_success, removed_ids
 
