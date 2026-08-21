@@ -513,6 +513,8 @@ def test_floor_plan_calls_semantic_llm_before_blueprint_compilation(
     persisted = load_requirement_graph(tmp_path / "scene_requirement_graph.json")
     assert persisted.analysis_status == "complete"
     assert persisted.analysis_model == "semantic-test-model"
+    assert (tmp_path / "semantic_obligation_ledger.json").is_file()
+    assert (tmp_path / "semantic_obligation_summary.json").is_file()
 
 
 def test_subjective_style_is_retained_but_advisory_until_calibrated():

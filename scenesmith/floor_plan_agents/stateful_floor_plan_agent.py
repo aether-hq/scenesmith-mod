@@ -81,6 +81,10 @@ from scenesmith.agent_utils.scoring import (
     log_critique_scores,
     scores_to_dict,
 )
+from scenesmith.agent_utils.semantic_ledger import (
+    load_or_initialize_semantic_ledger,
+    persist_semantic_ledger_summary,
+)
 from scenesmith.agent_utils.workflow_tools import WorkflowTools
 from scenesmith.floor_plan_agents.base_floor_plan_agent import BaseFloorPlanAgent
 from scenesmith.floor_plan_agents.tools.floor_plan_submission import (
@@ -809,6 +813,14 @@ class StatefulFloorPlanAgent(BaseStatefulAgent, BaseFloorPlanAgent):
         persist_requirement_graph(
             self.requirement_graph,
             self.logger.output_dir / "scene_requirement_graph.json",
+        )
+        self.semantic_ledger = load_or_initialize_semantic_ledger(
+            self.logger.output_dir / "semantic_obligation_ledger.json",
+            self.requirement_graph,
+        )
+        persist_semantic_ledger_summary(
+            self.semantic_ledger,
+            self.logger.output_dir / "semantic_obligation_summary.json",
         )
         console_logger.info(
             "Semantic requirement shadow graph %s captured %d literal candidates "

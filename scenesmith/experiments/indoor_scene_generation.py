@@ -58,6 +58,10 @@ from scenesmith.agent_utils.scene_requirements import (
     load_requirement_graph,
     persist_shadow_audit,
 )
+from scenesmith.agent_utils.semantic_ledger import (
+    load_or_initialize_semantic_ledger,
+    persist_semantic_ledger_summary,
+)
 from scenesmith.agent_utils.sceneeval_exporter import (
     SceneEvalExportConfig,
     SceneEvalExporter,
@@ -532,7 +536,8 @@ def _copy_checkpoint_for_stage(
 
     Unlike copytree of entire scene, this explicitly copies only required files:
     - Scene-level: floor_plans/, house_layout.json, scene_blueprint.json,
-      scene_requirement_graph.json, and legacy room_geometry/
+      scene_requirement_graph.json, semantic_obligation_ledger.json, and legacy
+      room_geometry/
     - Room-level: checkpoint directory + referenced assets
 
     NOT copied (ensuring fresh start for resumed stage):
@@ -591,6 +596,12 @@ def _copy_checkpoint_for_stage(
         shutil.copy(
             requirement_graph,
             target_scene_dir / "scene_requirement_graph.json",
+        )
+    semantic_ledger = source_scene_dir / "semantic_obligation_ledger.json"
+    if semantic_ledger.exists():
+        shutil.copy(
+            semantic_ledger,
+            target_scene_dir / "semantic_obligation_ledger.json",
         )
 
     checkpoint_name = STAGE_CHECKPOINTS[start_stage]
@@ -1129,6 +1140,33 @@ def _generate_room(
             console_logger.warning(
                 "Semantic shadow audit could not be completed; build verdict is "
                 "unchanged in shadow mode: %s",
+                exc,
+            )
+
+    if requirement_graph_path.is_file():
+        try:
+            requirement_graph = load_requirement_graph(requirement_graph_path)
+            semantic_ledger = load_or_initialize_semantic_ledger(
+                room_dir.parent / "semantic_obligation_ledger.json",
+                requirement_graph,
+            )
+            ledger_summary = persist_semantic_ledger_summary(
+                semantic_ledger,
+                room_dir / "semantic_obligation_summary.json",
+            )
+            console_logger.info(
+                "Semantic ledger summary: revision=%d closed=%s publishable=%s "
+                "blocking_failed=%d blocking_unresolved=%d",
+                ledger_summary.revision,
+                ledger_summary.closed,
+                ledger_summary.publishable,
+                len(ledger_summary.blocking_failed),
+                len(ledger_summary.blocking_unresolved),
+            )
+        except Exception as exc:
+            console_logger.warning(
+                "Semantic ledger summary could not be completed; publication gate "
+                "is not active yet: %s",
                 exc,
             )
 

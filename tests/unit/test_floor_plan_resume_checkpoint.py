@@ -122,6 +122,8 @@ def test_wall_resume_copies_canonical_checkpoint_without_legacy_room_geometry(
     requirement_graph.write_text(
         '{"schema_version":1,"graph_id":"requirements-test","requirements":[]}'
     )
+    semantic_ledger = source / "semantic_obligation_ledger.json"
+    semantic_ledger.write_text('{"ledger_id":"ledger-test"}')
     checkpoint = source / "room_room" / "scene_states" / "scene_after_furniture"
     checkpoint.mkdir(parents=True)
     (checkpoint / "scene_state.json").write_text("{}")
@@ -134,6 +136,9 @@ def test_wall_resume_copies_canonical_checkpoint_without_legacy_room_geometry(
     assert (target / "house_layout.json").is_file()
     assert (target / "scene_requirement_graph.json").read_bytes() == (
         requirement_graph.read_bytes()
+    )
+    assert (target / "semantic_obligation_ledger.json").read_bytes() == (
+        semantic_ledger.read_bytes()
     )
     assert (
         target
