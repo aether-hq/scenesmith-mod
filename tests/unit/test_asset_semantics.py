@@ -293,3 +293,26 @@ def test_curated_sculpture_beats_low_quality_literal_statue_match() -> None:
         )
 
     assert [candidate.uid for candidate in candidates] == ["curated"]
+
+
+def test_classical_human_statue_rejects_animal_sculpture() -> None:
+    animal, reason = catalog_candidate_is_compatible(
+        request_text="classical Renaissance marble human figure statue on pedestal",
+        candidate_text=(
+            "Bronze Whale Statue "
+            "polyhaven/Decor & Art/Sculptures & Figurines/Animal Figures"
+        ),
+        quality_score=1.0,
+    )
+    human, _ = catalog_candidate_is_compatible(
+        request_text="classical Renaissance marble human figure statue on pedestal",
+        candidate_text=(
+            "Gothic Statue ornate stone figure "
+            "polyhaven/Decor & Art/Sculptures & Figurines/Busts & Human Figures"
+        ),
+        quality_score=1.0,
+    )
+
+    assert not animal
+    assert "animal" in reason.casefold()
+    assert human

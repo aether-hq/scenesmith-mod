@@ -53,6 +53,18 @@ def test_collection_scale_library_requires_dense_shelves_and_statues():
     statue = next(slot for slot in selection.slots if slot.role == "classical_statue")
     assert statue.required
     assert selection.slot_counts["classical_statue"] >= 2
+    assert "human figure" in statue.query.casefold()
+    assert statue.nominal_dimensions_m == (1.4, 1.4, 1.8)
+    gothic_extents = (1.477464, 1.739898, 1.563758)
+    target_extents = (
+        statue.nominal_dimensions_m[0],
+        statue.nominal_dimensions_m[2],
+        statue.nominal_dimensions_m[1],
+    )
+    uniform_scale = min(
+        target / extent for target, extent in zip(target_extents, gothic_extents)
+    )
+    assert gothic_extents[1] * uniform_scale >= 0.6 * statue.nominal_dimensions_m[2]
     chair = next(slot for slot in selection.slots if slot.role == "reading_chair")
     assert "stationary" in chair.query.casefold()
 

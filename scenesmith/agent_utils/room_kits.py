@@ -504,10 +504,12 @@ def select_room_kit(
                     slot = replace(
                         slot,
                         query=(
-                            "classical Renaissance marble statue on pedestal"
+                            "classical Renaissance marble human figure statue on "
+                            "broad pedestal"
                             if renaissance
                             else slot.query
                         ),
+                        nominal_dimensions_m=(1.4, 1.4, 1.8),
                         minimum_count=2,
                         target_count=2,
                         required=True,

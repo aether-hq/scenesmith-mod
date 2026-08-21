@@ -222,6 +222,33 @@ def catalog_candidate_is_compatible(
             "storage furniture request is incompatible with the Books & Documents "
             "catalog branch",
         )
+    requests_human_sculpture = "sculpture" in requested and bool(
+        request_tokens & {"female", "human", "male", "man", "person", "woman"}
+    )
+    candidate_is_animal_sculpture = bool(
+        re.search(
+            r"sculptures?\s*(?:&|and)\s*figurines?\s*/\s*animal figures?",
+            candidate_catalog_text,
+        )
+        or candidate_tokens
+        & {
+            "bull",
+            "cat",
+            "elephant",
+            "fish",
+            "giraffe",
+            "horse",
+            "lion",
+            "ray",
+            "shark",
+            "whale",
+        }
+    )
+    if requests_human_sculpture and candidate_is_animal_sculpture:
+        return (
+            False,
+            "human figure sculpture request is incompatible with an animal figure",
+        )
     candidate = semantic_families(candidate_text)
     if not requested:
         return True, "request has no coarse ontology family"
