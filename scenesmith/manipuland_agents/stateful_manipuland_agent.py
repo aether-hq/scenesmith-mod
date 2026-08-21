@@ -1010,6 +1010,69 @@ class StatefulManipulandAgent(BaseStatefulAgent, BaseManipulandAgent):
             (owner.transform.inverse() @ surface.transform).GetAsMatrix4().tolist()
         )
 
+    def _normalize_intrinsic_dense_book_rows(self) -> tuple[int, int]:
+        """Bind exact catalog rows placed by any workflow to their bookcase tier."""
+
+        normalized = str(getattr(self.scene, "text_description", "")).casefold()
+        explicit_dense_library = (
+            "library" in normalized
+            and "large" in normalized
+            and "thousand" in normalized
+            and bool(re.search(r"\bmulti[ -]?level\b", normalized))
+        )
+        if not explicit_dense_library:
+            return 0, 0
+
+        owner_by_surface = self._dense_book_row_owner_by_surface(self.scene)
+        surface_by_id = {
+            surface.surface_id: surface
+            for obj in self.scene.objects.values()
+            if obj.object_type == ObjectType.FURNITURE
+            for surface in obj.support_surfaces
+        }
+        bound = 0
+        discarded = 0
+        for row in list(self.scene.objects.values()):
+            if (
+                not self._is_intrinsic_catalog_book_row_asset(row)
+                or row.placement_info is None
+            ):
+                continue
+            surface_id = row.placement_info.parent_surface_id
+            owner_id = owner_by_surface.get(surface_id)
+            owner = self.scene.get_object(owner_id) if owner_id is not None else None
+            surface = surface_by_id.get(surface_id)
+            if (
+                owner is None
+                or surface is None
+                or owner.object_type != ObjectType.FURNITURE
+                or not any(
+                    term in f"{owner.name} {owner.description}".casefold()
+                    for term in ("shelf", "bookcase")
+                )
+            ):
+                continue
+            effective_surface_transform = (
+                self._dense_book_row_effective_surface_transform(
+                    row,
+                    owner,
+                    surface,
+                )
+            )
+            if not self._dense_book_row_is_contained(
+                row,
+                surface,
+                surface_transform=effective_surface_transform,
+            ):
+                self.scene.remove_object(row.object_id)
+                discarded += 1
+                continue
+            was_bound = bool((row.metadata or {}).get("dense_library_book_row"))
+            self._bind_dense_book_row_to_owner_surface(row, owner, surface)
+            if not was_bound:
+                bound += 1
+        return bound, discarded
+
     @staticmethod
     def _dense_book_row_effective_surface_transform(
         row: SceneObject,
@@ -1837,6 +1900,15 @@ class StatefulManipulandAgent(BaseStatefulAgent, BaseManipulandAgent):
                     )
                     # Continue to next furniture piece.
                     continue
+
+        normalized_rows, discarded_rows = self._normalize_intrinsic_dense_book_rows()
+        if normalized_rows or discarded_rows:
+            console_logger.info(
+                "Normalized exact dense book rows before final dynamics: "
+                "%d owner-bound, %d uncontained discarded",
+                normalized_rows,
+                discarded_rows,
+            )
 
         recovered_dense_book_rows = self._recover_dense_library_book_row_deficits()
         if recovered_dense_book_rows:

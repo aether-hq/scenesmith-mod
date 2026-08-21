@@ -400,6 +400,52 @@ def test_requested_book_row_description_is_not_intrinsic_catalog_evidence(
     )
 
 
+def test_exact_llm_book_rows_are_bound_or_discarded_before_dynamics(tmp_path: Path):
+    bookcase = _dense_bookcase("bookcase_0", 0.0, tmp_path)
+    surface = bookcase.support_surfaces[2]
+
+    def exact_row(object_id: str, transform: RigidTransform) -> SceneObject:
+        return SceneObject(
+            object_id=UniqueID(object_id),
+            object_type=ObjectType.MANIPULAND,
+            name="encyclopedia_book_row",
+            description="upright encyclopedia book set row",
+            transform=transform,
+            geometry_path=tmp_path / "book_encyclopedia_set_01.gltf",
+            metadata={"catalog_id": "polyhaven__book_encyclopedia_set_01"},
+            bbox_min=np.array([-0.1, -0.05, 0.0]),
+            bbox_max=np.array([0.1, 0.05, 0.2]),
+            placement_info=PlacementInfo(
+                parent_surface_id=surface.surface_id,
+                position_2d=np.array([0.0, 0.0]),
+                rotation_2d=0.0,
+                placement_method="surface_placement",
+            ),
+        )
+
+    contained = exact_row("encyclopedia_book_row_0", surface.transform)
+    outside = exact_row(
+        "encyclopedia_book_row_1",
+        surface.transform @ RigidTransform(p=[0.8, 0.0, 0.0]),
+    )
+    scene = RoomScene(
+        room_geometry=object(),
+        scene_dir=tmp_path,
+        text_description="large multi-level library with thousands of books",
+        objects={obj.object_id: obj for obj in (bookcase, contained, outside)},
+    )
+    agent = object.__new__(StatefulManipulandAgent)
+    agent.scene = scene
+
+    bound, discarded = agent._normalize_intrinsic_dense_book_rows()
+
+    assert (bound, discarded) == (1, 1)
+    assert contained.metadata["dense_library_book_row"] is True
+    assert contained.metadata["dense_library_owner_bound"] == str(bookcase.object_id)
+    assert contained.metadata["dense_library_owner_surface_local_transform"]
+    assert outside.object_id not in scene.objects
+
+
 def test_dense_library_book_row_gate_requires_each_authored_story(tmp_path: Path):
     bookcases = [
         _dense_bookcase(f"bookcase_{int(level)}", level, tmp_path)
