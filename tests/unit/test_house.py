@@ -934,6 +934,39 @@ class TestV2StructuralLayout(unittest.TestCase):
                 len(compile_platform(platform).visual_mesh.triangles) * 3
             )
 
+    def test_textured_landing_retains_obj_collision_mesh(self) -> None:
+        platform = PlatformSpec(
+            platform_id="stair_landing",
+            space_id="library",
+            footprint=Footprint2D.rectangle(2, 2),
+            elevation=4.0,
+        )
+        layout = HouseLayout(
+            room_specs=[RoomSpec("library")],
+            room_materials={
+                "library": RoomMaterials(
+                    floor_material=Material.from_path(
+                        Path(__file__).parents[2]
+                        / "data/materials/WoodFloor014"
+                    )
+                )
+            },
+            platforms=[platform],
+        )
+
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            sdf_path = layout.compile_platforms(Path(temporary_directory))[
+                platform.platform_id
+            ]
+            sdf = ET.parse(sdf_path)
+            assert sdf.findtext(".//visual/geometry/mesh/uri") == (
+                "stair_landing.glb"
+            )
+            assert sdf.findtext(".//collision/geometry/mesh/uri") == (
+                "stair_landing.collision.obj"
+            )
+            assert (sdf_path.parent / "stair_landing.collision.obj").is_file()
+
     def test_house_compiles_heightfield_in_room_frame(self) -> None:
         layout = HouseLayout(
             room_specs=[RoomSpec("cavern")],

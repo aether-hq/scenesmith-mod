@@ -2480,7 +2480,10 @@ def write_compiled_structure(
     collision_mesh_bytes: bytes | None = None
     if (
         compiled.collision_enabled
-        and compiled.collision_mesh != compiled.visual_mesh
+        and (
+            compiled.collision_mesh != compiled.visual_mesh
+            or visual_material is not None
+        )
     ):
         collision_mesh_name = f"{compiled.structure_id}.collision.obj"
         collision_mesh_bytes = compiled.collision_mesh.to_obj(
