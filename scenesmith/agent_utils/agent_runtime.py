@@ -4,6 +4,8 @@ import asyncio
 import json
 import logging
 import os
+import threading
+import time
 
 from typing import Any
 from urllib.parse import urljoin
@@ -118,16 +120,65 @@ class BoundedRunner:
                 ),
             )
         )
+        heartbeat_interval = float(
+            kwargs.pop(
+                "heartbeat_interval_seconds",
+                os.environ.get("SCENESMITH_AGENT_HEARTBEAT_SECONDS", "10"),
+            )
+        )
         active_stream_hard_timeout = max(timeout, configured_active_stream_hard_timeout)
         if timeout <= 0:
             raise ValueError("timeout_seconds must be positive")
         if configured_active_stream_hard_timeout <= 0:
             raise ValueError("active_stream_hard_timeout_seconds must be positive")
+        if heartbeat_interval <= 0:
+            raise ValueError("heartbeat_interval_seconds must be positive")
         started = asyncio.get_running_loop().time()
+        monitor_started = time.monotonic()
+        monitor_stop = threading.Event()
+        monitor_deadline_exceeded = threading.Event()
+        monitor_cancel_started = threading.Event()
+
+        def monitor_workflow() -> None:
+            """Keep bounded liveness visible even if the event loop is blocked."""
+
+            hard_deadline = monitor_started + active_stream_hard_timeout
+            next_heartbeat = monitor_started + heartbeat_interval
+            while True:
+                wake_at = min(next_heartbeat, hard_deadline)
+                if monitor_stop.wait(max(0.0, wake_at - time.monotonic())):
+                    return
+                now = time.monotonic()
+                if now >= hard_deadline:
+                    monitor_deadline_exceeded.set()
+                    console_logger.error(
+                        "Agent workflow independent watchdog reached the %.1fs hard "
+                        "ceiling; cancelling subscription worker",
+                        active_stream_hard_timeout,
+                    )
+                    monitor_cancel_started.set()
+                    cancel_subscription_turn()
+                    return
+                console_logger.info(
+                    "Agent workflow active for %.1fs (bounded hard ceiling %.1fs)",
+                    now - monitor_started,
+                    active_stream_hard_timeout,
+                )
+                next_heartbeat = now + heartbeat_interval
+
+        monitor = threading.Thread(
+            target=monitor_workflow,
+            name="scenesmith-agent-workflow-monitor",
+            daemon=True,
+        )
+        monitor.start()
         task = asyncio.create_task(OpenAIRunner.run(*args, **kwargs))
         limit = timeout
         try:
             done, _ = await asyncio.wait({task}, timeout=timeout)
+            if monitor_deadline_exceeded.is_set():
+                limit = active_stream_hard_timeout
+                raise asyncio.TimeoutError
             if not done and await asyncio.to_thread(subscription_turn_active):
                 limit = active_stream_hard_timeout
                 console_logger.info(
@@ -142,6 +193,9 @@ class BoundedRunner:
                     - (asyncio.get_running_loop().time() - started),
                 )
                 done, _ = await asyncio.wait({task}, timeout=remaining)
+            if monitor_deadline_exceeded.is_set():
+                limit = active_stream_hard_timeout
+                raise asyncio.TimeoutError
             if done:
                 result = await task
             else:
@@ -162,8 +216,12 @@ class BoundedRunner:
             # Cancelling the async HTTP client does not stop the proxy's worker
             # thread. Explicitly terminate its active CLI process so the next
             # planner turn cannot queue behind an orphan.
-            await asyncio.to_thread(cancel_subscription_turn)
+            if not monitor_cancel_started.is_set():
+                await asyncio.to_thread(cancel_subscription_turn)
             raise AgentWorkflowTimeout(f"Agent workflow exceeded {limit:g}s") from exc
+        finally:
+            monitor_stop.set()
+            monitor.join(timeout=min(heartbeat_interval, 0.1))
         console_logger.info(
             "Agent workflow completed in %.3fs",
             asyncio.get_running_loop().time() - started,

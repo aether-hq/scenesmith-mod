@@ -1,4 +1,6 @@
 import asyncio
+import logging
+import time
 
 from unittest.mock import patch
 
@@ -19,6 +21,11 @@ async def _stuck_run(*args, **kwargs):
 async def _slow_but_healthy_run(*args, **kwargs):
     await asyncio.sleep(0.04)
     return "completed"
+
+
+async def _synchronously_silent_run(*args, **kwargs):
+    time.sleep(0.08)
+    return "incorrectly completed"
 
 
 def test_bounded_runner_cancels_stuck_workflow(monkeypatch):
@@ -131,4 +138,29 @@ def test_bounded_runner_still_stops_active_turn_at_hard_ceiling():
                 )
             )
 
+    cancel.assert_called_once_with()
+
+
+def test_bounded_runner_watchdog_stops_synchronously_silent_workflow(caplog):
+    caplog.set_level(logging.INFO)
+    with (
+        patch(
+            "scenesmith.agent_utils.agent_runtime.OpenAIRunner.run",
+            side_effect=_synchronously_silent_run,
+        ),
+        patch(
+            "scenesmith.agent_utils.agent_runtime.cancel_subscription_turn",
+            return_value=True,
+        ) as cancel,
+    ):
+        with pytest.raises(AgentWorkflowTimeout, match="exceeded 0.03s"):
+            asyncio.run(
+                BoundedRunner.run(
+                    timeout_seconds=0.01,
+                    active_stream_hard_timeout_seconds=0.03,
+                    heartbeat_interval_seconds=0.005,
+                )
+            )
+
+    assert "Agent workflow active for" in caplog.text
     cancel.assert_called_once_with()
