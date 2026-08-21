@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import errno
 import json
 import logging
 import os
@@ -34,6 +35,9 @@ from scenesmith.agent_utils.llm_harness import (
 
 
 console_logger = logging.getLogger(__name__)
+
+
+CLAUDE_BINARY_RECOVERY_SECONDS = 5.0
 
 
 def _extract_stream_result(stream_output: str) -> str:
@@ -94,11 +98,8 @@ class _ClaudeExecutor:
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._cancel_event = threading.Event()
-        requested_binary = os.environ.get("SCENESMITH_CLAUDE_BINARY", "claude")
-        resolved_binary = shutil.which(requested_binary)
-        if not resolved_binary:
-            raise RuntimeError(f"Claude CLI is not installed: {requested_binary}")
-        self.binary = str(Path(resolved_binary).resolve())
+        self.requested_binary = os.environ.get("SCENESMITH_CLAUDE_BINARY", "claude")
+        self.binary = self._resolve_binary()
         self.model = os.environ.get("SCENESMITH_LLM_MODEL", "sonnet")
         turn_timeout = float(
             os.environ.get(
@@ -118,6 +119,19 @@ class _ClaudeExecutor:
                 "45",
             )
         )
+
+    def _resolve_binary(self, *, wait_seconds: float = 0.0) -> str:
+        """Resolve a runnable launcher, allowing a bounded updater replacement."""
+        deadline = time.monotonic() + wait_seconds
+        while True:
+            resolved_binary = shutil.which(self.requested_binary)
+            if resolved_binary and os.access(resolved_binary, os.X_OK):
+                return str(Path(resolved_binary).resolve())
+            if time.monotonic() >= deadline:
+                raise RuntimeError(
+                    f"Claude CLI is not executable: {self.requested_binary}"
+                )
+            time.sleep(0.1)
 
     def cancel_active(self) -> None:
         """Cancel the currently running serialized CLI request, if any."""
@@ -208,19 +222,37 @@ class _ClaudeExecutor:
             # self-update for the lifetime of this engine process.
             child_env["DISABLE_AUTOUPDATER"] = "1"
 
-            process = _run_subscription_command(
-                self._lock,
-                command,
-                timeout_seconds=self.timeout,
-                response_start_timeout_seconds=self.response_start_timeout,
-                cancel_event=self._cancel_event,
-                input=prompt,
-                text=True,
-                capture_output=True,
-                cwd=work_dir,
-                env=child_env,
-                check=False,
-            )
+            def run_command() -> subprocess.CompletedProcess[str]:
+                return _run_subscription_command(
+                    self._lock,
+                    command,
+                    timeout_seconds=self.timeout,
+                    response_start_timeout_seconds=self.response_start_timeout,
+                    cancel_event=self._cancel_event,
+                    input=prompt,
+                    text=True,
+                    capture_output=True,
+                    cwd=work_dir,
+                    env=child_env,
+                    check=False,
+                )
+
+            try:
+                process = run_command()
+            except PermissionError as exc:
+                if exc.errno != errno.EACCES:
+                    raise
+                replacement_binary = self._resolve_binary(
+                    wait_seconds=CLAUDE_BINARY_RECOVERY_SECONDS
+                )
+                console_logger.warning(
+                    "Claude CLI executable changed during the build; retrying once "
+                    "with %s",
+                    replacement_binary,
+                )
+                self.binary = replacement_binary
+                command[0] = replacement_binary
+                process = run_command()
             if process.returncode != 0:
                 diagnostic = (process.stderr or process.stdout)[-4000:]
                 raise RuntimeError(

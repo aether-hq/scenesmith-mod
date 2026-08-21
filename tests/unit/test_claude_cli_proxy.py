@@ -1,3 +1,4 @@
+import errno
 import json
 import subprocess
 
@@ -100,6 +101,48 @@ def test_claude_executor_uses_subscription_and_returns_tool_call(monkeypatch):
     function = result["choices"][0]["message"]["tool_calls"][0]["function"]
     assert result["model"] == "haiku"
     assert function == {"name": "place_chair", "arguments": '{"x":9,"y":10}'}
+
+
+def test_claude_executor_recovers_when_pinned_binary_is_replaced_mid_run(
+    monkeypatch, tmp_path
+):
+    first_binary = tmp_path / "claude-v1.exe"
+    replacement_binary = tmp_path / "claude-v2.exe"
+    launcher = tmp_path / "claude"
+    first_binary.write_text("first")
+    first_binary.chmod(0o755)
+    launcher.symlink_to(first_binary)
+    monkeypatch.setenv("SCENESMITH_CLAUDE_BINARY", str(launcher))
+
+    executor = _ClaudeExecutor()
+    commands = []
+
+    def fake_run(_lock, command, **_kwargs):
+        commands.append(command[0])
+        if len(commands) == 1:
+            first_binary.unlink()
+            launcher.unlink()
+            replacement_binary.write_text("replacement")
+            replacement_binary.chmod(0o755)
+            launcher.symlink_to(replacement_binary)
+            raise PermissionError(errno.EACCES, "Permission denied", command[0])
+        return subprocess.CompletedProcess(
+            command,
+            0,
+            _stream_result("replacement succeeded"),
+            "",
+        )
+
+    monkeypatch.setattr(
+        "scenesmith.agent_utils.claude_cli_proxy._run_subscription_command", fake_run
+    )
+
+    result = executor.complete(
+        {"messages": [{"role": "user", "content": "Continue the build."}]}
+    )
+
+    assert result["choices"][0]["message"]["content"] == "replacement succeeded"
+    assert commands == [str(first_binary.resolve()), str(replacement_binary.resolve())]
 
 
 def test_response_json_schema_extracts_agents_sdk_final_output_schema():
