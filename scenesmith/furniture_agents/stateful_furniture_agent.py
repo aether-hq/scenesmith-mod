@@ -263,7 +263,7 @@ def _chair_cluster_poses(
     chair_size = footprint_size(chair_asset, (0.6, 0.6))
     radius = min(1.9, max(0.9, max(table_size) / 2 + max(chair_size) / 2 + 0.25))
     poses: list[tuple[float, float, float]] = []
-    for multiplier in (1.0, 1.15):
+    for multiplier in (1.0, 1.15, 1.5, 2.0):
         candidate_radius = min(2.2, radius * multiplier)
         for angle_degrees in (-90.0, 0.0, 90.0, 180.0, -45.0, 45.0, 135.0, 225.0):
             angle = math.radians(angle_degrees)

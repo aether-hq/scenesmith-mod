@@ -11,6 +11,7 @@ from pydrake.all import RigidTransform, RollPitchYaw
 from scenesmith.agent_utils.room import ObjectType
 from scenesmith.furniture_agents.stateful_furniture_agent import (
     StatefulFurnitureAgent,
+    _chair_cluster_poses,
     _validate_room_kit_completion,
 )
 
@@ -641,6 +642,25 @@ def test_large_multilevel_library_recovery_places_chairs_around_upper_tables():
     for call in placements:
         distance = math.dist((call["x"], call["y"]), (-2.8, 2.5))
         assert 0.75 <= distance <= 2.25
+
+
+def test_chair_cluster_search_covers_outer_strict_annulus():
+    table = SimpleNamespace(
+        transform=RigidTransform(p=[-3.98, 2.01, 4.0]),
+        bbox_min=(-0.375, -0.375, 0.0),
+        bbox_max=(0.375, 0.375, 0.75),
+    )
+    chair = SimpleNamespace(
+        bbox_min=(-0.3, -0.3, 0.0),
+        bbox_max=(0.3, 0.3, 0.9),
+    )
+
+    poses = _chair_cluster_poses(table, chair)
+    distances = [math.dist((x, y), (-3.98, 2.01)) for x, y, _yaw in poses]
+
+    assert min(distances) >= 0.75
+    assert max(distances) <= 2.25
+    assert max(distances) >= 1.75
 
 
 def test_library_recovery_extends_the_existing_table_ensemble():
