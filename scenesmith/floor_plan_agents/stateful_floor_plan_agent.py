@@ -1757,6 +1757,7 @@ class StatefulFloorPlanAgent(BaseStatefulAgent, BaseFloorPlanAgent):
 
         from scenesmith.agent_utils.structural_compiler import (
             compile_polygon_space,
+            triangle_group_mesh,
             write_compiled_structure,
         )
         from scenesmith.agent_utils.structural_geometry import Footprint2D, SurfaceRole
@@ -1819,11 +1820,33 @@ class StatefulFloorPlanAgent(BaseStatefulAgent, BaseFloorPlanAgent):
                 ),
             ],
         )
+        room_materials = self.layout.room_materials.get(room_spec.room_id)
+        floor_material = (
+            room_materials.floor_material
+            if room_materials is not None and room_materials.floor_material is not None
+            else Material.from_path("materials/Wood094_1K-JPG")
+        )
+        floor_overlays = (
+            {
+                "floor_finish": (
+                    triangle_group_mesh(
+                        compiled.visual_mesh,
+                        compiled.triangle_groups["floor_top"],
+                        translation=(0.0, 0.0, 0.0015),
+                    ),
+                    floor_material,
+                    floor_material.texture_scale or 0.5,
+                )
+            }
+            if compiled.triangle_groups.get("floor_top")
+            else None
+        )
         paths = write_compiled_structure(
             compiled,
             output_dir / room_spec.room_id / "structural",
             model_name="room_geometry",
             link_name="room_geometry_body_link",
+            visual_overlays=floor_overlays,
         )
 
         wall_objects: list[SceneObject] = []

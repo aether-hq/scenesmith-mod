@@ -700,6 +700,40 @@ class TestV2StructuralLayout(unittest.TestCase):
                 for surface in geometry.structural_surfaces
             )
 
+    def test_polygon_room_exports_selected_floor_material_as_visual_finish(
+        self,
+    ) -> None:
+        floor_material = Material.from_path(
+            Path(__file__).parents[2] / "data/materials/WoodFloor014"
+        )
+        footprint = Footprint2D.rectangle(6, 5)
+        layout = HouseLayout(
+            room_specs=[RoomSpec("library", length=6, width=5, footprint=footprint)],
+            placed_rooms=[PlacedRoom("library", (0, 0), 6, 5, footprint=footprint)],
+            room_materials={"library": RoomMaterials(floor_material=floor_material)},
+        )
+
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            paths = layout.compile_polygon_rooms(Path(temporary_directory))
+            sdf_path = paths["library"]
+            visual_uris = [
+                node.text
+                for node in ET.parse(sdf_path).findall(".//visual/geometry/mesh/uri")
+            ]
+
+            assert len(visual_uris) == 2
+            assert visual_uris[0].endswith(".obj")
+            assert visual_uris[1].endswith(".floor_finish.glb")
+            finish_path = sdf_path.parent / visual_uris[1]
+            gltf = GLTF2().load(str(finish_path))
+            assert gltf.meshes[0].primitives[0].material == 0
+            assert len(gltf.images) == 3
+            assert all(image.uri.startswith("data:image/") for image in gltf.images)
+            assert all(
+                node.find("geometry/mesh") is None
+                for node in ET.parse(sdf_path).findall(".//collision")
+            )
+
     def test_house_compiles_rectangular_room_with_sloped_floor(self) -> None:
         layout = HouseLayout(
             room_specs=[

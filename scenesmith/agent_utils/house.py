@@ -1775,6 +1775,7 @@ class HouseLayout:
 
         from scenesmith.agent_utils.structural_compiler import (
             compile_polygon_space,
+            triangle_group_mesh,
             write_compiled_structure,
         )
 
@@ -1856,11 +1857,32 @@ class HouseLayout:
                     ),
                 ],
             )
+            room_materials = self.room_materials.get(room_spec.room_id)
+            floor_material = (
+                room_materials.floor_material if room_materials is not None else None
+            )
+            floor_overlays = (
+                {
+                    "floor_finish": (
+                        triangle_group_mesh(
+                            compiled.visual_mesh,
+                            compiled.triangle_groups["floor_top"],
+                            translation=(0.0, 0.0, 0.0015),
+                        ),
+                        floor_material,
+                        floor_material.texture_scale or 0.5,
+                    )
+                }
+                if floor_material is not None
+                and compiled.triangle_groups.get("floor_top")
+                else None
+            )
             paths = write_compiled_structure(
                 compiled,
                 output_dir / room_spec.room_id,
                 model_name="room_geometry",
                 link_name="room_geometry_body_link",
+                visual_overlays=floor_overlays,
             )
             geometry = RoomGeometry(
                 sdf_tree=ET.parse(paths.sdf_path),

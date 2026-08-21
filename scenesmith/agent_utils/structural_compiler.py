@@ -144,6 +144,35 @@ class TriangleMesh:
         return "\n".join(lines) + "\n"
 
 
+def triangle_group_mesh(
+    mesh: TriangleMesh,
+    triangle_indices: Sequence[int],
+    *,
+    translation: Point3 = (0.0, 0.0, 0.0),
+) -> TriangleMesh:
+    """Extract a compact translated mesh for one authored triangle group."""
+
+    selected = tuple(mesh.triangles[index] for index in triangle_indices)
+    if not selected:
+        raise ValueError("triangle group must contain at least one triangle")
+    used_indices = sorted({index for triangle in selected for index in triangle})
+    remap = {source: target for target, source in enumerate(used_indices)}
+    translated_vertices = tuple(
+        (
+            mesh.vertices[index][0] + translation[0],
+            mesh.vertices[index][1] + translation[1],
+            mesh.vertices[index][2] + translation[2],
+        )
+        for index in used_indices
+    )
+    return TriangleMesh(
+        vertices=translated_vertices,
+        triangles=tuple(
+            tuple(remap[index] for index in triangle) for triangle in selected
+        ),
+    )
+
+
 @dataclass(frozen=True)
 class MeshAudit:
     """Topology/orientation facts shared by every geometry backend."""
@@ -1474,7 +1503,9 @@ def compile_platform(platform: PlatformSpec) -> CompiledStructure:
         )
     )
     for loop_index, loop in enumerate(loops):
-        for edge_index, (start, end) in enumerate(zip(loop, loop[1:] + loop[:1])):
+        for edge_index, (start, end) in enumerate(
+            zip(loop, loop[1:] + loop[:1])
+        ):
             roles = {SurfaceRole.BOUNDARY}
             if loop_index == 0 and edge_index in platform.open_edge_indices:
                 roles.add(SurfaceRole.OPEN_EDGE)
@@ -1550,9 +1581,7 @@ def compile_platform(platform: PlatformSpec) -> CompiledStructure:
 
     for hole_index in platform.guarded_hole_indices:
         loop = platform.footprint.holes[hole_index]
-        for edge_index, (start, end) in enumerate(
-            zip(loop, loop[1:] + loop[:1])
-        ):
+        for edge_index, (start, end) in enumerate(zip(loop, loop[1:] + loop[:1])):
             dx, dy = end[0] - start[0], end[1] - start[1]
             edge_length = math.hypot(dx, dy)
             along = (dx / edge_length, dy / edge_length, 0.0)
@@ -2446,6 +2475,7 @@ def write_compiled_structure(
     compile_options: Mapping[str, object] | None = None,
     visual_material: Material | None = None,
     visual_texture_scale: float = 0.5,
+    visual_overlays: Mapping[str, tuple[TriangleMesh, Material, float]] | None = None,
 ) -> CompiledStructurePaths:
     """Write OBJ, weldable SDF, and semantic-surface sidecar files.
 
@@ -2476,14 +2506,27 @@ def write_compiled_structure(
             "utf-8"
         )
     )
+    overlay_products: dict[str, bytes] = {}
+    for overlay_name, (overlay_mesh, overlay_material, texture_scale) in (
+        visual_overlays or {}
+    ).items():
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", overlay_name):
+            raise GeometryValidationError(
+                "invalid_identifier",
+                "visual overlay ID is not safe for a file name",
+                entity_id=overlay_name,
+            )
+        overlay_products[f"{compiled.structure_id}.{overlay_name}.glb"] = (
+            _textured_mesh_glb_bytes(
+                overlay_mesh,
+                overlay_material,
+                texture_scale=texture_scale,
+            )
+        )
     collision_mesh_name: str | None = None
     collision_mesh_bytes: bytes | None = None
-    if (
-        compiled.collision_enabled
-        and (
-            compiled.collision_mesh != compiled.visual_mesh
-            or visual_material is not None
-        )
+    if compiled.collision_enabled and (
+        compiled.collision_mesh != compiled.visual_mesh or visual_material is not None
     ):
         collision_mesh_name = f"{compiled.structure_id}.collision.obj"
         collision_mesh_bytes = compiled.collision_mesh.to_obj(
@@ -2500,6 +2543,13 @@ def write_compiled_structure(
     link = ET.SubElement(model, "link", {"name": link_name})
     visual = ET.SubElement(link, "visual", {"name": "structure_visual"})
     _add_mesh_geometry(visual, mesh_name)
+    for overlay_name in overlay_products:
+        overlay_visual = ET.SubElement(
+            link,
+            "visual",
+            {"name": f"{Path(overlay_name).stem}_visual"},
+        )
+        _add_mesh_geometry(overlay_visual, overlay_name)
 
     if not compiled.collision_enabled:
         pass
@@ -2640,6 +2690,10 @@ def write_compiled_structure(
         "sdf_sha256": sdf_hash,
         "surface_semantics_sha256": semantic_product_hash,
     }
+    for overlay_name, overlay_bytes in overlay_products.items():
+        product_hashes[f"visual_overlay_{overlay_name}_sha256"] = hashlib.sha256(
+            overlay_bytes
+        ).hexdigest()
     if collision_mesh_bytes is not None:
         product_hashes["collision_mesh_sha256"] = hashlib.sha256(
             collision_mesh_bytes
@@ -2677,6 +2731,9 @@ def write_compiled_structure(
         sdf_path: sdf_bytes,
         surfaces_path: surfaces_bytes,
     }
+    products.update(
+        {artifact_path / name: data for name, data in overlay_products.items()}
+    )
     if collision_mesh_path is not None and collision_mesh_bytes is not None:
         products[collision_mesh_path] = collision_mesh_bytes
     if artifact_path.exists():
@@ -2699,6 +2756,8 @@ def write_compiled_structure(
             (staging_path / mesh_name).write_bytes(mesh_bytes)
             (staging_path / sdf_name).write_bytes(sdf_bytes)
             (staging_path / surfaces_name).write_bytes(surfaces_bytes)
+            for overlay_name, overlay_bytes in overlay_products.items():
+                (staging_path / overlay_name).write_bytes(overlay_bytes)
             if collision_mesh_name is not None and collision_mesh_bytes is not None:
                 (staging_path / collision_mesh_name).write_bytes(collision_mesh_bytes)
             try:
