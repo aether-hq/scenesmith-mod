@@ -249,11 +249,19 @@ def _nearest_family(
     entities: Sequence[SpatialEntity],
     family: str,
     maximum_distance_m: float,
+    maximum_vertical_gap_m: float = 0.5,
 ) -> SpatialEntity | None:
     choices = [
         entity
         for entity in entities
-        if entity.entity_id != subject.entity_id and family in entity.families
+        if entity.entity_id != subject.entity_id
+        and family in entity.families
+        and max(
+            0.0,
+            abs(subject.center_xyz[2] - entity.center_xyz[2])
+            - (subject.dimensions_xyz[2] + entity.dimensions_xyz[2]) / 2,
+        )
+        <= maximum_vertical_gap_m
     ]
     if not choices:
         return None

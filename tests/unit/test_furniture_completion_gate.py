@@ -281,6 +281,73 @@ def _dense_multilevel_bookshelf_kit():
     )
 
 
+def _dense_multilevel_library_kit():
+    return SimpleNamespace(
+        kit_id="library-reading-hall-v1",
+        slots=(
+            *_dense_multilevel_bookshelf_kit().slots,
+            SimpleNamespace(
+                role="reading_table",
+                aliases=("table",),
+                query="library reading table",
+                required=True,
+                minimum_count=5,
+                placement_class="floor",
+            ),
+            SimpleNamespace(
+                role="reading_chair",
+                aliases=("chair",),
+                query="stationary upholstered library reading chair",
+                required=True,
+                minimum_count=12,
+                placement_class="floor",
+            ),
+        ),
+    )
+
+
+def _role_furniture(
+    role: str,
+    index: int,
+    elevation: float,
+    *,
+    x: float = 0.0,
+    y: float = 0.0,
+):
+    return SimpleNamespace(
+        object_id=f"{role}_{index}",
+        object_type=ObjectType.FURNITURE,
+        name=role,
+        description=role.replace("_", " "),
+        metadata={"asset_quality_score": 1.0},
+        transform=SimpleNamespace(translation=lambda: (x, y, elevation)),
+    )
+
+
+def _library_with_ground_only_tables():
+    shelves = [
+        *(_full_height_bookshelf(index, 0.0) for index in range(9)),
+        *(_full_height_bookshelf(index + 9, 4.0) for index in range(3)),
+        *(_full_height_bookshelf(index + 12, 8.0) for index in range(3)),
+    ]
+    tables = [
+        _role_furniture(
+            "reading_table",
+            index,
+            0.0,
+            x=1.25 + index,
+            y=-1.5,
+        )
+        for index in range(5)
+    ]
+    chairs = [
+        *(_role_furniture("reading_chair", index, 0.0) for index in range(3)),
+        *(_role_furniture("reading_chair", index + 3, 4.0) for index in range(4)),
+        *(_role_furniture("reading_chair", index + 7, 8.0) for index in range(5)),
+    ]
+    return [*shelves, *tables, *chairs]
+
+
 def test_large_multilevel_library_gate_rejects_ground_only_bookshelves():
     scene = SimpleNamespace(
         text_description=_EXACT_MULTILEVEL_LIBRARY_PROMPT,
@@ -331,6 +398,59 @@ def test_large_multilevel_library_recovery_fills_bookshelves_on_every_story():
     assert [call["z"] for call in placements].count(4.0) == 3
     assert [call["z"] for call in placements].count(8.0) == 3
     assert not any(call["z"] == 0.0 for call in placements)
+
+
+def test_large_multilevel_library_gate_rejects_ground_only_reading_tables():
+    furniture = _library_with_ground_only_tables()
+    scene = SimpleNamespace(
+        text_description=_EXACT_MULTILEVEL_LIBRARY_PROMPT,
+        objects={obj.object_id: obj for obj in furniture},
+    )
+
+    with pytest.raises(ModelBehaviorError, match=r"reading_table.*4\.000m.*0.*1"):
+        _validate_room_kit_completion(
+            scene,
+            _dense_multilevel_library_kit(),
+            support_elevations=(0.0, 4.0, 8.0),
+        )
+
+
+def test_large_multilevel_library_recovery_fills_patron_ensemble_on_each_story():
+    furniture = _library_with_ground_only_tables()
+    table_asset = next(obj for obj in furniture if obj.name == "reading_table")
+    placements = []
+
+    class FakeTools:
+        def set_noise_profile(self, _mode):
+            pass
+
+        def _major_support_elevations(self):
+            return (0.0, 4.0, 8.0)
+
+        def _add_furniture_to_scene_impl(self, **kwargs):
+            placements.append(kwargs)
+            return json.dumps({"success": True})
+
+    agent = object.__new__(StatefulFurnitureAgent)
+    agent.scene = SimpleNamespace(
+        text_description=_EXACT_MULTILEVEL_LIBRARY_PROMPT,
+        objects={obj.object_id: obj for obj in furniture},
+        room_geometry=SimpleNamespace(length=13.8, width=13.8),
+    )
+    agent.asset_manager = SimpleNamespace(
+        list_available_assets=lambda: [table_asset]
+    )
+    agent.furniture_tools = FakeTools()
+
+    assert (
+        agent._place_room_kit_minimums_deterministically(
+            _dense_multilevel_library_kit()
+        )
+        == 2
+    )
+    assert [call["z"] for call in placements] == [4.0, 8.0]
+    assert all(call["asset_id"] == table_asset.object_id for call in placements)
+    assert all((call["x"], call["y"]) == (1.25, -1.5) for call in placements)
 
 
 def test_library_recovery_prefers_stable_armchair_over_role_exact_rocker():

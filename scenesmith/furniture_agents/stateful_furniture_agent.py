@@ -7,6 +7,7 @@ SQLiteSession agents that maintain conversation memory across interactions.
 
 import json
 import logging
+import math
 import re
 from pathlib import Path
 from typing import Any
@@ -127,7 +128,7 @@ def _required_room_kit_level_coverage(
     )
     if not dense_library or not explicit_multilevel or len(support_elevations) < 2:
         return {}
-    return {"bookshelf": 3}
+    return {"bookshelf": 3, "reading_table": 1, "reading_chair": 3}
 
 
 def _room_kit_role_level_counts(
@@ -653,6 +654,28 @@ class StatefulFurnitureAgent(BaseStatefulAgent, BaseFurnitureAgent):
             positions = self._deterministic_room_positions(
                 wall=getattr(slot, "placement_class", "floor") == "wall"
             )
+            if slot.role == "reading_table" and level_targets:
+                role_anchors: list[tuple[float, float, float]] = []
+                for scene_object in self.scene.objects.values():
+                    if not _object_matches_room_kit_slot(scene_object, slot):
+                        continue
+                    try:
+                        translation = scene_object.transform.translation()
+                        yaw = math.degrees(
+                            scene_object.transform.rotation()
+                            .ToRollPitchYaw()
+                            .yaw_angle()
+                        )
+                    except (AttributeError, IndexError, TypeError, ValueError):
+                        try:
+                            translation = scene_object.transform.translation()
+                        except (AttributeError, IndexError, TypeError, ValueError):
+                            continue
+                        yaw = 0.0
+                    anchor = (float(translation[0]), float(translation[1]), yaw)
+                    if anchor not in role_anchors:
+                        role_anchors.append(anchor)
+                positions = [*role_anchors, *positions]
 
             for recovery_index in range(missing):
                 success = False

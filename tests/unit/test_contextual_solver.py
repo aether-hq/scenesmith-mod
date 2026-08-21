@@ -84,6 +84,29 @@ def test_active_chair_must_face_nearby_table_but_stacked_chair_does_not():
     )
 
 
+def test_active_chair_ignores_xy_near_table_on_different_story():
+    ground_table = scene_object_to_spatial_entity(
+        _object("table_0", "reading table", (0, 0, 0.375), (1.5, 0.8, 0.75))
+    )
+    upper_chair = scene_object_to_spatial_entity(
+        _object(
+            "chair_0",
+            "reading chair",
+            (0, -1.1, 4.45),
+            (0.5, 0.5, 0.9),
+            180,
+        )
+    )
+    assert ground_table is not None and upper_chair is not None
+
+    result = evaluate_spatial_entities([ground_table, upper_chair])
+
+    assert not any(
+        violation.code == "seat_faces_away_from_table"
+        for violation in result.violations
+    )
+
+
 def test_storage_access_zone_is_hard_while_seat_access_is_advisory():
     cabinet = scene_object_to_spatial_entity(
         _object("cabinet_0", "storage cabinet", (0, 0, 0.9), (1, 0.5, 1.8))
