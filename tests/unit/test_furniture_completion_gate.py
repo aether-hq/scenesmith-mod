@@ -686,6 +686,62 @@ def test_large_multilevel_library_recovery_fills_patron_ensemble_on_each_story()
     assert all((call["x"], call["y"]) == (1.25, -1.5) for call in placements)
 
 
+def test_level_recovery_retries_when_support_snaps_table_to_another_story():
+    furniture = _library_with_ground_only_tables()
+    table_asset = next(obj for obj in furniture if obj.name == "reading_table")
+    attempts = []
+    removed = []
+    scene = SimpleNamespace(
+        text_description=_EXACT_MULTILEVEL_LIBRARY_PROMPT,
+        objects={obj.object_id: obj for obj in furniture},
+        room_geometry=SimpleNamespace(length=13.8, width=13.8),
+    )
+
+    class FakeTools:
+        def set_noise_profile(self, _mode):
+            pass
+
+        def _major_support_elevations(self):
+            return (0.0, 4.0, 8.0)
+
+        def _add_furniture_to_scene_impl(self, **kwargs):
+            attempts.append(kwargs)
+            object_id = f"recovered_table_{len(attempts)}"
+            actual_z = 0.0 if len(attempts) == 1 else kwargs["z"]
+            placed = _role_furniture(
+                "reading_table",
+                100 + len(attempts),
+                actual_z,
+                x=kwargs["x"],
+                y=kwargs["y"],
+                yaw=kwargs["yaw"],
+            )
+            placed.object_id = object_id
+            scene.objects[object_id] = placed
+            return json.dumps({"success": True, "object_id": object_id})
+
+        def _remove_furniture_impl(self, object_id):
+            removed.append(object_id)
+            scene.objects.pop(object_id, None)
+            return json.dumps({"success": True})
+
+    agent = object.__new__(StatefulFurnitureAgent)
+    agent.scene = scene
+    agent.asset_manager = SimpleNamespace(list_available_assets=lambda: [table_asset])
+    agent.furniture_tools = FakeTools()
+
+    assert (
+        agent._place_room_kit_minimums_deterministically(
+            _dense_multilevel_library_kit()
+        )
+        == 2
+    )
+    assert [call["z"] for call in attempts] == [4.0, 4.0, 8.0]
+    assert removed == ["recovered_table_1"]
+    assert scene.objects["recovered_table_2"].transform.translation()[2] == 4.0
+    assert scene.objects["recovered_table_3"].transform.translation()[2] == 8.0
+
+
 def test_library_recovery_prefers_stable_armchair_over_role_exact_rocker():
     assets = [
         SimpleNamespace(

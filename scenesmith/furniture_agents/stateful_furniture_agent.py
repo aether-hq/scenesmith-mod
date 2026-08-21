@@ -908,13 +908,34 @@ class StatefulFurnitureAgent(BaseStatefulAgent, BaseFurnitureAgent):
                         except (json.JSONDecodeError, AttributeError, TypeError):
                             result_payload = {}
                             success = False
+                        object_id = str(result_payload.get("object_id") or "")
+                        placed_object = self.scene.objects.get(object_id)
+                        actual_level = (
+                            _nearest_level(placed_object, support_elevations)
+                            if placed_object is not None
+                            else None
+                        )
+                        if (
+                            success
+                            and target_elevation is not None
+                            and actual_level is not None
+                            and actual_level != elevation
+                        ):
+                            self.furniture_tools._remove_furniture_impl(object_id)
+                            console_logger.warning(
+                                "Deterministic recovery rejected %s at %.3fm: "
+                                "support resolution placed it at %.3fm",
+                                slot.role,
+                                elevation,
+                                actual_level,
+                            )
+                            success = False
                         if success:
                             level_counts[elevation] += 1
                             if (
                                 slot.role == "reading_chair"
                                 and elevation in cluster_ids
                             ):
-                                object_id = str(result_payload.get("object_id") or "")
                                 if object_id:
                                     cluster_ids[elevation].append(object_id)
                             break
