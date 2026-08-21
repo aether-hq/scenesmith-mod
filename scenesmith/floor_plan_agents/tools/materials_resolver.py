@@ -23,6 +23,23 @@ console_logger = logging.getLogger(__name__)
 DEFAULT_MATERIALS_DIR = Path(__file__).parent.parent.parent.parent / "materials"
 
 
+def _material_matches_requested_surface(description: str, result: object) -> bool:
+    """Reject a proven cross-family retrieval without second-guessing CLIP."""
+
+    requested = description.casefold()
+    material_family = " ".join(
+        (
+            str(getattr(result, "material_id", "")),
+            str(getattr(result, "category", "")),
+        )
+    ).casefold()
+    explicit_wall_finish = any(
+        term in requested for term in ("wall", "plaster", "stucco", "drywall")
+    )
+    ground_family = "ground" in material_family
+    return not (explicit_wall_finish and ground_family)
+
+
 @dataclass
 class MaterialsConfig:
     """Configuration for materials resolution."""
@@ -190,6 +207,14 @@ class MaterialsResolver:
         for _index, response in client.retrieve_materials([request]):
             if response.results:
                 result = response.results[0]
+                if not _material_matches_requested_surface(description, result):
+                    console_logger.warning(
+                        "Rejected incompatible material %s for wall finish %r; "
+                        "using the configured wall fallback",
+                        result.material_id,
+                        description,
+                    )
+                    return self.get_default_wall_material()
                 material_path = Path(result.material_path)
 
                 # Cache the material so get_material_by_id can find it later.
