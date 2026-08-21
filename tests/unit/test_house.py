@@ -7,6 +7,8 @@ import xml.etree.ElementTree as ET
 
 from pathlib import Path
 
+from pygltflib import GLTF2
+
 from scenesmith.agent_utils.house import (
     ConnectionType,
     Door,
@@ -33,7 +35,7 @@ from scenesmith.agent_utils.semantic_environments import (
     FormationType,
     SemanticEnvironmentSpec,
 )
-from scenesmith.agent_utils.structural_compiler import TriangleMesh
+from scenesmith.agent_utils.structural_compiler import TriangleMesh, compile_platform
 from scenesmith.agent_utils.structural_geometry import (
     SCHEMA_VERSION,
     ConnectorEndpoint,
@@ -887,6 +889,50 @@ class TestV2StructuralLayout(unittest.TestCase):
                 paths["mezzanine"].with_suffix(".surfaces.json")
             ]
             assert restored.platforms == layout.platforms
+
+    def test_house_platform_inherits_room_floor_material_and_uvs(self) -> None:
+        material = Material.from_path(
+            Path(__file__).parents[2] / "data/materials/WoodFloor014"
+        )
+        platform = PlatformSpec(
+            platform_id="renaissance_gallery",
+            space_id="library",
+            footprint=Footprint2D(
+                outer=((0, 0), (8, 0), (8, 8), (0, 8)),
+                holes=(((2, 2), (2, 6), (6, 6), (6, 2)),),
+            ),
+            elevation=4.0,
+            guarded_hole_indices=(0,),
+        )
+        layout = HouseLayout(
+            room_specs=[RoomSpec("library")],
+            room_materials={
+                "library": RoomMaterials(
+                    wall_material=Material.from_path("materials/plaster"),
+                    floor_material=material,
+                )
+            },
+            platforms=[platform],
+        )
+
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            paths = layout.compile_platforms(Path(temporary_directory))
+            sdf_path = paths[platform.platform_id]
+            visual_uri = ET.parse(sdf_path).findtext(".//visual/geometry/mesh/uri")
+            assert visual_uri is not None
+            assert visual_uri.endswith(".glb")
+            visual_path = sdf_path.parent / visual_uri
+            assert visual_path.is_file()
+            gltf = GLTF2().load(str(visual_path))
+            primitive = gltf.meshes[0].primitives[0]
+            assert primitive.attributes.TEXCOORD_0 is not None
+            assert primitive.material == 0
+            assert len(gltf.materials) == 1
+            assert len(gltf.images) == 3
+            assert all(image.uri.startswith("data:image/") for image in gltf.images)
+            assert gltf.accessors[primitive.indices].count == (
+                len(compile_platform(platform).visual_mesh.triangles) * 3
+            )
 
     def test_house_compiles_heightfield_in_room_frame(self) -> None:
         layout = HouseLayout(

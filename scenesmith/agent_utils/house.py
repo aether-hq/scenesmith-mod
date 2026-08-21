@@ -1953,8 +1953,20 @@ class HouseLayout:
         self.validate_structure()
         compiled_paths: dict[str, Path] = {}
         for platform in self.platforms:
+            room_materials = self.room_materials.get(platform.space_id)
+            floor_material = (
+                room_materials.floor_material if room_materials is not None else None
+            )
+            texture_scale = (
+                floor_material.texture_scale or 0.5
+                if floor_material is not None
+                else 0.5
+            )
             paths = write_compiled_structure(
-                compile_platform(platform), output_dir / platform.platform_id
+                compile_platform(platform),
+                output_dir / platform.platform_id,
+                visual_material=floor_material,
+                visual_texture_scale=texture_scale,
             )
             compiled_paths[platform.platform_id] = paths.sdf_path
             self._attach_structural_sidecar(platform.space_id, paths.surfaces_path)

@@ -16,9 +16,17 @@ import shutil
 import tempfile
 import xml.etree.ElementTree as ET
 
+import numpy as np
+
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Iterable, Mapping, Sequence
+
+from scenesmith.utils.gltf_generation import (
+    create_glb_from_mesh_data,
+    zup_to_yup_transform,
+)
+from scenesmith.utils.material import Material
 
 from scenesmith.agent_utils.structural_geometry import (
     GEOMETRY_TOLERANCE,
@@ -2381,6 +2389,52 @@ def _add_mesh_geometry(parent: ET.Element, mesh_name: str) -> None:
     ET.SubElement(mesh, "uri").text = mesh_name
 
 
+def _textured_mesh_glb_bytes(
+    mesh: TriangleMesh,
+    material: Material,
+    *,
+    texture_scale: float,
+) -> bytes:
+    """Serialize one structural mesh as a tiled, single-material PBR GLB."""
+
+    if texture_scale <= 0:
+        raise ValueError("texture_scale must be positive")
+    vertices_zup: list[Point3] = []
+    normals_zup: list[Point3] = []
+    uvs: list[Point2] = []
+    for triangle_index, triangle in enumerate(mesh.triangles):
+        normal = mesh.triangle_normal(triangle_index)
+        dominant_axis = max(range(3), key=lambda axis: abs(normal[axis]))
+        for vertex_index in triangle:
+            x, y, z = mesh.vertices[vertex_index]
+            vertices_zup.append((x, y, z))
+            normals_zup.append(normal)
+            if dominant_axis == 2:
+                uvs.append((x / texture_scale, y / texture_scale))
+            elif dominant_axis == 0:
+                uvs.append((y / texture_scale, z / texture_scale))
+            else:
+                uvs.append((x / texture_scale, z / texture_scale))
+
+    vertices = zup_to_yup_transform(np.asarray(vertices_zup, dtype=np.float32))
+    normals = zup_to_yup_transform(np.asarray(normals_zup, dtype=np.float32))
+    indices = np.arange(len(vertices_zup), dtype=np.uint32)
+    textures = material.get_all_textures()
+    with tempfile.TemporaryDirectory() as temporary_directory:
+        output_path = Path(temporary_directory) / "structure.glb"
+        create_glb_from_mesh_data(
+            vertices=vertices,
+            normals=normals,
+            uvs=np.asarray(uvs, dtype=np.float32),
+            indices=indices,
+            color_texture_path=textures["color"],
+            normal_texture_path=textures["normal"],
+            roughness_texture_path=textures["roughness"],
+            output_path=output_path,
+        )
+        return output_path.read_bytes()
+
+
 def write_compiled_structure(
     compiled: CompiledStructure,
     output_dir: Path | str,
@@ -2390,6 +2444,8 @@ def write_compiled_structure(
     source_content_hash: str | None = None,
     compiler_version: str = "structural-compiler-v1",
     compile_options: Mapping[str, object] | None = None,
+    visual_material: Material | None = None,
+    visual_texture_scale: float = 0.5,
 ) -> CompiledStructurePaths:
     """Write OBJ, weldable SDF, and semantic-surface sidecar files.
 
@@ -2406,10 +2462,20 @@ def write_compiled_structure(
         )
     if not str(compiler_version).strip():
         raise ValueError("compiler_version must not be empty")
-    mesh_name = f"{compiled.structure_id}.obj"
+    mesh_name = f"{compiled.structure_id}.{'glb' if visual_material else 'obj'}"
     sdf_name = f"{compiled.structure_id}.sdf"
     surfaces_name = f"{compiled.structure_id}.surfaces.json"
-    mesh_text = compiled.visual_mesh.to_obj(object_name=compiled.structure_id)
+    mesh_bytes = (
+        _textured_mesh_glb_bytes(
+            compiled.visual_mesh,
+            visual_material,
+            texture_scale=visual_texture_scale,
+        )
+        if visual_material is not None
+        else compiled.visual_mesh.to_obj(object_name=compiled.structure_id).encode(
+            "utf-8"
+        )
+    )
     collision_mesh_name: str | None = None
     collision_mesh_bytes: bytes | None = None
     if (
@@ -2552,7 +2618,6 @@ def write_compiled_structure(
             }
             for patch in compiled.surfaces
         ]
-    mesh_bytes = mesh_text.encode("utf-8")
     mesh_hash = hashlib.sha256(mesh_bytes).hexdigest()
     sdf_hash = hashlib.sha256(sdf_bytes).hexdigest()
     semantic_product_hash = hashlib.sha256(
