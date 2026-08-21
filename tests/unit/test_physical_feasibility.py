@@ -832,6 +832,75 @@ class TestApplyPhysicalFeasibilityPostprocessing(PhysicalFeasibilityTestCase):
         )
         self.assertEqual(collisions.call_count, 2)
 
+    def test_owner_bound_decor_preserves_full_relative_pose_across_postprocessing(
+        self,
+    ) -> None:
+        """Projection and simulation cannot detach decor welded to its owner."""
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            scene = self._create_scene_with_manipuland(Path(tmp_dir))
+            owner = scene.get_object(UniqueID("table_0"))
+            row = scene.get_object(UniqueID("ball_0"))
+            owner.transform = RigidTransform(
+                RollPitchYaw(0.0, 0.0, 0.3), [1.0, 2.0, 0.25]
+            )
+            relative = RigidTransform(RollPitchYaw(0.1, -0.05, -0.2), [0.2, -0.1, 0.4])
+            row.transform = owner.transform @ relative
+            row.metadata["dense_library_owner_bound"] = "table_0"
+            projection_owner = RigidTransform(
+                RollPitchYaw(0.0, 0.0, 1.1), [2.5, -1.0, 0.3]
+            )
+            simulation_owner = RigidTransform(
+                RollPitchYaw(0.05, -0.02, -0.7), [-1.5, 0.75, 0.28]
+            )
+            attached_before_simulation = []
+
+            def detach_in_projection(*, scene, **_kwargs):
+                scene.get_object(UniqueID("table_0")).transform = projection_owner
+                scene.get_object(UniqueID("ball_0")).transform = RigidTransform(
+                    RollPitchYaw(0.4, 0.2, 0.8), [-4.0, 5.0, 7.0]
+                )
+                return scene, True
+
+            def move_owner_in_simulation(*, scene, **_kwargs):
+                current_row = scene.get_object(UniqueID("ball_0"))
+                attached_before_simulation.append(
+                    np.allclose(
+                        current_row.transform.GetAsMatrix4(),
+                        (projection_owner @ relative).GetAsMatrix4(),
+                    )
+                )
+                scene.get_object(UniqueID("table_0")).transform = simulation_owner
+                return scene, []
+
+            with (
+                patch(
+                    "scenesmith.agent_utils.physical_feasibility."
+                    "apply_non_penetration_projection",
+                    side_effect=detach_in_projection,
+                ),
+                patch(
+                    "scenesmith.agent_utils.physical_feasibility."
+                    "apply_forward_simulation",
+                    side_effect=move_owner_in_simulation,
+                ),
+            ):
+                processed, success, _ = apply_physical_feasibility_postprocessing(
+                    scene=scene,
+                    weld_furniture=True,
+                    projection_enabled=True,
+                    simulation_enabled=True,
+                )
+
+        self.assertTrue(success)
+        self.assertEqual(attached_before_simulation, [True])
+        self.assertTrue(
+            np.allclose(
+                processed.get_object(UniqueID("ball_0")).transform.GetAsMatrix4(),
+                (simulation_owner @ relative).GetAsMatrix4(),
+            )
+        )
+
     def test_successful_projection_rejects_dirty_restored_scene(self) -> None:
         """A targeted restore must still pass an authoritative full recheck."""
 

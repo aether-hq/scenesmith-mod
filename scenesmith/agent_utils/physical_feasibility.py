@@ -1632,6 +1632,33 @@ def apply_physical_feasibility_postprocessing(
             if obj.object_type == ObjectType.FURNITURE
         }
 
+    owner_bound_relative_transforms: dict[UniqueID, tuple[UniqueID, RigidTransform]] = (
+        {}
+    )
+    for obj in scene.objects.values():
+        owner_value = (obj.metadata or {}).get("dense_library_owner_bound")
+        if not owner_value:
+            continue
+        owner_id = UniqueID(str(owner_value))
+        owner = scene.get_object(owner_id)
+        if owner is None:
+            continue
+        owner_bound_relative_transforms[obj.object_id] = (
+            owner_id,
+            owner.transform.inverse() @ obj.transform,
+        )
+
+    def restore_owner_bound_relative_transforms() -> None:
+        for object_id, (
+            owner_id,
+            relative_transform,
+        ) in owner_bound_relative_transforms.items():
+            obj = scene.get_object(object_id)
+            owner = scene.get_object(owner_id)
+            if obj is None or owner is None:
+                continue
+            obj.transform = owner.transform @ relative_transform
+
     def find_ejected_furniture() -> list[UniqueID]:
         if not original_furniture_transforms:
             return []
@@ -1713,6 +1740,7 @@ def apply_physical_feasibility_postprocessing(
             collision_penetration_threshold_m=collision_penetration_threshold_m,
         )
         projection_attempt_failed = not projection_success
+        restore_owner_bound_relative_transforms()
 
         if not projection_success and not weld_furniture:
             # Only apply floor fallback when furniture is free to move.
@@ -1767,6 +1795,7 @@ def apply_physical_feasibility_postprocessing(
             "skipping forward simulation for this checkpoint",
             projection_restored,
         )
+    restore_owner_bound_relative_transforms()
 
     pre_simulation_furniture_transforms: dict[UniqueID, RigidTransform] = {}
     if not weld_furniture and not projection_restored:
@@ -1795,9 +1824,11 @@ def apply_physical_feasibility_postprocessing(
             fallen_manipuland_z_displacement=fallen_manipuland_z_displacement,
         )
         removed_ids.extend(simulation_removed_ids)
+        restore_owner_bound_relative_transforms()
 
     simulation_ejected = find_ejected_furniture()
     restore_ejected_furniture(simulation_ejected, "Simulation")
+    restore_owner_bound_relative_transforms()
     simulation_restored = len(simulation_ejected)
     if simulation_restored:
         projection_success = False
@@ -1838,6 +1869,7 @@ def apply_physical_feasibility_postprocessing(
                 obj.transform = RigidTransform(
                     transform.rotation(), transform.translation().copy()
                 )
+            restore_owner_bound_relative_transforms()
             repaired_collisions = compute_scene_collisions(
                 scene=scene,
                 penetration_threshold=validation_object_penetration_threshold_m,
@@ -1918,6 +1950,7 @@ def apply_physical_feasibility_postprocessing(
                 max_tilt_delta,
             )
 
+    restore_owner_bound_relative_transforms()
     return scene, projection_success, removed_ids
 
 
