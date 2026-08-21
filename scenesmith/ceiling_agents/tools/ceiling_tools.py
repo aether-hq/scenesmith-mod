@@ -6,6 +6,7 @@ This module provides tools for generating and placing ceiling-mounted objects
 
 import logging
 import math
+import re
 
 from dataclasses import replace
 from typing import Any
@@ -52,6 +53,7 @@ def _grand_atrium_chandelier_dimensions(
     dimensions: list[float],
     room_bounds: tuple[float, float, float, float],
     ceiling_height: float,
+    context_description: str = "",
 ) -> list[float]:
     """Keep an explicit grand atrium chandelier at a visible focal scale."""
     requested = [float(value) for value in dimensions]
@@ -61,9 +63,26 @@ def _grand_atrium_chandelier_dimensions(
     min_x, min_y, max_x, max_y = room_bounds
     room_span = min(float(max_x - min_x), float(max_y - min_y))
     text = description.casefold()
+    context = context_description.casefold()
+    grand_room_context = (
+        bool(
+            re.search(
+                r"\b(?:large|grand|vast|expansive|huge|monumental)\b",
+                context,
+            )
+        )
+        and bool(
+            re.search(
+                r"\b(?:multi[\s-]?level|multiple\s+(?:floors|levels))\b",
+                context,
+            )
+        )
+        and bool(re.search(r"\brenai+ssance\b", context))
+        and "librar" in context
+    )
     if (
-        "grand" not in text
-        or "chandelier" not in text
+        "chandelier" not in text
+        or ("grand" not in text and not grand_room_context)
         or room_span < 10.0
         or ceiling_height < 8.0
     ):
@@ -486,6 +505,10 @@ class CeilingTools:
                     dimensions=dimensions,
                     room_bounds=self.room_bounds,
                     ceiling_height=self.ceiling_height,
+                    context_description=str(
+                        getattr(getattr(self, "scene", None), "text_description", "")
+                        or ""
+                    ),
                 )
                 for index, dimensions in enumerate(request.desired_dimensions)
             ]

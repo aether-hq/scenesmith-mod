@@ -37,6 +37,9 @@ def test_chandelier_focal_minimum_is_limited_to_large_tall_atriums() -> None:
         dimensions=[0.4, 0.4, 0.6],
         room_bounds=(-6.6, -6.6, 6.6, 6.6),
         ceiling_height=12.0,
+        context_description=(
+            "large multi-level renaiissance library with thousands of books"
+        ),
     )
 
     assert ordinary == [0.8, 0.8, 0.9]
@@ -65,3 +68,37 @@ def test_ceiling_generation_normalizes_grand_atrium_chandelier_request() -> None
     generated_request = asset_manager.generate_assets.call_args.kwargs["request"]
     assert generated_request.desired_dimensions == [[1.4, 1.4, 1.8]]
     assert original.desired_dimensions == [[1.4, 1.4, 1.0]]
+
+
+def test_large_multilevel_renaissance_library_normalizes_ornate_chandelier() -> None:
+    asset_manager = Mock()
+    asset_manager.generate_assets.return_value = SimpleNamespace(
+        successful_assets=[],
+        has_failures=False,
+    )
+    tools = CeilingTools.__new__(CeilingTools)
+    tools.asset_manager = asset_manager
+    tools.room_bounds = (-6.6, -6.6, 6.6, 6.6)
+    tools.ceiling_height = 12.0
+    tools.scene = SimpleNamespace(
+        text_description=(
+            "a large, multi-level library with thousands of books and a bunch "
+            "of tables and chairs for patrons. A spiral staircase connects the "
+            "floors, and there are huge archted windows, statues, and so on, as "
+            "it has a renaiissance, gorgeous decor."
+        )
+    )
+    request = AssetGenerationRequest(
+        object_descriptions=[
+            "Renaissance-style ornate chandelier with multiple crystal arms "
+            "and candle-style lights"
+        ],
+        short_names=["chandelier_main"],
+        object_type=ObjectType.CEILING_MOUNTED,
+        desired_dimensions=[[1.5, 1.5, 0.8]],
+    )
+
+    tools._generate_assets_impl(request)
+
+    generated_request = asset_manager.generate_assets.call_args.kwargs["request"]
+    assert generated_request.desired_dimensions == [[1.5, 1.5, 1.8]]
