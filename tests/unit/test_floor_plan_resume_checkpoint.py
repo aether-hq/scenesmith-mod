@@ -14,6 +14,7 @@ from scenesmith.floor_plan_agents.stateful_floor_plan_agent import (
 from scenesmith.experiments.indoor_scene_generation import (
     _copy_checkpoint_for_stage,
 )
+from scenesmith.agent_utils.scene_analyzer import _load_manipuland_design_context
 
 
 def test_valid_layout_is_atomically_checkpointed_before_critique(tmp_path):
@@ -100,6 +101,23 @@ def test_wall_resume_copies_canonical_checkpoint_without_legacy_room_geometry(
         "platform"
     )
     (source / "house_layout.json").write_text('{"rooms": []}')
+    (source / "scene_blueprint.json").write_text(
+        json.dumps(
+            {
+                "source_prompt": (
+                    "a large, multi-level Renaissance library with thousands "
+                    "of books"
+                ),
+                "design_tokens": {"style_keywords": ["Renaissance", "ornate"]},
+                "furniture_groups": [
+                    {
+                        "density": "layered",
+                        "roles": {"bookshelf": 15},
+                    }
+                ],
+            }
+        )
+    )
     checkpoint = source / "room_room" / "scene_states" / "scene_after_furniture"
     checkpoint.mkdir(parents=True)
     (checkpoint / "scene_state.json").write_text("{}")
@@ -118,6 +136,15 @@ def test_wall_resume_copies_canonical_checkpoint_without_legacy_room_geometry(
         / "scene_state.json"
     ).is_file()
     assert not (target / "room_geometry").exists()
+    design_context = _load_manipuland_design_context(
+        SimpleNamespace(
+            scene_dir=target / "room_room",
+            text_description="large multi-level library",
+        )
+    )
+    assert design_context is not None
+    assert design_context.rich_collection is True
+    assert "Avoid sparse functional treatment" in design_context.style_notes
 
 
 def test_wall_resume_still_copies_legacy_room_geometry(tmp_path):

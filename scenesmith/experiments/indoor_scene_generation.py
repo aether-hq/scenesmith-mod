@@ -487,7 +487,8 @@ def _copy_checkpoint_for_stage(
     """Copy only the checkpoint state needed to resume from start_stage.
 
     Unlike copytree of entire scene, this explicitly copies only required files:
-    - Scene-level: floor_plans/, house_layout.json, and legacy room_geometry/
+    - Scene-level: floor_plans/, house_layout.json, scene_blueprint.json, and
+      legacy room_geometry/
     - Room-level: checkpoint directory + referenced assets
 
     NOT copied (ensuring fresh start for resumed stage):
@@ -535,6 +536,12 @@ def _copy_checkpoint_for_stage(
         source_scene_dir / "house_layout.json",
         target_scene_dir / "house_layout.json",
     )
+    # Downstream deterministic detail selection consumes the persisted semantic
+    # blueprint. Preserve it when resuming a current checkpoint; older
+    # checkpoints without one retain the existing prompt-derived fallback.
+    scene_blueprint = source_scene_dir / "scene_blueprint.json"
+    if scene_blueprint.exists():
+        shutil.copy(scene_blueprint, target_scene_dir / "scene_blueprint.json")
 
     checkpoint_name = STAGE_CHECKPOINTS[start_stage]
     asset_dirs = STAGE_ASSET_DIRS[start_stage]
