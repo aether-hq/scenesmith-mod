@@ -1099,7 +1099,7 @@ class TestV2StructuralLayout(unittest.TestCase):
                 room_id="library",
                 text_description=prompt,
             )
-            for index, x in enumerate((-1.05, 0.0, 1.05)):
+            for index, x in enumerate((-2.1, -1.05, 0.0, 1.05, 2.1)):
                 owner_id = UniqueID(f"bookcase_{index}")
                 room.add_object(
                     SceneObject(
@@ -1110,7 +1110,10 @@ class TestV2StructuralLayout(unittest.TestCase):
                         transform=RigidTransform(p=[x, 5.2, 0.0]),
                         bbox_min=np.array([-0.48, -0.18, 0.0]),
                         bbox_max=np.array([0.48, 0.18, 2.0]),
-                        metadata={"dense_library_grouped_run": 0.0},
+                        metadata={
+                            "dense_library_populated_case": 0.0,
+                            **({"dense_library_grouped_run": 0.0} if index < 3 else {}),
+                        },
                     )
                 )
                 for row_index in range(3):
@@ -1145,9 +1148,9 @@ class TestV2StructuralLayout(unittest.TestCase):
             )._renaissance_bookcase_blender_visuals(scene_dir / "bookcase_dressing")
 
             self.assertEqual(len(visuals), 1)
-            self.assertEqual(visuals[0]["populated_bookcases"], 3)
+            self.assertEqual(visuals[0]["populated_bookcases"], 5)
             self.assertEqual(visuals[0]["shelf_tiers_per_bookcase"], 6)
-            self.assertGreaterEqual(visuals[0]["visible_book_spines"], 180)
+            self.assertGreaterEqual(visuals[0]["visible_book_spines"], 300)
             gltf = GLTF2().load(visuals[0]["path"])
             node_names = {node.name for node in gltf.nodes}
             self.assertIn("renaissance_bookcase_walnut", node_names)

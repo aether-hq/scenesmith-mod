@@ -10,6 +10,7 @@ import logging
 import math
 import re
 from collections import Counter
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -25,6 +26,10 @@ from scenesmith.agent_utils.asset_semantics import (
 from scenesmith.agent_utils.asset_manager import AssetGenerationRequest
 from scenesmith.agent_utils.base_stateful_agent import BaseStatefulAgent
 from scenesmith.agent_utils.blender.process_provider import RenderAllocation
+from scenesmith.agent_utils.clearance_zones import (
+    compute_door_clearance_violations,
+    compute_window_clearance_violations,
+)
 from scenesmith.agent_utils.placement_noise import PlacementNoiseMode
 from scenesmith.agent_utils.physics_validation import compute_scene_collisions
 from scenesmith.agent_utils.reachability import (
@@ -334,6 +339,131 @@ def _required_room_kit_role_count(room_kit: Any, slot: Any) -> int:
     return int(slot.minimum_count)
 
 
+def _normalize_dense_library_bookcases(
+    scene: RoomScene,
+    room_kit: RoomKitSelection,
+    support_elevations: tuple[float, ...],
+    *,
+    remove_object: Callable[[str], Any],
+) -> int:
+    """Prune explicit rich-library shelving to its authored per-story count."""
+
+    level_requirements = _required_room_kit_level_coverage(
+        str(getattr(scene, "text_description", "")),
+        room_kit,
+        support_elevations,
+    )
+    target_per_level = level_requirements.get("bookshelf")
+    bookshelf_slot = next(
+        (slot for slot in room_kit.slots if slot.role == "bookshelf"), None
+    )
+    if target_per_level is None or bookshelf_slot is None:
+        return 0
+
+    try:
+        window_blockers = {
+            str(violation.furniture_id)
+            for violation in compute_window_clearance_violations(scene)
+        }
+    except (AttributeError, TypeError, ValueError):
+        window_blockers = set()
+    try:
+        path_blockers = {
+            str(violation.furniture_id)
+            for violation in compute_door_clearance_violations(scene)
+        }
+    except (AttributeError, TypeError, ValueError):
+        path_blockers = set()
+
+    by_level = {elevation: [] for elevation in support_elevations}
+    for obj in scene.objects.values():
+        if not _object_matches_room_kit_slot(obj, bookshelf_slot):
+            continue
+        metadata = getattr(obj, "metadata", None)
+        if not isinstance(metadata, dict):
+            metadata = {}
+            obj.metadata = metadata
+        metadata.pop("dense_library_populated_case", None)
+        level = _nearest_level(obj, support_elevations)
+        if level is not None:
+            by_level[level].append(obj)
+
+    room_geometry = getattr(scene, "room_geometry", None)
+    half_x = max(0.0, float(getattr(room_geometry, "length", 0.0)) / 2.0)
+    half_y = max(0.0, float(getattr(room_geometry, "width", 0.0)) / 2.0)
+
+    removed = 0
+    for elevation, candidates in by_level.items():
+        if len(candidates) <= target_per_level:
+            retained = list(candidates)
+        else:
+            grouped = sorted(
+                (
+                    obj
+                    for obj in candidates
+                    if (getattr(obj, "metadata", None) or {}).get(
+                        "dense_library_grouped_run"
+                    )
+                    == elevation
+                ),
+                key=lambda obj: str(obj.object_id),
+            )
+            retained = grouped[:target_per_level]
+            retained_ids = {str(obj.object_id) for obj in retained}
+            grouped_points: list[tuple[float, float]] = []
+            for obj in retained:
+                try:
+                    translation = obj.transform.translation()
+                    grouped_points.append(
+                        (float(translation[0]), float(translation[1]))
+                    )
+                except (AttributeError, IndexError, TypeError, ValueError):
+                    continue
+
+            def retention_priority(obj: Any) -> tuple[bool, bool, float, float, str]:
+                object_id = str(obj.object_id)
+                try:
+                    translation = obj.transform.translation()
+                    x = float(translation[0])
+                    y = float(translation[1])
+                    wall_gap = min(abs(half_x - abs(x)), abs(half_y - abs(y)))
+                    run_gap = min(
+                        (math.hypot(x - px, y - py) for px, py in grouped_points),
+                        default=0.0,
+                    )
+                except (AttributeError, IndexError, TypeError, ValueError):
+                    wall_gap = math.inf
+                    run_gap = math.inf
+                return (
+                    object_id in window_blockers,
+                    object_id in path_blockers,
+                    wall_gap,
+                    run_gap,
+                    object_id,
+                )
+
+            extras = sorted(
+                (obj for obj in candidates if str(obj.object_id) not in retained_ids),
+                key=retention_priority,
+            )
+            retained.extend(extras[: max(0, target_per_level - len(retained))])
+            retained_ids = {str(obj.object_id) for obj in retained}
+            for obj in candidates:
+                if str(obj.object_id) in retained_ids:
+                    continue
+                remove_object(str(obj.object_id))
+                removed += 1
+
+        for obj in retained:
+            metadata = getattr(obj, "metadata", None)
+            if not isinstance(metadata, dict):
+                metadata = {}
+                obj.metadata = metadata
+            metadata["dense_library_populated_case"] = elevation
+
+    return removed
+
+
 def _chair_cluster_poses(
     table: Any, chair_asset: Any
 ) -> list[tuple[float, float, float]]:
@@ -372,6 +502,7 @@ def _validate_room_kit_completion(
     room_kit: RoomKitSelection | None,
     *,
     support_elevations: tuple[float, ...] = (),
+    enforce_exact_level_counts: bool = False,
 ) -> int:
     """Reject a matched semantic room kit that did not place required furniture."""
 
@@ -450,6 +581,33 @@ def _validate_room_kit_completion(
             f"Semantic room kit {room_kit.kit_id} has required level coverage "
             f"deficits: {details}. The furniture stage cannot publish this checkpoint."
         )
+    if enforce_exact_level_counts and "bookshelf" in level_requirements:
+        bookshelf_slot = next(
+            (slot for slot in room_kit.slots if slot.role == "bookshelf"), None
+        )
+        if bookshelf_slot is not None:
+            counts = _room_kit_role_level_counts(
+                furniture,
+                bookshelf_slot,
+                support_elevations,
+            )
+            target = level_requirements["bookshelf"]
+            mismatches = [
+                (elevation, counts[elevation])
+                for elevation in support_elevations
+                if counts[elevation] != target
+            ]
+            if mismatches:
+                details = "; ".join(
+                    f"bookshelf at {elevation:.3f}m placed {placed}, required "
+                    f"exactly {target}"
+                    for elevation, placed in mismatches
+                )
+                raise ModelBehaviorError(
+                    f"Semantic room kit {room_kit.kit_id} has noncanonical "
+                    f"bookshelf density: {details}. The furniture stage cannot "
+                    "publish this checkpoint."
+                )
     bookshelf_slot = next(
         (slot for slot in room_kit.slots if slot.role == "bookshelf"), None
     )
@@ -1435,12 +1593,31 @@ class StatefulFurnitureAgent(BaseStatefulAgent, BaseFurnitureAgent):
             # Pass update_checkpoint=False to preserve N-1 checkpoint for reset check.
             await self._request_critique_bounded(update_checkpoint=False)
 
+        support_elevations = self.furniture_tools._major_support_elevations()
+        if room_kit is not None:
+            pruned = _normalize_dense_library_bookcases(
+                self.scene,
+                room_kit,
+                support_elevations,
+                remove_object=self.furniture_tools._remove_furniture_impl,
+            )
+            if pruned:
+                console_logger.info(
+                    "Pruned %d surplus bookcases from explicit dense library",
+                    pruned,
+                )
+            _validate_furniture_collision_free(
+                self.scene,
+                self.cfg.physics_validation,
+            )
+
         # Validate final scene and save scores.
         await self._finalize_scene_and_scores()
         _validate_room_kit_completion(
             self.scene,
             room_kit,
-            support_elevations=self.furniture_tools._major_support_elevations(),
+            support_elevations=support_elevations,
+            enforce_exact_level_counts=True,
         )
 
     def _get_final_scores_directory(self) -> Path:

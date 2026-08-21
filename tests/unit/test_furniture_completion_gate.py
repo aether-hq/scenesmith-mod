@@ -12,6 +12,7 @@ from scenesmith.agent_utils.room import ObjectType
 from scenesmith.furniture_agents.stateful_furniture_agent import (
     StatefulFurnitureAgent,
     _chair_cluster_poses,
+    _normalize_dense_library_bookcases,
     _validate_furniture_collision_free,
     _validate_room_kit_completion,
 )
@@ -920,6 +921,7 @@ def test_large_multilevel_library_gate_accepts_contiguous_bookcase_wall_runs():
             scene,
             _dense_multilevel_bookshelf_kit(),
             support_elevations=(0.0, 4.0, 8.0),
+            enforce_exact_level_counts=True,
         )
         == 15
     )
@@ -930,6 +932,109 @@ def test_large_multilevel_library_gate_accepts_contiguous_bookcase_wall_runs():
                 for shelf in shelves
             )
             >= 3
+        )
+
+
+def test_large_multilevel_library_exact_gate_rejects_unpruned_surplus():
+    shelves = []
+    for level_index, elevation in enumerate((0.0, 4.0, 8.0)):
+        shelves.extend(
+            _full_height_bookshelf(
+                level_index * 6 + position_index,
+                elevation,
+                x=-2.625 + position_index * 1.05,
+                y=5.5,
+                yaw=180.0,
+            )
+            for position_index in range(6)
+        )
+    scene = SimpleNamespace(
+        text_description=_EXACT_MULTILEVEL_LIBRARY_PROMPT,
+        objects={shelf.object_id: shelf for shelf in shelves},
+    )
+
+    with pytest.raises(ModelBehaviorError, match=r"noncanonical bookshelf density"):
+        _validate_room_kit_completion(
+            scene,
+            _dense_multilevel_bookshelf_kit(),
+            support_elevations=(0.0, 4.0, 8.0),
+            enforce_exact_level_counts=True,
+        )
+
+
+def test_large_multilevel_library_prunes_surplus_and_marks_all_retained_cases(
+    monkeypatch,
+):
+    shelves = []
+    for level_index, elevation in enumerate((0.0, 4.0, 8.0)):
+        level_count = 18 if elevation == 0.0 else 5
+        for position_index in range(level_count):
+            shelf = _full_height_bookshelf(
+                level_index * 20 + position_index,
+                elevation,
+                x=-5.5 + (position_index % 6) * 2.0,
+                y=5.5 - (position_index // 6) * 5.5,
+                yaw=180.0,
+            )
+            if position_index < 3:
+                shelf.metadata["dense_library_grouped_run"] = elevation
+            shelves.append(shelf)
+    scene = SimpleNamespace(
+        text_description=_EXACT_MULTILEVEL_LIBRARY_PROMPT,
+        objects={shelf.object_id: shelf for shelf in shelves},
+        room_geometry=SimpleNamespace(length=13.8, width=13.8, openings=[]),
+    )
+    window_blockers = {
+        shelf.object_id for shelf in shelves if shelf.transform.translation()[2] == 0.0
+    }
+    window_blockers = set(sorted(window_blockers)[3:9])
+    monkeypatch.setattr(
+        "scenesmith.furniture_agents.stateful_furniture_agent."
+        "compute_window_clearance_violations",
+        lambda _scene: [
+            SimpleNamespace(furniture_id=object_id)
+            for object_id in sorted(window_blockers)
+        ],
+    )
+    monkeypatch.setattr(
+        "scenesmith.furniture_agents.stateful_furniture_agent."
+        "compute_door_clearance_violations",
+        lambda _scene: [],
+    )
+    removed = []
+
+    assert (
+        _normalize_dense_library_bookcases(
+            scene,
+            _dense_multilevel_bookshelf_kit(),
+            (0.0, 4.0, 8.0),
+            remove_object=lambda object_id: (
+                removed.append(object_id),
+                scene.objects.pop(object_id),
+            ),
+        )
+        == 13
+    )
+    retained = list(scene.objects.values())
+    assert {
+        elevation: sum(
+            float(shelf.transform.translation()[2]) == elevation for shelf in retained
+        )
+        for elevation in (0.0, 4.0, 8.0)
+    } == {0.0: 5, 4.0: 5, 8.0: 5}
+    assert window_blockers <= set(removed)
+    assert all(
+        shelf.metadata.get("dense_library_populated_case")
+        == float(shelf.transform.translation()[2])
+        for shelf in retained
+    )
+    for elevation in (0.0, 4.0, 8.0):
+        assert (
+            sum(
+                shelf.metadata.get("dense_library_grouped_run") == elevation
+                for shelf in retained
+            )
+            == 3
         )
 
 

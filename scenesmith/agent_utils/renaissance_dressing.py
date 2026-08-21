@@ -5,7 +5,6 @@ from __future__ import annotations
 import math
 import re
 
-from collections import Counter
 from pathlib import Path
 
 import numpy as np
@@ -467,21 +466,11 @@ def write_renaissance_bookcase_visuals(
         room = rooms.get(placed_room.room_id)
         if room is None:
             continue
-        row_counts = Counter(
-            str((obj.metadata or {}).get("dense_library_owner_bound"))
-            for obj in room.objects.values()
-            if bool((obj.metadata or {}).get("dense_library_book_row"))
-        )
         grouped: dict[float, list[object]] = {}
         for obj in room.objects.values():
             metadata = obj.metadata or {}
-            marker = metadata.get("dense_library_grouped_run")
-            if (
-                marker is None
-                or row_counts[str(obj.object_id)] < 3
-                or obj.bbox_min is None
-                or obj.bbox_max is None
-            ):
+            marker = metadata.get("dense_library_populated_case")
+            if marker is None or obj.bbox_min is None or obj.bbox_max is None:
                 continue
             grouped.setdefault(float(marker), []).append(obj)
 
@@ -492,28 +481,16 @@ def write_renaissance_bookcase_visuals(
         spine_count = 0
         for level in sorted(grouped):
             owners = grouped[level]
-            if len(owners) < 3:
+            if len(owners) < 5:
                 continue
-            points = np.asarray(
-                [owner.transform.translation()[:2] for owner in owners], dtype=float
-            )
-            farthest = max(
-                (
-                    (left, right)
-                    for left in range(len(points))
-                    for right in range(left + 1, len(points))
-                ),
-                key=lambda pair: float(
-                    np.linalg.norm(points[pair[1]] - points[pair[0]])
-                ),
-            )
-            along = points[farthest[1]] - points[farthest[0]]
-            along /= np.linalg.norm(along)
-            inward = np.array([-along[1], along[0]])
-            centroid = np.mean(points, axis=0)
-            if float(np.dot(inward, -centroid)) < 0.0:
-                inward *= -1.0
             for owner in owners:
+                rotation = np.asarray(owner.transform.rotation().matrix(), dtype=float)
+                along = rotation[:2, 0]
+                along /= np.linalg.norm(along)
+                inward = np.array([-along[1], along[0]])
+                center = np.asarray(owner.transform.translation()[:2], dtype=float)
+                if float(np.dot(inward, -center)) < 0.0:
+                    inward *= -1.0
                 added = _append_populated_bookcase(
                     owner=owner,
                     along=along,
