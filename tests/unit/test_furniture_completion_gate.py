@@ -100,6 +100,38 @@ def test_matched_library_kit_accepts_required_minimum():
     assert _validate_room_kit_completion(scene, _library_kit()) == 7
 
 
+def test_matched_library_kit_rejects_statue_deficit_against_expanded_count():
+    room_kit = _library_kit()
+    room_kit.slots = (
+        *room_kit.slots,
+        SimpleNamespace(
+            role="classical_statue",
+            aliases=("statue", "sculpture"),
+            required=True,
+            minimum_count=2,
+            placement_class="floor",
+            facing_target="room_center",
+        ),
+    )
+    room_kit.slot_counts = {
+        "bookshelf": 2,
+        "reading_table": 1,
+        "reading_chair": 4,
+        "task_lamp": 1,
+        "classical_statue": 3,
+    }
+    scene = _scene_with_role_counts(
+        bookshelf=2,
+        reading_table=1,
+        reading_chair=4,
+        classical_statue=2,
+        task_lamp=1,
+    )
+
+    with pytest.raises(ModelBehaviorError, match=r"classical_statue.*2.*3"):
+        _validate_room_kit_completion(scene, room_kit)
+
+
 def test_matched_library_kit_rejects_role_deficit_despite_large_total():
     room_kit = _library_kit()
     room_kit.slots[2].minimum_count = 12
@@ -237,6 +269,67 @@ def test_library_kit_recovers_required_minimums_from_cached_assets():
     assert "task_lamp" not in placed_roles
     assert len({(call["x"], call["y"], call["z"]) for call in placements}) == 7
     assert {call["z"] for call in placements} == {0.0, 4.0, 8.0}
+
+
+def test_library_recovery_fills_expanded_statue_count():
+    statue_slot = SimpleNamespace(
+        role="classical_statue",
+        aliases=("statue", "sculpture"),
+        query="classical Renaissance marble statue on pedestal",
+        required=True,
+        minimum_count=2,
+        placement_class="floor",
+        facing_target="room_center",
+    )
+    room_kit = SimpleNamespace(
+        kit_id="library-reading-hall-v1",
+        slot_counts={"classical_statue": 3},
+        slots=(statue_slot,),
+    )
+    statue_asset = SimpleNamespace(
+        object_id="classical_statue_asset",
+        object_type=ObjectType.FURNITURE,
+        name="classical_statue",
+        description="classical Renaissance marble statue on pedestal",
+        metadata={"asset_quality_score": 1.0},
+    )
+    placements = []
+
+    class FakeTools:
+        def set_noise_profile(self, _mode):
+            pass
+
+        def _major_support_elevations(self):
+            return (0.0, 4.0, 8.0)
+
+        def _add_furniture_to_scene_impl(self, **kwargs):
+            placements.append(kwargs)
+            return json.dumps({"success": True})
+
+    agent = object.__new__(StatefulFurnitureAgent)
+    agent.scene = SimpleNamespace(
+        objects={
+            f"classical_statue_{index}": SimpleNamespace(
+                object_id=f"classical_statue_{index}",
+                object_type=ObjectType.FURNITURE,
+                name="classical_statue",
+                description="classical Renaissance marble statue on pedestal",
+                metadata={"asset_quality_score": 1.0},
+                transform=RigidTransform([0.0, 0.0, elevation]),
+            )
+            for index, elevation in enumerate((0.0, 4.0))
+        },
+        room_geometry=SimpleNamespace(length=13.0, width=13.0),
+        text_description="large multi-level Renaissance library with statues",
+    )
+    agent.asset_manager = SimpleNamespace(list_available_assets=lambda: [statue_asset])
+    agent.furniture_tools = FakeTools()
+
+    placed = agent._place_room_kit_minimums_deterministically(room_kit)
+
+    assert placed == 1
+    assert len(placements) == 1
+    assert placements[0]["asset_id"] == "classical_statue_asset"
 
 
 _EXACT_MULTILEVEL_LIBRARY_PROMPT = (

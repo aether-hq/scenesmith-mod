@@ -233,6 +233,15 @@ def _patron_ensemble_level_counts(
     }
 
 
+def _required_room_kit_role_count(room_kit: Any, slot: Any) -> int:
+    """Return the room-sized required count, falling back to the slot minimum."""
+
+    slot_counts = getattr(room_kit, "slot_counts", None)
+    if isinstance(slot_counts, dict) and slot.role in slot_counts:
+        return max(int(slot.minimum_count), int(slot_counts[slot.role]))
+    return int(slot.minimum_count)
+
+
 def _chair_cluster_poses(
     table: Any, chair_asset: Any
 ) -> list[tuple[float, float, float]]:
@@ -281,7 +290,9 @@ def _validate_room_kit_completion(
         return furniture_count
 
     required_minimum = sum(
-        slot.minimum_count for slot in room_kit.slots if slot.required
+        _required_room_kit_role_count(room_kit, slot)
+        for slot in room_kit.slots
+        if slot.required
     )
     if furniture_count < required_minimum:
         raise ModelBehaviorError(
@@ -299,9 +310,14 @@ def _validate_room_kit_completion(
         if slot.required
     }
     deficits = [
-        (slot.role, role_counts[slot.role], int(slot.minimum_count))
+        (
+            slot.role,
+            role_counts[slot.role],
+            _required_room_kit_role_count(room_kit, slot),
+        )
         for slot in room_kit.slots
-        if slot.required and role_counts[slot.role] < int(slot.minimum_count)
+        if slot.required
+        and role_counts[slot.role] < _required_room_kit_role_count(room_kit, slot)
     ]
     if deficits:
         details = "; ".join(
@@ -764,7 +780,10 @@ class StatefulFurnitureAgent(BaseStatefulAgent, BaseFurnitureAgent):
                 and _object_matches_room_kit_slot(obj, slot)
                 for obj in self.scene.objects.values()
             )
-            aggregate_missing = max(0, int(slot.minimum_count) - existing)
+            aggregate_missing = max(
+                0,
+                _required_room_kit_role_count(room_kit, slot) - existing,
+            )
             level_targets: list[float] = []
             required_per_level = level_requirements.get(slot.role)
             if required_per_level is not None:
