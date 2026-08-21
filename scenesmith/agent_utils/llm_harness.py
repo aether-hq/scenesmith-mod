@@ -39,7 +39,7 @@ console_logger = logging.getLogger(__name__)
 
 
 def _cli_proxy_http_timeout_seconds() -> float:
-    timeout = float(os.environ.get("SCENESMITH_LLM_PROXY_HTTP_TIMEOUT_SECONDS", "150"))
+    timeout = float(os.environ.get("SCENESMITH_LLM_PROXY_HTTP_TIMEOUT_SECONDS", "330"))
     if timeout <= 0:
         raise ValueError("SCENESMITH_LLM_PROXY_HTTP_TIMEOUT_SECONDS must be positive")
     return timeout
@@ -760,7 +760,7 @@ def install_agents_runtime(
         harness.provider,
         os.environ.get("SCENESMITH_LLM_RESPONSE_START_TIMEOUT_SECONDS", "15"),
         os.environ.get("SCENESMITH_LLM_CLI_INACTIVITY_TIMEOUT_SECONDS", "45"),
-        os.environ.get("SCENESMITH_LLM_HARD_TIMEOUT_SECONDS", "120"),
+        os.environ.get("SCENESMITH_LLM_HARD_TIMEOUT_SECONDS", "300"),
         f"{proxy_timeout:g}",
         os.environ.get("SCENESMITH_LLM_CIRCUIT_COOLDOWN_SECONDS", "0"),
     )

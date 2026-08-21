@@ -252,6 +252,14 @@ def test_agents_sdk_does_not_apply_direct_api_deadline_to_cli_bridge():
     assert response == "stream-managed response"
 
 
+def test_cli_loopback_default_covers_the_longest_subscription_turn(monkeypatch):
+    monkeypatch.delenv("SCENESMITH_LLM_PROXY_HTTP_TIMEOUT_SECONDS", raising=False)
+
+    from scenesmith.agent_utils.llm_harness import _cli_proxy_http_timeout_seconds
+
+    assert _cli_proxy_http_timeout_seconds() == 330.0
+
+
 def test_agents_sdk_cli_request_forces_loopback_timeout(monkeypatch):
     monkeypatch.setenv("SCENESMITH_LLM_PROXY_HTTP_TIMEOUT_SECONDS", "150")
 

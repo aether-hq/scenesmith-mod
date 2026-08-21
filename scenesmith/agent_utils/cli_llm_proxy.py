@@ -38,6 +38,7 @@ console_logger = logging.getLogger(__name__)
 
 
 DEFAULT_SUBSCRIPTION_TURN_TIMEOUT_SECONDS = 30.0
+DEFAULT_SUBSCRIPTION_HARD_TIMEOUT_SECONDS = 300.0
 SUBSCRIPTION_HEARTBEAT_SECONDS = 10.0
 
 
@@ -124,7 +125,10 @@ def _run_subscription_command(
         if response_start_timeout_seconds <= 0:
             raise ValueError("subscription response-start timeout must be positive")
         hard_timeout_seconds = float(
-            os.environ.get("SCENESMITH_LLM_HARD_TIMEOUT_SECONDS", "120")
+            os.environ.get(
+                "SCENESMITH_LLM_HARD_TIMEOUT_SECONDS",
+                str(DEFAULT_SUBSCRIPTION_HARD_TIMEOUT_SECONDS),
+            )
         )
         if hard_timeout_seconds <= 0:
             raise ValueError("subscription hard timeout must be positive")

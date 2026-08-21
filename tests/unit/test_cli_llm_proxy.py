@@ -10,6 +10,7 @@ import pytest
 from pathlib import Path
 
 from scenesmith.agent_utils.cli_llm_proxy import (
+    DEFAULT_SUBSCRIPTION_HARD_TIMEOUT_SECONDS,
     SubscriptionCommandCancelled,
     SubscriptionCommandTimeout,
     SubscriptionQueueBusy,
@@ -19,6 +20,10 @@ from scenesmith.agent_utils.cli_llm_proxy import (
     _text_content,
     _tool_output_schema,
 )
+
+
+def test_subscription_absolute_safety_ceiling_allows_long_active_streams():
+    assert DEFAULT_SUBSCRIPTION_HARD_TIMEOUT_SECONDS == 300.0
 
 
 def test_data_url_images_are_materialized(tmp_path: Path):
