@@ -42,14 +42,18 @@ from scenesmith.ceiling_agents.tools.response_dataclasses import (
 
 console_logger = logging.getLogger(__name__)
 
+CEILING_ATTACHMENT_CLEARANCE_METERS = 0.01
+
 
 def compute_ceiling_transform(
     x: float, y: float, rotation_deg: float, ceiling_height: float
 ) -> RigidTransform:
-    """Place object at ceiling with top at ceiling_height.
+    """Place an object just inside the ceiling attachment surface.
 
     Due to CEILING_MOUNTED canonicalization (top at z=0), placing at
-    z=ceiling_height puts the object's top flush with the ceiling.
+    z=ceiling_height would put the object's collision proxy exactly coplanar
+    with the room shell.  Keep a visually imperceptible inward clearance to
+    avoid mesh-contact degeneracies being reported as deep penetrations.
 
     Args:
         x: Position along room X-axis (meters).
@@ -62,7 +66,7 @@ def compute_ceiling_transform(
     """
     return RigidTransform(
         rpy=RollPitchYaw(roll=0, pitch=0, yaw=math.radians(rotation_deg)),
-        p=[x, y, ceiling_height],
+        p=[x, y, ceiling_height - CEILING_ATTACHMENT_CLEARANCE_METERS],
     )
 
 
@@ -209,7 +213,10 @@ class CeilingTools:
                 )
             )
         )
-        return RigidTransform(rotation, pose.position)
+        attachment_position = np.asarray(pose.position, dtype=float) + (
+            CEILING_ATTACHMENT_CLEARANCE_METERS * np.asarray(pose.normal, dtype=float)
+        )
+        return RigidTransform(rotation, attachment_position)
 
     def set_noise_profile(self, mode: PlacementNoiseMode) -> None:
         """Update the active noise profile based on placement style.

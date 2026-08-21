@@ -165,7 +165,40 @@ class TestStructuralSurfaceIndex(unittest.TestCase):
         transform = tools._ceiling_transform(0.0, 0.0, 0.0)
 
         assert transform is not None
-        self.assertAlmostEqual(transform.translation()[2], 3.2)
+        self.assertAlmostEqual(transform.translation()[2], 3.19)
+
+    def test_ceiling_tool_offsets_sloped_mount_inward_along_surface_normal(
+        self,
+    ) -> None:
+        compiled = compile_polygon_space(
+            structure_id="sloped_fixture_room",
+            footprint=Footprint2D.rectangle(4, 3).centered_on_bounds(),
+            ceiling_profile=ElevationProfile(
+                profile_type=ElevationProfileType.SLOPED,
+                base_elevation=3.0,
+                gradient=(0.1, 0.0),
+            ),
+        )
+        index = StructuralSurfaceIndex(compiled.surfaces)
+        floor = SimpleNamespace(
+            compute_world_bounds=lambda: (
+                np.array([-2.0, -1.5, -0.1]),
+                np.array([2.0, 1.5, 0.0]),
+            )
+        )
+        tools = CeilingTools.__new__(CeilingTools)
+        tools.scene = SimpleNamespace(room_geometry=SimpleNamespace(floor=floor))
+        tools.ceiling_height = 3.0
+        tools._get_structural_surface_index = lambda: index
+        authored_pose = index.overhead_pose(1.0, 0.0, reference_z=0.0)
+
+        transform = tools._ceiling_transform(1.0, 0.0, 0.0)
+
+        assert transform is not None and authored_pose is not None
+        expected = np.asarray(authored_pose.position) + 0.01 * np.asarray(
+            authored_pose.normal
+        )
+        np.testing.assert_allclose(transform.translation(), expected, atol=1e-9)
 
     def test_agent_clearance_detects_low_overhead_and_narrow_edge(self) -> None:
         compiled = compile_polygon_space(
