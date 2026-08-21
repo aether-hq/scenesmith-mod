@@ -9,6 +9,7 @@ import json
 import logging
 import math
 import re
+from collections import Counter
 from pathlib import Path
 from typing import Any
 
@@ -142,10 +143,9 @@ def _room_kit_role_level_counts(
     if not counts:
         return counts
     for obj in objects:
-        if (
-            getattr(obj, "object_type", None) != ObjectType.FURNITURE
-            or not _object_matches_room_kit_slot(obj, slot)
-        ):
+        if getattr(
+            obj, "object_type", None
+        ) != ObjectType.FURNITURE or not _object_matches_room_kit_slot(obj, slot):
             continue
         try:
             object_elevation = float(obj.transform.translation()[2])
@@ -157,6 +157,113 @@ def _room_kit_role_level_counts(
         )
         counts[nearest] += 1
     return counts
+
+
+def _nearest_level(obj: Any, support_elevations: tuple[float, ...]) -> float | None:
+    if not support_elevations:
+        return None
+    try:
+        object_elevation = float(obj.transform.translation()[2])
+    except (AttributeError, IndexError, TypeError, ValueError):
+        return None
+    return min(
+        support_elevations,
+        key=lambda elevation: abs(elevation - object_elevation),
+    )
+
+
+def _stable_chair_faces_table(chair: Any, table: Any) -> bool:
+    """Whether an active upright chair occupies the table's usable annulus."""
+
+    if (
+        str((getattr(chair, "metadata", None) or {}).get("placement_context", "active"))
+        != "active"
+    ):
+        return False
+    try:
+        chair_position = chair.transform.translation()
+        table_position = table.transform.translation()
+        rotation = chair.transform.rotation().matrix()
+        forward_x = float(rotation[0, 1])
+        forward_y = float(rotation[1, 1])
+        upright = float(rotation[2, 2]) >= math.cos(math.radians(15.0))
+        dx = float(table_position[0]) - float(chair_position[0])
+        dy = float(table_position[1]) - float(chair_position[1])
+    except (AttributeError, IndexError, TypeError, ValueError):
+        return False
+    distance = math.hypot(dx, dy)
+    if not upright or distance < 0.75 or distance > 2.25:
+        return False
+    alignment = (forward_x * dx + forward_y * dy) / distance
+    return alignment >= 0.35
+
+
+def _patron_ensemble_level_counts(
+    objects: Any,
+    table_slot: Any,
+    chair_slot: Any,
+    support_elevations: tuple[float, ...],
+) -> dict[float, int]:
+    """Count the largest coherent table/chair ensemble on every story."""
+
+    tables_by_level = {elevation: [] for elevation in support_elevations}
+    chairs_by_level = {elevation: [] for elevation in support_elevations}
+    for obj in objects:
+        if getattr(obj, "object_type", None) != ObjectType.FURNITURE:
+            continue
+        level = _nearest_level(obj, support_elevations)
+        if level is None:
+            continue
+        if _object_matches_room_kit_slot(obj, table_slot):
+            tables_by_level[level].append(obj)
+        if _object_matches_room_kit_slot(obj, chair_slot):
+            chairs_by_level[level].append(obj)
+    return {
+        elevation: max(
+            (
+                sum(
+                    _stable_chair_faces_table(chair, table)
+                    for chair in chairs_by_level[elevation]
+                )
+                for table in tables_by_level[elevation]
+            ),
+            default=0,
+        )
+        for elevation in support_elevations
+    }
+
+
+def _chair_cluster_poses(
+    table: Any, chair_asset: Any
+) -> list[tuple[float, float, float]]:
+    """Return bounded deterministic chair poses around one table anchor."""
+
+    translation = table.transform.translation()
+
+    def footprint_size(obj: Any, fallback: tuple[float, float]) -> list[float]:
+        try:
+            return [
+                float(obj.bbox_max[index]) - float(obj.bbox_min[index])
+                for index in (0, 1)
+            ]
+        except (AttributeError, IndexError, TypeError, ValueError):
+            return list(fallback)
+
+    table_size = footprint_size(table, (1.5, 0.8))
+    chair_size = footprint_size(chair_asset, (0.6, 0.6))
+    radius = min(1.9, max(0.9, max(table_size) / 2 + max(chair_size) / 2 + 0.25))
+    poses: list[tuple[float, float, float]] = []
+    for multiplier in (1.0, 1.15):
+        candidate_radius = min(2.2, radius * multiplier)
+        for angle_degrees in (-90.0, 0.0, 90.0, 180.0, -45.0, 45.0, 135.0, 225.0):
+            angle = math.radians(angle_degrees)
+            x = float(translation[0]) + math.cos(angle) * candidate_radius
+            y = float(translation[1]) + math.sin(angle) * candidate_radius
+            dx = float(translation[0]) - x
+            dy = float(translation[1]) - y
+            yaw = math.degrees(math.atan2(-dx, dy))
+            poses.append((x, y, yaw))
+    return poses
 
 
 def _validate_room_kit_completion(
@@ -184,9 +291,7 @@ def _validate_room_kit_completion(
         )
 
     furniture = [
-        obj
-        for obj in scene.objects.values()
-        if obj.object_type == ObjectType.FURNITURE
+        obj for obj in scene.objects.values() if obj.object_type == ObjectType.FURNITURE
     ]
     role_counts = {
         slot.role: sum(_object_matches_room_kit_slot(obj, slot) for obj in furniture)
@@ -237,6 +342,40 @@ def _validate_room_kit_completion(
             f"Semantic room kit {room_kit.kit_id} has required level coverage "
             f"deficits: {details}. The furniture stage cannot publish this checkpoint."
         )
+    table_slot = next(
+        (slot for slot in room_kit.slots if slot.role == "reading_table"), None
+    )
+    chair_slot = next(
+        (slot for slot in room_kit.slots if slot.role == "reading_chair"), None
+    )
+    required_chairs = level_requirements.get("reading_chair")
+    if (
+        table_slot is not None
+        and chair_slot is not None
+        and required_chairs is not None
+    ):
+        ensemble_counts = _patron_ensemble_level_counts(
+            furniture,
+            table_slot,
+            chair_slot,
+            support_elevations,
+        )
+        ensemble_deficits = [
+            (elevation, ensemble_counts[elevation])
+            for elevation in support_elevations
+            if ensemble_counts[elevation] < required_chairs
+        ]
+        if ensemble_deficits:
+            details = "; ".join(
+                f"patron ensemble at {elevation:.3f}m has {placed} stable "
+                f"inward-facing chairs, required {required_chairs}"
+                for elevation, placed in ensemble_deficits
+            )
+            raise ModelBehaviorError(
+                f"Semantic room kit {room_kit.kit_id} has incoherent patron "
+                f"ensembles: {details}. The furniture stage cannot publish this "
+                "checkpoint."
+            )
     console_logger.info(
         "Semantic room kit %s completion gate passed: %d furniture objects "
         "(minimum %d; roles %s)",
@@ -504,9 +643,7 @@ class StatefulFurnitureAgent(BaseStatefulAgent, BaseFurnitureAgent):
             or metadata.get("ontology_path")
             or f"{asset.name} {getattr(asset, 'description', '')}"
         )
-        detail_text = (
-            f"{asset.name} {getattr(asset, 'description', '')} {catalog_text}"
-        )
+        detail_text = f"{asset.name} {getattr(asset, 'description', '')} {catalog_text}"
         compatible, _ = catalog_candidate_is_compatible(
             request_text=str(getattr(slot, "query", slot.role)),
             candidate_text=catalog_text,
@@ -597,6 +734,12 @@ class StatefulFurnitureAgent(BaseStatefulAgent, BaseFurnitureAgent):
             room_kit,
             support_elevations,
         )
+        table_slot = next(
+            (slot for slot in room_kit.slots if slot.role == "reading_table"), None
+        )
+        chair_slot = next(
+            (slot for slot in room_kit.slots if slot.role == "reading_chair"), None
+        )
         attempted_positions: set[tuple[float, float, float]] = set()
         level_counts = {elevation: 0 for elevation in support_elevations}
         for scene_object in self.scene.objects.values():
@@ -625,11 +768,23 @@ class StatefulFurnitureAgent(BaseStatefulAgent, BaseFurnitureAgent):
             level_targets: list[float] = []
             required_per_level = level_requirements.get(slot.role)
             if required_per_level is not None:
-                role_level_counts = _room_kit_role_level_counts(
-                    self.scene.objects.values(),
-                    slot,
-                    support_elevations,
-                )
+                if (
+                    slot.role == "reading_chair"
+                    and table_slot is not None
+                    and chair_slot is not None
+                ):
+                    role_level_counts = _patron_ensemble_level_counts(
+                        self.scene.objects.values(),
+                        table_slot,
+                        chair_slot,
+                        support_elevations,
+                    )
+                else:
+                    role_level_counts = _room_kit_role_level_counts(
+                        self.scene.objects.values(),
+                        slot,
+                        support_elevations,
+                    )
                 for elevation in support_elevations:
                     level_targets.extend(
                         [elevation]
@@ -677,6 +832,9 @@ class StatefulFurnitureAgent(BaseStatefulAgent, BaseFurnitureAgent):
                         role_anchors.append(anchor)
                 positions = [*role_anchors, *positions]
 
+            cluster_ids: dict[float, list[str]] = {
+                elevation: [] for elevation in set(level_targets)
+            }
             for recovery_index in range(missing):
                 success = False
                 target_elevation = (
@@ -695,7 +853,20 @@ class StatefulFurnitureAgent(BaseStatefulAgent, BaseFurnitureAgent):
                     )
                 )
                 for elevation in candidate_elevations:
-                    for x, y, yaw in positions:
+                    candidate_positions = positions
+                    if slot.role == "reading_chair" and table_slot is not None:
+                        tables = sorted(
+                            (
+                                obj
+                                for obj in self.scene.objects.values()
+                                if _object_matches_room_kit_slot(obj, table_slot)
+                                and _nearest_level(obj, support_elevations) == elevation
+                            ),
+                            key=lambda obj: str(getattr(obj, "object_id", "")),
+                        )
+                        if tables:
+                            candidate_positions = _chair_cluster_poses(tables[0], asset)
+                    for x, y, yaw in candidate_positions:
                         position_key = (
                             round(x, 4),
                             round(y, 4),
@@ -714,11 +885,20 @@ class StatefulFurnitureAgent(BaseStatefulAgent, BaseFurnitureAgent):
                             yaw=yaw,
                         )
                         try:
-                            success = bool(json.loads(raw_result).get("success"))
+                            result_payload = json.loads(raw_result)
+                            success = bool(result_payload.get("success"))
                         except (json.JSONDecodeError, AttributeError, TypeError):
+                            result_payload = {}
                             success = False
                         if success:
                             level_counts[elevation] += 1
+                            if (
+                                slot.role == "reading_chair"
+                                and elevation in cluster_ids
+                            ):
+                                object_id = str(result_payload.get("object_id") or "")
+                                if object_id:
+                                    cluster_ids[elevation].append(object_id)
                             break
                     if success:
                         break
@@ -733,6 +913,23 @@ class StatefulFurnitureAgent(BaseStatefulAgent, BaseFurnitureAgent):
                         missing,
                     )
                     break
+
+            if slot.role == "reading_chair" and cluster_ids:
+                required_by_level = Counter(level_targets)
+                for elevation, object_ids in cluster_ids.items():
+                    if len(object_ids) >= required_by_level[elevation]:
+                        continue
+                    for object_id in reversed(object_ids):
+                        self.furniture_tools._remove_furniture_impl(object_id)
+                    placed -= len(object_ids)
+                    level_counts[elevation] -= len(object_ids)
+                    console_logger.warning(
+                        "Rolled back incomplete patron chair cluster at %.3fm: "
+                        "placed %d of %d required chairs",
+                        elevation,
+                        len(object_ids),
+                        required_by_level[elevation],
+                    )
 
         return placed
 

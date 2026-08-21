@@ -1,10 +1,12 @@
 """Regression tests for semantic furniture-stage completion gates."""
 
 import json
+import math
 from types import SimpleNamespace
 
 import pytest
 from agents.exceptions import ModelBehaviorError
+from pydrake.all import RigidTransform, RollPitchYaw
 
 from scenesmith.agent_utils.room import ObjectType
 from scenesmith.furniture_agents.stateful_furniture_agent import (
@@ -253,9 +255,7 @@ def _full_height_bookshelf(index: int, elevation: float):
         bbox_max=(0.48, 0.18, 2.0),
         metadata={
             "asset_quality_score": 0.76,
-            "catalog_semantics": (
-                "Reproduction Bookcase hssd/wordnet/bookcase.n.01"
-            ),
+            "catalog_semantics": ("Reproduction Bookcase hssd/wordnet/bookcase.n.01"),
         },
         transform=SimpleNamespace(translation=lambda: (0.0, 0.0, elevation)),
     )
@@ -313,6 +313,7 @@ def _role_furniture(
     *,
     x: float = 0.0,
     y: float = 0.0,
+    yaw: float = 0.0,
 ):
     return SimpleNamespace(
         object_id=f"{role}_{index}",
@@ -320,7 +321,10 @@ def _role_furniture(
         name=role,
         description=role.replace("_", " "),
         metadata={"asset_quality_score": 1.0},
-        transform=SimpleNamespace(translation=lambda: (x, y, elevation)),
+        transform=RigidTransform(
+            RollPitchYaw(0.0, 0.0, math.radians(yaw)),
+            (x, y, elevation),
+        ),
     )
 
 
@@ -340,12 +344,184 @@ def _library_with_ground_only_tables():
         )
         for index in range(5)
     ]
-    chairs = [
-        *(_role_furniture("reading_chair", index, 0.0) for index in range(3)),
-        *(_role_furniture("reading_chair", index + 3, 4.0) for index in range(4)),
-        *(_role_furniture("reading_chair", index + 7, 8.0) for index in range(5)),
-    ]
+    chairs = []
+    for level_index, elevation in enumerate((0.0, 4.0, 8.0)):
+        chairs.extend(
+            (
+                _role_furniture(
+                    "reading_chair",
+                    level_index * 3,
+                    elevation,
+                    x=1.25,
+                    y=-2.8,
+                    yaw=0.0,
+                ),
+                _role_furniture(
+                    "reading_chair",
+                    level_index * 3 + 1,
+                    elevation,
+                    x=2.55,
+                    y=-1.5,
+                    yaw=90.0,
+                ),
+                _role_furniture(
+                    "reading_chair",
+                    level_index * 3 + 2,
+                    elevation,
+                    x=1.25,
+                    y=-0.2,
+                    yaw=180.0,
+                ),
+            )
+        )
+    chairs.extend(
+        (
+            _role_furniture("reading_chair", 9, 4.0, x=-5.0, y=-5.0),
+            _role_furniture("reading_chair", 10, 8.0, x=-5.0, y=-5.0),
+            _role_furniture("reading_chair", 11, 8.0, x=5.0, y=-5.0),
+        )
+    )
     return [*shelves, *tables, *chairs]
+
+
+def test_large_multilevel_library_gate_rejects_isolated_upper_chairs():
+    furniture = _library_with_ground_only_tables()
+    furniture.extend(
+        (
+            _role_furniture("reading_table", 5, 4.0, x=-2.8, y=2.5),
+            _role_furniture("reading_table", 6, 8.0, x=-2.8, y=2.5),
+        )
+    )
+    for obj in furniture:
+        if obj.name == "reading_chair" and obj.transform.translation()[2] > 0:
+            elevation = float(obj.transform.translation()[2])
+            index = int(obj.object_id.rsplit("_", 1)[1])
+            obj.transform = RigidTransform(
+                RollPitchYaw(0.0, 0.0, 0.0),
+                (4.5 - index * 0.2, -4.5, elevation),
+            )
+    scene = SimpleNamespace(
+        text_description=_EXACT_MULTILEVEL_LIBRARY_PROMPT,
+        objects={obj.object_id: obj for obj in furniture},
+    )
+
+    with pytest.raises(
+        ModelBehaviorError,
+        match=r"patron ensemble at 4\.000m.*required 3",
+    ):
+        _validate_room_kit_completion(
+            scene,
+            _dense_multilevel_library_kit(),
+            support_elevations=(0.0, 4.0, 8.0),
+        )
+
+
+def test_large_multilevel_library_recovery_places_chairs_around_upper_tables():
+    furniture = _library_with_ground_only_tables()
+    furniture.extend(
+        (
+            _role_furniture("reading_table", 5, 4.0, x=-2.8, y=2.5),
+            _role_furniture("reading_table", 6, 8.0, x=-2.8, y=2.5),
+        )
+    )
+    for obj in furniture:
+        if obj.name == "reading_chair" and obj.transform.translation()[2] > 0:
+            elevation = float(obj.transform.translation()[2])
+            obj.transform = RigidTransform(
+                RollPitchYaw(0.0, 0.0, 0.0),
+                (5.0, -5.0, elevation),
+            )
+    chair_asset = next(obj for obj in furniture if obj.name == "reading_chair")
+    placements = []
+
+    class FakeTools:
+        def set_noise_profile(self, _mode):
+            pass
+
+        def _major_support_elevations(self):
+            return (0.0, 4.0, 8.0)
+
+        def _add_furniture_to_scene_impl(self, **kwargs):
+            placements.append(kwargs)
+            return json.dumps(
+                {"success": True, "object_id": f"recovered_{len(placements)}"}
+            )
+
+    agent = object.__new__(StatefulFurnitureAgent)
+    agent.scene = SimpleNamespace(
+        text_description=_EXACT_MULTILEVEL_LIBRARY_PROMPT,
+        objects={obj.object_id: obj for obj in furniture},
+        room_geometry=SimpleNamespace(length=13.8, width=13.8),
+    )
+    agent.asset_manager = SimpleNamespace(list_available_assets=lambda: [chair_asset])
+    agent.furniture_tools = FakeTools()
+
+    assert (
+        agent._place_room_kit_minimums_deterministically(
+            _dense_multilevel_library_kit()
+        )
+        == 6
+    )
+    assert [call["z"] for call in placements] == [4.0] * 3 + [8.0] * 3
+    for call in placements:
+        distance = math.dist((call["x"], call["y"]), (-2.8, 2.5))
+        assert 0.75 <= distance <= 2.25
+
+
+def test_library_recovery_rolls_back_incomplete_new_chair_cluster():
+    furniture = _library_with_ground_only_tables()
+    furniture.extend(
+        (
+            _role_furniture("reading_table", 5, 4.0, x=-2.8, y=2.5),
+            _role_furniture("reading_table", 6, 8.0, x=-2.8, y=2.5),
+        )
+    )
+    for obj in furniture:
+        if obj.name == "reading_chair" and obj.transform.translation()[2] > 0:
+            elevation = float(obj.transform.translation()[2])
+            obj.transform = RigidTransform(
+                RollPitchYaw(0.0, 0.0, 0.0),
+                (5.0, -5.0, elevation),
+            )
+    chair_asset = next(obj for obj in furniture if obj.name == "reading_chair")
+    attempts = []
+    removed = []
+
+    class FakeTools:
+        def set_noise_profile(self, _mode):
+            pass
+
+        def _major_support_elevations(self):
+            return (0.0, 4.0, 8.0)
+
+        def _add_furniture_to_scene_impl(self, **kwargs):
+            attempts.append(kwargs)
+            if len(attempts) <= 2:
+                return json.dumps(
+                    {"success": True, "object_id": f"recovered_{len(attempts)}"}
+                )
+            return json.dumps({"success": False, "object_id": ""})
+
+        def _remove_furniture_impl(self, object_id):
+            removed.append(object_id)
+            return json.dumps({"success": True})
+
+    agent = object.__new__(StatefulFurnitureAgent)
+    agent.scene = SimpleNamespace(
+        text_description=_EXACT_MULTILEVEL_LIBRARY_PROMPT,
+        objects={obj.object_id: obj for obj in furniture},
+        room_geometry=SimpleNamespace(length=13.8, width=13.8),
+    )
+    agent.asset_manager = SimpleNamespace(list_available_assets=lambda: [chair_asset])
+    agent.furniture_tools = FakeTools()
+
+    assert (
+        agent._place_room_kit_minimums_deterministically(
+            _dense_multilevel_library_kit()
+        )
+        == 0
+    )
+    assert removed == ["recovered_2", "recovered_1"]
 
 
 def test_large_multilevel_library_gate_rejects_ground_only_bookshelves():
@@ -437,9 +613,7 @@ def test_large_multilevel_library_recovery_fills_patron_ensemble_on_each_story()
         objects={obj.object_id: obj for obj in furniture},
         room_geometry=SimpleNamespace(length=13.8, width=13.8),
     )
-    agent.asset_manager = SimpleNamespace(
-        list_available_assets=lambda: [table_asset]
-    )
+    agent.asset_manager = SimpleNamespace(list_available_assets=lambda: [table_asset])
     agent.furniture_tools = FakeTools()
 
     assert (
@@ -619,8 +793,7 @@ def test_exact_hssd_bookcase_is_intrinsically_fillable_without_support_zones():
         metadata={
             "asset_quality_score": 0.76,
             "catalog_semantics": (
-                "Revolve Lexington Tall Bookcase Walnut "
-                "hssd/wordnet/bookcase.n.01"
+                "Revolve Lexington Tall Bookcase Walnut " "hssd/wordnet/bookcase.n.01"
             ),
         },
     )
