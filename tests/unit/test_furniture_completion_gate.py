@@ -1038,6 +1038,129 @@ def test_large_multilevel_library_prunes_surplus_and_marks_all_retained_cases(
         )
 
 
+def test_library_recovery_preprunes_overcrowded_story_before_wall_run(monkeypatch):
+    ground_poses = (
+        (-5.8, -4.5, 90.0),
+        (-5.8, -1.5, 90.0),
+        (-5.8, 1.5, 90.0),
+        (-5.8, 4.5, 90.0),
+        (5.8, -4.5, -90.0),
+        (5.8, -1.5, -90.0),
+        (5.8, 1.5, -90.0),
+        (5.8, 4.5, -90.0),
+        (-4.5, -5.8, 0.0),
+        (-1.5, -5.8, 0.0),
+        (1.5, -5.8, 0.0),
+        (4.5, -5.8, 0.0),
+        (-3.0, 5.8, 180.0),
+        (0.0, 5.8, 180.0),
+        (3.0, 5.8, 180.0),
+    )
+    shelves = [
+        *(
+            _full_height_bookshelf(index, 0.0, x=x, y=y, yaw=yaw)
+            for index, (x, y, yaw) in enumerate(ground_poses)
+        ),
+        *(
+            _full_height_bookshelf(
+                level_index * 20 + index,
+                elevation,
+                x=-4.8 + index * 2.4,
+                y=5.5,
+                yaw=180.0,
+            )
+            for level_index, elevation in ((1, 4.0), (2, 8.0))
+            for index in range(5)
+        ),
+    ]
+    scene = SimpleNamespace(
+        text_description=_EXACT_MULTILEVEL_LIBRARY_PROMPT,
+        objects={shelf.object_id: shelf for shelf in shelves},
+        room_geometry=SimpleNamespace(length=13.8, width=13.8, openings=[]),
+    )
+    window_blockers = {
+        "renaissance_bookshelf_5",
+        "renaissance_bookshelf_6",
+        "renaissance_bookshelf_7",
+        "renaissance_bookshelf_8",
+        "renaissance_bookshelf_10",
+        "renaissance_bookshelf_11",
+    }
+    monkeypatch.setattr(
+        "scenesmith.furniture_agents.stateful_furniture_agent."
+        "compute_window_clearance_violations",
+        lambda _scene: [
+            SimpleNamespace(furniture_id=object_id)
+            for object_id in sorted(window_blockers)
+        ],
+    )
+    monkeypatch.setattr(
+        "scenesmith.furniture_agents.stateful_furniture_agent."
+        "compute_door_clearance_violations",
+        lambda _scene: [SimpleNamespace(furniture_id="renaissance_bookshelf_13")],
+    )
+    placements = []
+    removed = []
+
+    class FakeTools:
+        def set_noise_profile(self, _mode):
+            pass
+
+        def _major_support_elevations(self):
+            return (0.0, 4.0, 8.0)
+
+        def _add_furniture_to_scene_impl(self, **kwargs):
+            placements.append(kwargs)
+            object_id = f"recovered_wall_case_{len(placements)}"
+            recovered = _full_height_bookshelf(
+                100 + len(placements),
+                kwargs["z"],
+                x=kwargs["x"],
+                y=kwargs["y"],
+                yaw=kwargs["yaw"],
+            )
+            recovered.object_id = object_id
+            scene.objects[object_id] = recovered
+            return json.dumps({"success": True, "object_id": object_id})
+
+        def _remove_furniture_impl(self, object_id):
+            removed.append(object_id)
+            scene.objects.pop(object_id, None)
+            return json.dumps({"success": True})
+
+    agent = object.__new__(StatefulFurnitureAgent)
+    agent.scene = scene
+    agent.asset_manager = SimpleNamespace(list_available_assets=lambda: [shelves[0]])
+    agent.furniture_tools = FakeTools()
+
+    prepruned, recovered = agent._preprune_and_recover_room_kit(
+        _dense_multilevel_bookshelf_kit()
+    )
+
+    assert prepruned == 10
+    assert recovered == 9
+    assert window_blockers <= set(removed)
+    assert [call["z"] for call in placements] == [0.0] * 3 + [4.0] * 3 + [8.0] * 3
+    assert (
+        _normalize_dense_library_bookcases(
+            scene,
+            _dense_multilevel_bookshelf_kit(),
+            (0.0, 4.0, 8.0),
+            remove_object=agent.furniture_tools._remove_furniture_impl,
+        )
+        == 9
+    )
+    assert (
+        _validate_room_kit_completion(
+            scene,
+            _dense_multilevel_bookshelf_kit(),
+            support_elevations=(0.0, 4.0, 8.0),
+            enforce_exact_level_counts=True,
+        )
+        == 15
+    )
+
+
 def test_large_multilevel_library_recovery_builds_atomic_bookcase_wall_runs():
     shelves = []
     isolated_poses = (

@@ -1495,6 +1495,21 @@ class StatefulFurnitureAgent(BaseStatefulAgent, BaseFurnitureAgent):
 
         return placed
 
+    def _preprune_and_recover_room_kit(
+        self, room_kit: RoomKitSelection
+    ) -> tuple[int, int]:
+        """Clear dense-library surplus before bounded wall-run recovery."""
+
+        support_elevations = self.furniture_tools._major_support_elevations()
+        pruned = _normalize_dense_library_bookcases(
+            self.scene,
+            room_kit,
+            support_elevations,
+            remove_object=self.furniture_tools._remove_furniture_impl,
+        )
+        recovered = self._place_room_kit_minimums_deterministically(room_kit)
+        return pruned, recovered
+
     async def add_furniture(self, scene: RoomScene) -> None:
         """Add furniture to a scene.
 
@@ -1560,7 +1575,12 @@ class StatefulFurnitureAgent(BaseStatefulAgent, BaseFurnitureAgent):
         )
 
         if room_kit is not None:
-            recovered = self._place_room_kit_minimums_deterministically(room_kit)
+            prepruned, recovered = self._preprune_and_recover_room_kit(room_kit)
+            if prepruned:
+                console_logger.info(
+                    "Pre-pruned %d surplus bookcases before deterministic recovery",
+                    prepruned,
+                )
             if recovered:
                 console_logger.warning(
                     "Deterministic room-kit recovery placed %d required furniture "
