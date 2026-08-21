@@ -421,8 +421,16 @@ def scale_mesh_uniformly_to_dimensions(
     if any(dim <= 0 for dim in desired_dimensions):
         raise ValueError(f"All dimensions must be positive, got: {desired_dimensions}")
 
-    # Load mesh and ensure it's a single Trimesh object.
-    mesh = load_mesh_as_trimesh(mesh_path, force_merge=True)
+    # Keep the authored scene graph intact.  Catalog furniture commonly stores
+    # upholstery, wood, metal, and trim as separate primitives/materials; forcing
+    # those into one Trimesh before export discards those assignments and can bake
+    # the retained albedo much darker than the source.
+    try:
+        mesh = trimesh.load(mesh_path, force="scene")
+    except Exception as exc:
+        raise ValueError(f"Failed to load mesh from {mesh_path}: {exc}") from exc
+    if not isinstance(mesh, trimesh.Scene) or not mesh.geometry:
+        raise ValueError(f"Scene contains no valid mesh geometry: {mesh_path}")
 
     # Get current bounding box.
     bounds = mesh.bounds  # [[xmin, ymin, zmin], [xmax, ymax, zmax]]

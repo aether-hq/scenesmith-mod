@@ -87,7 +87,7 @@ if TYPE_CHECKING:
 
 console_logger = logging.getLogger(__name__)
 
-HSSD_CANONICAL_CONVERSION_VERSION = 3
+HSSD_CANONICAL_CONVERSION_VERSION = 4
 
 
 def _subscription_aware_worker_count(

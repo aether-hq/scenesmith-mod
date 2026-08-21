@@ -85,6 +85,49 @@ class TestScaleMeshToDimensions(unittest.TestCase):
             f"Scene dimensions {scaled_dims} exceed desired {desired_dims}",
         )
 
+    def test_uniform_scaling_preserves_multimaterial_scene_primitives(self):
+        """Scaling must not merge away authored catalog material assignments."""
+        wood = trimesh.creation.box(extents=[0.8, 0.3, 1.8])
+        wood.visual = trimesh.visual.TextureVisuals(
+            uv=np.zeros((len(wood.vertices), 2)),
+            material=trimesh.visual.material.PBRMaterial(
+                name="warm_wood",
+                baseColorFactor=[180, 90, 40, 255],
+            ),
+        )
+        upholstery = trimesh.creation.box(extents=[0.6, 0.5, 0.5])
+        upholstery.apply_translation([0.0, 0.0, 0.65])
+        upholstery.visual = trimesh.visual.TextureVisuals(
+            uv=np.zeros((len(upholstery.vertices), 2)),
+            material=trimesh.visual.material.PBRMaterial(
+                name="burgundy_upholstery",
+                baseColorFactor=[110, 20, 35, 255],
+            ),
+        )
+        input_path = self.temp_path / "two_material_asset.glb"
+        trimesh.Scene({"wood": wood, "upholstery": upholstery}).export(input_path)
+        self.assertEqual(
+            len(trimesh.load(input_path, force="scene").geometry),
+            2,
+        )
+
+        output_path = self.temp_path / "two_material_asset_scaled.glb"
+        scale_mesh_uniformly_to_dimensions(
+            mesh_path=input_path,
+            desired_dimensions=[1.0, 0.6, 2.0],
+            output_path=output_path,
+        )
+
+        scaled_scene = trimesh.load(output_path, force="scene")
+        self.assertEqual(len(scaled_scene.geometry), 2)
+        self.assertEqual(
+            {
+                geometry.visual.material.name
+                for geometry in scaled_scene.geometry.values()
+            },
+            {"warm_wood", "burgundy_upholstery"},
+        )
+
     def test_uniform_scaling_preserves_proportions(self):
         """Test that uniform scaling preserves the original mesh proportions."""
         # Create a mesh with specific proportions (2:1:0.5 ratio).

@@ -157,7 +157,7 @@ def test_short_bare_full_height_shelf_cache_entry_is_quarantined():
 
 def test_router_hssd_metadata_stamps_current_canonical_conversion():
     assert AssetManager._asset_conversion_metadata("hssd") == {
-        "canonical_conversion_version": 3
+        "canonical_conversion_version": 4
     }
     assert AssetManager._asset_conversion_metadata("objaverse") == {}
 
