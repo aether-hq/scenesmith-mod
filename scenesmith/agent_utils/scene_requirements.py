@@ -68,6 +68,7 @@ VerificationStage = Literal[
 ]
 FulfillmentStrategy = Literal["catalog", "composed", "procedural"]
 CandidateModality = Literal["required", "forbidden", "optional"]
+EnforcementDisposition = Literal["blocking", "advisory", "unresolved_blocking"]
 
 
 class RequirementModel(BaseModel):
@@ -266,6 +267,20 @@ class SceneRequirement(RequirementModel):
     verification: VerificationPolicy
     interpretation_status: Literal["classified", "unclassified"]
     interpretation_rationale: str = ""
+    enforcement: EnforcementDisposition
+    enforcement_rationale: str
+
+
+class RequirementGraphIssue(RequirementModel):
+    code: Literal[
+        "exact_quantity_conflict",
+        "quantity_range_conflict",
+        "polarity_conflict",
+    ]
+    severity: Literal["error"] = "error"
+    canonical_subject: str
+    requirement_ids: tuple[str, ...]
+    message: str
 
 
 class SceneRequirementGraph(RequirementModel):
@@ -280,6 +295,7 @@ class SceneRequirementGraph(RequirementModel):
     analysis_status: Literal["complete", "partial", "unavailable"]
     analysis_model: str | None = None
     merge_issues: tuple[str, ...] = ()
+    validation_issues: tuple[RequirementGraphIssue, ...] = ()
 
     @model_validator(mode="after")
     def validate_provenance(self) -> "SceneRequirementGraph":
@@ -326,6 +342,13 @@ class SceneRequirementGraph(RequirementModel):
                 raise ValueError("model interpretation cannot weaken source modality")
             if requirement.polarity != candidate.modality:
                 raise ValueError("model interpretation cannot change source polarity")
+            expected_enforcement = _enforcement_disposition(
+                candidate, requirement.kind
+            )[0]
+            if requirement.enforcement != expected_enforcement:
+                raise ValueError(
+                    "requirement enforcement does not match source-bound policy"
+                )
             covered_candidates.add(candidate.candidate_id)
             if requirement.quantity.source_quantity_id:
                 covered_quantities.add(requirement.quantity.source_quantity_id)
@@ -345,6 +368,10 @@ class SceneRequirementGraph(RequirementModel):
     def content_hash(self) -> str:
         payload = self.model_dump_json(exclude_none=False)
         return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+    @property
+    def is_valid(self) -> bool:
+        return not self.validation_issues
 
 
 class ShadowRequirementResult(RequirementModel):
@@ -377,6 +404,10 @@ class SemanticShadowAudit(RequirementModel):
 
 class RequirementMergeError(ValueError):
     """A model interpretation attempted to alter or omit source truth."""
+
+
+class RequirementGraphValidationError(ValueError):
+    """The preserved user obligations contradict each other."""
 
 
 class _Runner(Protocol):
@@ -625,6 +656,120 @@ def _quantity_equal(proposal: RequirementQuantity, explicit: ExplicitQuantity) -
     )
 
 
+def _enforcement_disposition(
+    candidate: LiteralObligationCandidate,
+    kind: RequirementKind,
+) -> tuple[EnforcementDisposition, str]:
+    """Apply objective rollout policy after the LLM has classified semantics."""
+
+    if candidate.modality == "optional":
+        return "advisory", "The source clause is explicitly optional."
+    if kind == "unclassified":
+        return (
+            "unresolved_blocking",
+            "A required source clause cannot publish until it is classified.",
+        )
+    if kind == "style":
+        return (
+            "advisory",
+            "The style obligation is retained, but its subjective verifier is not "
+            "yet calibrated for blocking enforcement.",
+        )
+    return (
+        "blocking",
+        "The source clause is required or forbidden and has objective model-supplied "
+        "verification criteria.",
+    )
+
+
+def _canonical_subject(subject: str) -> str:
+    return " ".join(re.findall(r"[a-z0-9]+", subject.casefold()))
+
+
+def _detect_requirement_conflicts(
+    requirements: list[SceneRequirement],
+) -> tuple[RequirementGraphIssue, ...]:
+    by_subject: dict[str, list[SceneRequirement]] = {}
+    for requirement in requirements:
+        if requirement.enforcement == "advisory" or requirement.kind == "unclassified":
+            continue
+        canonical = _canonical_subject(requirement.subject)
+        if canonical:
+            by_subject.setdefault(canonical, []).append(requirement)
+
+    issues: list[RequirementGraphIssue] = []
+    for canonical, grouped in sorted(by_subject.items()):
+        required = [item for item in grouped if item.polarity == "required"]
+        forbidden = [item for item in grouped if item.polarity == "forbidden"]
+        if required and forbidden:
+            issues.append(
+                RequirementGraphIssue(
+                    code="polarity_conflict",
+                    canonical_subject=canonical,
+                    requirement_ids=tuple(
+                        item.requirement_id for item in required + forbidden
+                    ),
+                    message=(
+                        f"{canonical!r} is both required and forbidden by explicit "
+                        "source clauses"
+                    ),
+                )
+            )
+
+        exact = {
+            int(item.quantity.value): item
+            for item in required
+            if item.quantity.mode == "exact" and item.quantity.value is not None
+        }
+        if len(exact) > 1:
+            issues.append(
+                RequirementGraphIssue(
+                    code="exact_quantity_conflict",
+                    canonical_subject=canonical,
+                    requirement_ids=tuple(
+                        item.requirement_id
+                        for item in required
+                        if item.quantity.mode == "exact"
+                    ),
+                    message=(
+                        f"{canonical!r} has incompatible exact counts "
+                        f"{sorted(exact)}"
+                    ),
+                )
+            )
+
+        minimums = [
+            int(item.quantity.value)
+            for item in required
+            if item.quantity.mode == "minimum" and item.quantity.value is not None
+        ]
+        if len(exact) == 1 and minimums and max(minimums) > next(iter(exact)):
+            issues.append(
+                RequirementGraphIssue(
+                    code="quantity_range_conflict",
+                    canonical_subject=canonical,
+                    requirement_ids=tuple(
+                        item.requirement_id
+                        for item in required
+                        if item.quantity.mode in {"exact", "minimum"}
+                    ),
+                    message=(
+                        f"{canonical!r} requires exactly {next(iter(exact))} but "
+                        f"also at least {max(minimums)}"
+                    ),
+                )
+            )
+    return tuple(issues)
+
+
+def assert_requirement_graph_consistent(graph: SceneRequirementGraph) -> None:
+    """Raise a specific error before enforcing a contradictory graph."""
+
+    if graph.validation_issues:
+        messages = "; ".join(issue.message for issue in graph.validation_issues)
+        raise RequirementGraphValidationError(messages)
+
+
 def _unclassified_requirements(
     prompt: str,
     candidate: LiteralObligationCandidate,
@@ -634,6 +779,9 @@ def _unclassified_requirements(
 ) -> list[SceneRequirement]:
     quantities = candidate.explicit_quantities or (None,)
     output: list[SceneRequirement] = []
+    enforcement, enforcement_rationale = _enforcement_disposition(
+        candidate, "unclassified"
+    )
     for offset, explicit in enumerate(quantities):
         quantity = (
             explicit.as_requirement_quantity()
@@ -665,6 +813,8 @@ def _unclassified_requirements(
                 ),
                 interpretation_status="unclassified",
                 interpretation_rationale=reason,
+                enforcement=enforcement,
+                enforcement_rationale=enforcement_rationale,
             )
         )
     return output
@@ -731,6 +881,9 @@ def merge_requirement_interpretations(
             continue
 
         for proposal in proposals:
+            enforcement, enforcement_rationale = _enforcement_disposition(
+                candidate, proposal.kind
+            )
             if proposal.source_quantity_id:
                 claimed_quantities.add(proposal.source_quantity_id)
                 explicit = quantity_by_id[proposal.source_quantity_id][1]
@@ -768,6 +921,8 @@ def merge_requirement_interpretations(
                     verification=proposal.verification,
                     interpretation_status="classified",
                     interpretation_rationale=proposal.interpretation_rationale,
+                    enforcement=enforcement,
+                    enforcement_rationale=enforcement_rationale,
                 )
             )
 
@@ -812,6 +967,7 @@ def merge_requirement_interpretations(
         analysis_status=status,
         analysis_model=analysis_model,
         merge_issues=tuple(issues),
+        validation_issues=_detect_requirement_conflicts(requirements),
     )
 
 

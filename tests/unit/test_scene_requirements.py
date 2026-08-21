@@ -13,6 +13,7 @@ from scenesmith.agent_utils.scene_requirements import (
     CompositionPlan,
     RequirementInterpretationBatch,
     RequirementInterpretationProposal,
+    RequirementGraphValidationError,
     RequirementMergeError,
     RequirementQuantity,
     RequirementRelation,
@@ -22,6 +23,7 @@ from scenesmith.agent_utils.scene_requirements import (
     TopologyOpinion,
     VerificationPolicy,
     analyze_requirement_candidates,
+    assert_requirement_graph_consistent,
     audit_requirement_graph,
     literal_candidates_from_prompt,
     load_requirement_graph,
@@ -298,6 +300,7 @@ def test_llm_semantics_supply_size_composition_topology_and_strategies():
         item for item in graph.requirements if item.subject == "space fighter"
     )
     assert fighter_requirement.kind == "hero_object"
+    assert fighter_requirement.enforcement == "blocking"
     assert fighter_requirement.scale.preferred_dimensions_m == (18.0, 12.0, 4.5)
     assert fighter_requirement.composition.strategy_order == (
         "catalog",
@@ -376,8 +379,10 @@ def test_modality_is_literal_and_cannot_be_softened_by_model():
     assert forbidden.modality == "forbidden"
     assert by_candidate[forbidden.candidate_id].polarity == "forbidden"
     assert by_candidate[forbidden.candidate_id].strength == "hard"
+    assert by_candidate[forbidden.candidate_id].enforcement == "blocking"
     assert optional.modality == "optional"
     assert by_candidate[optional.candidate_id].strength == "soft"
+    assert by_candidate[optional.candidate_id].enforcement == "advisory"
 
 
 def test_abbreviation_periods_do_not_split_literal_obligations():
@@ -422,6 +427,7 @@ def test_shadow_audit_marks_unclassified_fallback_ambiguous(tmp_path):
     )
     assert audit.ambiguous_count == len(graph.requirements)
     assert graph.analysis_status == "unavailable"
+    assert all(item.enforcement == "unresolved_blocking" for item in graph.requirements)
     output = tmp_path / "semantic_shadow_audit.json"
     persist_shadow_audit(audit, output)
     assert '"mode": "shadow"' in output.read_text()
@@ -507,3 +513,75 @@ def test_floor_plan_calls_semantic_llm_before_blueprint_compilation(
     persisted = load_requirement_graph(tmp_path / "scene_requirement_graph.json")
     assert persisted.analysis_status == "complete"
     assert persisted.analysis_model == "semantic-test-model"
+
+
+def test_subjective_style_is_retained_but_advisory_until_calibrated():
+    prompt = "A gallery with lavish iridescent decor."
+    candidates = literal_candidates_from_prompt(prompt)
+    style = _candidate(candidates, "lavish")
+    graph = merge_requirement_interpretations(
+        prompt,
+        candidates,
+        _batch(
+            candidates,
+            {
+                style.evidence.text: _proposal(
+                    style,
+                    subject="lavish iridescent decor",
+                    kind="style",
+                )
+            },
+        ),
+    )
+
+    requirement = next(item for item in graph.requirements if item.kind == "style")
+    assert requirement.strength == "hard"
+    assert requirement.enforcement == "advisory"
+    assert "subjective verifier" in requirement.enforcement_rationale
+
+
+@pytest.mark.parametrize(
+    ("prompt", "first_text", "second_text", "expected_code"),
+    [
+        (
+            "A hall with exactly two echo plinths and exactly three echo plinths.",
+            "two echo",
+            "three echo",
+            "exact_quantity_conflict",
+        ),
+        (
+            "A hall with exactly two echo plinths and at least three echo plinths.",
+            "two echo",
+            "three echo",
+            "quantity_range_conflict",
+        ),
+        (
+            "A hall with one echo plinth. No echo plinth is allowed.",
+            "one echo",
+            "no echo",
+            "polarity_conflict",
+        ),
+    ],
+)
+def test_conflicting_source_bound_semantics_are_explicit_graph_errors(
+    prompt, first_text, second_text, expected_code
+):
+    candidates = literal_candidates_from_prompt(prompt)
+    first = _candidate(candidates, first_text)
+    second = _candidate(candidates, second_text)
+    graph = merge_requirement_interpretations(
+        prompt,
+        candidates,
+        _batch(
+            candidates,
+            {
+                first.evidence.text: _proposal(first, subject="echo plinth"),
+                second.evidence.text: _proposal(second, subject="echo plinth"),
+            },
+        ),
+    )
+
+    assert not graph.is_valid
+    assert expected_code in {issue.code for issue in graph.validation_issues}
+    with pytest.raises(RequirementGraphValidationError, match="echo plinth"):
+        assert_requirement_graph_consistent(graph)
