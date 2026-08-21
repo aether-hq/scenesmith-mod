@@ -1,0 +1,154 @@
+{
+  "schema_version": 1,
+  "cases": [
+    {
+      "case_id": "renaissance-library",
+      "category": "approved-complex-interior",
+      "prompt": "a large, multi-level library with thousands of books and a bunch of tables and chairs for patrons. A spiral staircase connects the floors, and there are huge archted windows, statues, and so on, as it has a renaiissance , gorgeous decor.",
+      "target_outcome": "complete",
+      "target_obligations": [
+        "large multi-level library",
+        "thousands of visible books",
+        "patron tables and chairs",
+        "spiral staircase connecting levels",
+        "huge arched windows",
+        "classical statues",
+        "gorgeous Renaissance decor"
+      ],
+      "reference": {
+        "run_id": "20260821T125050-b28024e0",
+        "job_status": "completed",
+        "semantic_status": "approved",
+        "topology": {"levels": 2, "spaces": 2, "openings": 3, "connectors": 1},
+        "final_object_minimum": 90,
+        "final_object_maximum": 100,
+        "object_counts": [
+          {"pattern": "renaissance_bookcase", "minimum": 15},
+          {"pattern": "classical_statue", "minimum": 3, "maximum": 3},
+          {"pattern": "reading_table", "minimum": 5},
+          {"pattern": "reading_chair", "minimum": 13},
+          {"pattern": "(?:encyclopedia|burgundy)_book_row", "minimum": 36},
+          {"pattern": "chandelier", "minimum": 1}
+        ],
+        "required_exports": ["scene.glb", "scene_textured.glb"],
+        "usage": {"required": false},
+        "visual_references": [
+          {
+            "mode": "original-cutaway",
+            "sha256": "d1acc31c2ee6f65663c9f403fdb65e5bf79eb5db7677f79b2a6c26729dfb1a3e",
+            "width": 1600,
+            "height": 1000,
+            "source_path": "/tmp/aether-library-b280-casecut2-original.png",
+            "criteria": ["all three levels readable", "full arched window visible", "grand chandelier visible", "populated bookcase runs visible"]
+          },
+          {
+            "mode": "full-room",
+            "sha256": "851dd9b34739f184c19828881fee7164426f2c67de80adb1751e7a2e8196efa5",
+            "width": 1600,
+            "height": 1000,
+            "source_path": "/tmp/aether-library-b280-casecut2-full.png",
+            "criteria": ["full shell restored", "no presentation geometry missing"]
+          }
+        ],
+        "known_semantic_gaps": []
+      }
+    },
+    {
+      "case_id": "spaceship-repair-dock",
+      "category": "known-semantic-false-success",
+      "prompt": "A SPACEship dock with a huge space-fighter in the middle.  There are 10 repair bays, each big enough for a fighter, a giant opening into space, and then all the parts, machines, and so on are across the bay. There are massive doors into the rest of the station and many smaller doors to e.g. crew quarters, etc.",
+      "target_outcome": "complete",
+      "target_obligations": [
+        "exactly ten fighter-sized repair bays",
+        "one huge central space fighter",
+        "one giant opening into space",
+        "massive doors into the station",
+        "multiple smaller crew doors",
+        "parts and repair machinery across the bay"
+      ],
+      "reference": {
+        "run_id": "20260821T162555-b7408e28",
+        "job_status": "completed",
+        "semantic_status": "known_failure",
+        "topology": {"levels": 1, "spaces": 1, "openings": 0, "connectors": 0},
+        "final_object_minimum": 18,
+        "final_object_maximum": 18,
+        "object_counts": [
+          {"pattern": "equipment_rack", "minimum": 1},
+          {"pattern": "repair_workbench", "minimum": 1},
+          {"pattern": "fighter", "minimum": 0, "maximum": 0},
+          {"pattern": "repair_bay", "minimum": 0, "maximum": 0},
+          {"pattern": "(?:book_row|candlestick)", "minimum": 3}
+        ],
+        "required_exports": ["scene.glb", "scene_textured.glb"],
+        "usage": {
+          "required": true,
+          "requests": 24,
+          "turns": 72,
+          "total_tokens": 401814,
+          "api_equivalent_cost_usd": 0.8217156999999999
+        },
+        "visual_references": [
+          {
+            "mode": "original",
+            "sha256": "a993d9af4b9a13c4bbbd9176e1a4783e9e916ea0b5f674e4254f50229672b44e",
+            "width": 1614,
+            "height": 1340,
+            "source_path": "/var/folders/6v/yk9bzvrn5zx0kxll7d4szzb80000gn/T/codex-clipboard-z322Nh.png",
+            "criteria": ["documents the generic-room false success", "contains no huge central fighter", "contains no ten-bay dock topology"]
+          }
+        ],
+        "known_semantic_gaps": [
+          "ten repair bays discarded",
+          "huge central fighter discarded",
+          "giant space opening discarded",
+          "massive station doors discarded",
+          "smaller crew doors discarded",
+          "library detail leaked from shared cache"
+        ]
+      }
+    },
+    {
+      "case_id": "simple-bedroom",
+      "category": "generic-room-control",
+      "prompt": "A simple bedroom with a bed, two nightstands, and a wardrobe.",
+      "target_outcome": "complete",
+      "target_obligations": ["one bed", "two nightstands", "one wardrobe"]
+    },
+    {
+      "case_id": "small-office",
+      "category": "generic-room-control",
+      "prompt": "A small office with one desk, one ergonomic chair, and storage.",
+      "target_outcome": "complete",
+      "target_obligations": ["one desk", "one ergonomic chair", "storage"]
+    },
+    {
+      "case_id": "connected-house",
+      "category": "topology-control",
+      "prompt": "A house with a kitchen, living room, two bedrooms, and connected circulation.",
+      "target_outcome": "complete",
+      "target_obligations": ["one kitchen", "one living room", "two bedrooms", "connected circulation"]
+    },
+    {
+      "case_id": "three-level-gallery",
+      "category": "multilevel-control",
+      "prompt": "A three-level gallery connected by a wide central staircase, with exhibits on every level.",
+      "target_outcome": "complete",
+      "target_obligations": ["three levels", "wide central staircase", "exhibits on every level"]
+    },
+    {
+      "case_id": "uncommon-hero-observatory",
+      "category": "fallback-control",
+      "prompt": "An observatory centered around one enormous articulated radio telescope dish.",
+      "target_outcome": "complete",
+      "target_obligations": ["one enormous articulated radio telescope dish", "dish centered in observatory"]
+    },
+    {
+      "case_id": "contradictory-counts",
+      "category": "explicit-failure-control",
+      "prompt": "Build exactly two booths and exactly three booths in the same marked two-booth area.",
+      "target_outcome": "explicit_failure",
+      "target_obligations": ["surface the contradictory exact counts before construction"]
+    }
+  ]
+}
