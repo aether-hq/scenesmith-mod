@@ -19,6 +19,7 @@ import numpy as np
 from agents import Agent, FunctionTool, custom_span
 from agents.exceptions import ModelBehaviorError
 from omegaconf import DictConfig
+from pydrake.math import RigidTransform
 
 from scenesmith.agent_utils.asset_manager import AssetGenerationRequest
 from scenesmith.agent_utils.base_stateful_agent import BaseStatefulAgent
@@ -956,11 +957,48 @@ class StatefulManipulandAgent(BaseStatefulAgent, BaseManipulandAgent):
         }
 
     @staticmethod
+    def _bind_dense_book_row_to_owner_surface(
+        row: SceneObject,
+        owner: SceneObject,
+        surface: SupportSurface,
+    ) -> None:
+        """Persist the authored tier pose in its owning furniture frame."""
+
+        row.metadata["dense_library_book_row"] = True
+        row.metadata["dense_library_owner_bound"] = str(owner.object_id)
+        row.metadata["dense_library_owner_surface_local_transform"] = (
+            (owner.transform.inverse() @ surface.transform).GetAsMatrix4().tolist()
+        )
+
+    @staticmethod
+    def _dense_book_row_effective_surface_transform(
+        row: SceneObject,
+        owner: SceneObject,
+        surface: SupportSurface,
+    ) -> RigidTransform:
+        """Resolve a cached authored tier through its owner's current pose."""
+
+        metadata = row.metadata or {}
+        if metadata.get("dense_library_owner_bound") != str(owner.object_id):
+            return surface.transform
+        local_transform = metadata.get("dense_library_owner_surface_local_transform")
+        if local_transform is None:
+            return surface.transform
+        try:
+            matrix = np.asarray(local_transform, dtype=float)
+            if matrix.shape != (4, 4) or not np.all(np.isfinite(matrix)):
+                return surface.transform
+            return owner.transform @ RigidTransform(matrix)
+        except (RuntimeError, TypeError, ValueError):
+            return surface.transform
+
+    @staticmethod
     def _dense_book_row_is_contained(
         row: SceneObject,
         surface: SupportSurface,
         *,
         edge_clearance_m: float = 0.002,
+        surface_transform: RigidTransform | None = None,
     ) -> bool:
         """Require the row's actual footprint to remain inside its authored tier."""
 
@@ -973,7 +1011,8 @@ class StatefulManipulandAgent(BaseStatefulAgent, BaseManipulandAgent):
         if row_height > surface_clearance + 1e-6:
             return False
 
-        relative = surface.transform.inverse() @ row.transform
+        effective_surface_transform = surface_transform or surface.transform
+        relative = effective_surface_transform.inverse() @ row.transform
         minimum = surface.bounding_box_min
         maximum = surface.bounding_box_max
         for x in (float(row.bbox_min[0]), float(row.bbox_max[0])):
@@ -1029,11 +1068,22 @@ class StatefulManipulandAgent(BaseStatefulAgent, BaseManipulandAgent):
                 else None
             )
             surface = surface_by_id.get(parent_surface_id)
+            owner_id = owner_by_surface.get(parent_surface_id)
+            owner = scene.get_object(owner_id) if owner_id is not None else None
+            effective_surface_transform = (
+                cls._dense_book_row_effective_surface_transform(row, owner, surface)
+                if row is not None and owner is not None and surface is not None
+                else None
+            )
             if (
                 row is None
-                or parent_surface_id not in owner_by_surface
+                or owner is None
                 or surface is None
-                or not cls._dense_book_row_is_contained(row, surface)
+                or not cls._dense_book_row_is_contained(
+                    row,
+                    surface,
+                    surface_transform=effective_surface_transform,
+                )
             ):
                 invalid.add(row_id)
 
@@ -1207,9 +1257,10 @@ class StatefulManipulandAgent(BaseStatefulAgent, BaseManipulandAgent):
                         ):
                             self.scene.remove_object(placed_object.object_id)
                             continue
-                        placed_object.metadata["dense_library_book_row"] = True
-                        placed_object.metadata["dense_library_owner_bound"] = str(
-                            furniture.object_id
+                        self._bind_dense_book_row_to_owner_surface(
+                            placed_object,
+                            furniture,
+                            surface,
                         )
                     placed += 1
                     break
@@ -1389,7 +1440,11 @@ class StatefulManipulandAgent(BaseStatefulAgent, BaseManipulandAgent):
                 scale_factor=original.scale_factor,
             )
             if bool(clone.metadata.get("dense_library_book_row")):
-                clone.metadata["dense_library_owner_bound"] = str(target.object_id)
+                self._bind_dense_book_row_to_owner_surface(
+                    clone,
+                    target,
+                    target_surface,
+                )
             self.scene.add_object(clone)
         return len(originals)
 

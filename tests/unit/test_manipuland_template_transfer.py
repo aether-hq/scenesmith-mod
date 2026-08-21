@@ -580,6 +580,10 @@ def test_dense_library_recovers_variable_capacity_templates_to_twelve_rows(
     ]
     assert len(recovered_rows) == 6
     assert all(row.metadata.get("dense_library_book_row") for row in recovered_rows)
+    assert all(
+        row.metadata.get("dense_library_owner_surface_local_transform") is not None
+        for row in recovered_rows
+    )
     assert all(row.name != "candlestick" for row in recovered_rows)
 
 
@@ -691,6 +695,81 @@ def test_dense_library_physics_allows_only_shallow_owner_support_contact(
     assert rows[0].object_id not in invalid
     assert rows[1].object_id not in invalid
     assert invalid == {rows[2].object_id, rows[3].object_id}
+
+
+def test_dense_library_containment_follows_owner_translation_and_rotation(
+    tmp_path: Path,
+    monkeypatch,
+):
+    bookcase = _dense_bookcase("bookcase_0", 0.0, tmp_path)
+    surface = bookcase.support_surfaces[2]
+    row = SceneObject(
+        object_id=UniqueID("book_row_0"),
+        object_type=ObjectType.MANIPULAND,
+        name="encyclopedia_book_row",
+        description="upright encyclopedia book set",
+        transform=surface.transform,
+        geometry_path=tmp_path / "book_row.gltf",
+        metadata={
+            "dense_library_book_row": True,
+            "dense_library_owner_bound": str(bookcase.object_id),
+            "dense_library_owner_surface_local_transform": (
+                bookcase.transform.inverse() @ surface.transform
+            )
+            .GetAsMatrix4()
+            .tolist(),
+        },
+        bbox_min=np.array([-0.1, -0.05, 0.0]),
+        bbox_max=np.array([0.1, 0.05, 0.2]),
+        placement_info=PlacementInfo(
+            parent_surface_id=surface.surface_id,
+            position_2d=np.array([0.0, 0.0]),
+            rotation_2d=0.0,
+        ),
+    )
+    scene = RoomScene(
+        room_geometry=object(),
+        scene_dir=tmp_path,
+        objects={bookcase.object_id: bookcase, row.object_id: row},
+    )
+    collisions = []
+    monkeypatch.setattr(
+        "scenesmith.manipuland_agents.stateful_manipuland_agent.compute_scene_collisions",
+        lambda **_kwargs: collisions,
+    )
+    cfg = SimpleNamespace(
+        physics_validation=SimpleNamespace(
+            object_penetration_threshold_m=0.001,
+            floor_penetration_tolerance_m=0.05,
+        )
+    )
+    owner_delta = RigidTransform(
+        RollPitchYaw(0.0, 0.0, math.radians(37.0)),
+        [0.4, -0.3, 0.1],
+    )
+    bookcase.transform = owner_delta @ bookcase.transform
+    row.transform = owner_delta @ row.transform
+
+    invalid = StatefulManipulandAgent._physically_invalid_dense_book_row_ids(
+        scene,
+        cfg,
+    )
+
+    assert invalid == set()
+
+    collisions.append(
+        CollisionPair(
+            "wall",
+            "room_geometry",
+            row.name,
+            str(row.object_id),
+            0.01,
+        )
+    )
+    assert StatefulManipulandAgent._physically_invalid_dense_book_row_ids(
+        scene,
+        cfg,
+    ) == {row.object_id}
 
 
 def test_final_dense_library_gate_rejects_row_displaced_after_simulation(
