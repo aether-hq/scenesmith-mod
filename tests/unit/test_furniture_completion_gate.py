@@ -506,8 +506,8 @@ def _role_furniture(
 def _library_with_ground_only_tables():
     shelves = [
         *(_full_height_bookshelf(index, 0.0) for index in range(9)),
-        *(_full_height_bookshelf(index + 9, 4.0) for index in range(3)),
-        *(_full_height_bookshelf(index + 12, 8.0) for index in range(3)),
+        *(_full_height_bookshelf(index + 9, 4.0) for index in range(5)),
+        *(_full_height_bookshelf(index + 14, 8.0) for index in range(5)),
     ]
     tables = [
         _role_furniture(
@@ -767,12 +767,68 @@ def test_large_multilevel_library_gate_rejects_ground_only_bookshelves():
         },
     )
 
-    with pytest.raises(ModelBehaviorError, match=r"bookshelf.*4\.000m.*0.*3"):
+    with pytest.raises(ModelBehaviorError, match=r"bookshelf.*4\.000m.*0.*5"):
         _validate_room_kit_completion(
             scene,
             _dense_multilevel_bookshelf_kit(),
             support_elevations=(0.0, 4.0, 8.0),
         )
+
+
+def test_large_multilevel_library_gate_rejects_sparse_upper_bookshelves():
+    shelves = [
+        *(_full_height_bookshelf(index, 0.0) for index in range(15)),
+        *(_full_height_bookshelf(index + 15, 4.0) for index in range(3)),
+        *(_full_height_bookshelf(index + 18, 8.0) for index in range(3)),
+    ]
+    scene = SimpleNamespace(
+        text_description=_EXACT_MULTILEVEL_LIBRARY_PROMPT,
+        objects={shelf.object_id: shelf for shelf in shelves},
+    )
+
+    with pytest.raises(ModelBehaviorError, match=r"bookshelf.*4\.000m.*3.*5"):
+        _validate_room_kit_completion(
+            scene,
+            _dense_multilevel_bookshelf_kit(),
+            support_elevations=(0.0, 4.0, 8.0),
+        )
+
+
+def test_large_multilevel_library_recovery_fills_sparse_upper_bookshelves():
+    shelves = [
+        *(_full_height_bookshelf(index, 0.0) for index in range(16)),
+        *(_full_height_bookshelf(index + 16, 4.0) for index in range(3)),
+        *(_full_height_bookshelf(index + 19, 8.0) for index in range(3)),
+    ]
+    placements = []
+
+    class FakeTools:
+        def set_noise_profile(self, _mode):
+            pass
+
+        def _major_support_elevations(self):
+            return (0.0, 4.0, 8.0)
+
+        def _add_furniture_to_scene_impl(self, **kwargs):
+            placements.append(kwargs)
+            return json.dumps({"success": True})
+
+    agent = object.__new__(StatefulFurnitureAgent)
+    agent.scene = SimpleNamespace(
+        text_description=_EXACT_MULTILEVEL_LIBRARY_PROMPT,
+        objects={shelf.object_id: shelf for shelf in shelves},
+        room_geometry=SimpleNamespace(length=13.8, width=13.8),
+    )
+    agent.asset_manager = SimpleNamespace(list_available_assets=lambda: [shelves[0]])
+    agent.furniture_tools = FakeTools()
+
+    assert (
+        agent._place_room_kit_minimums_deterministically(
+            _dense_multilevel_bookshelf_kit()
+        )
+        == 4
+    )
+    assert [call["z"] for call in placements] == [4.0, 4.0, 8.0, 8.0]
 
 
 def test_large_multilevel_library_recovery_fills_bookshelves_on_every_story():
@@ -803,10 +859,10 @@ def test_large_multilevel_library_recovery_fills_bookshelves_on_every_story():
         agent._place_room_kit_minimums_deterministically(
             _dense_multilevel_bookshelf_kit()
         )
-        == 6
+        == 10
     )
-    assert [call["z"] for call in placements].count(4.0) == 3
-    assert [call["z"] for call in placements].count(8.0) == 3
+    assert [call["z"] for call in placements].count(4.0) == 5
+    assert [call["z"] for call in placements].count(8.0) == 5
     assert not any(call["z"] == 0.0 for call in placements)
 
 

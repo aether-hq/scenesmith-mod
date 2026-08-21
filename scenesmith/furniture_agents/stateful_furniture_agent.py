@@ -130,7 +130,7 @@ def _required_room_kit_level_coverage(
     )
     if not dense_library or not explicit_multilevel or len(support_elevations) < 2:
         return {}
-    return {"bookshelf": 3, "reading_table": 1, "reading_chair": 3}
+    return {"bookshelf": 5, "reading_table": 1, "reading_chair": 3}
 
 
 def _room_kit_role_level_counts(

@@ -423,14 +423,15 @@ def test_dense_library_book_row_gate_requires_each_authored_story(tmp_path: Path
         objects={obj.object_id: obj for obj in [*bookcases, *rows]},
     )
 
-    with pytest.raises(ModelBehaviorError, match=r"4\.000m.*0.*4"):
+    with pytest.raises(ModelBehaviorError, match=r"4\.000m.*0.*12"):
         StatefulManipulandAgent._validate_dense_library_book_rows(scene)
 
 
-def test_dense_library_book_row_gate_accepts_four_rows_per_story(tmp_path: Path):
+def test_dense_library_book_row_gate_accepts_twelve_rows_per_story(tmp_path: Path):
     bookcases = [
-        _dense_bookcase(f"bookcase_{int(level)}", level, tmp_path)
-        for level in (0.0, 4.0, 8.0)
+        _dense_bookcase(f"bookcase_{level_index}_{case_index}", level, tmp_path)
+        for level_index, level in enumerate((0.0, 4.0, 8.0))
+        for case_index in range(3)
     ]
     rows = [
         SimpleNamespace(
@@ -438,22 +439,53 @@ def test_dense_library_book_row_gate_accepts_four_rows_per_story(tmp_path: Path)
             object_type=ObjectType.MANIPULAND,
             metadata={"dense_library_book_row": True},
             placement_info=PlacementInfo(
-                parent_surface_id=bookcases[level_index]
-                .support_surfaces[row_index + 1]
+                parent_surface_id=bookcases[level_index * 3 + row_index // 4]
+                .support_surfaces[row_index % 4 + 1]
                 .surface_id,
                 position_2d=np.array([0.0, 0.0]),
                 rotation_2d=0.0,
             ),
         )
         for level_index in range(3)
-        for row_index in range(4)
+        for row_index in range(12)
     ]
     scene = SimpleNamespace(
         text_description="large multi-level library with thousands of books",
         objects={obj.object_id: obj for obj in [*bookcases, *rows]},
     )
 
-    assert StatefulManipulandAgent._validate_dense_library_book_rows(scene) == 12
+    assert StatefulManipulandAgent._validate_dense_library_book_rows(scene) == 36
+
+
+def test_dense_library_book_row_gate_rejects_eight_rows_per_story(tmp_path: Path):
+    bookcases = [
+        _dense_bookcase(f"bookcase_{level_index}_{case_index}", level, tmp_path)
+        for level_index, level in enumerate((0.0, 4.0, 8.0))
+        for case_index in range(2)
+    ]
+    rows = [
+        SimpleNamespace(
+            object_id=UniqueID(f"book_row_{level_index}_{row_index}"),
+            object_type=ObjectType.MANIPULAND,
+            metadata={"dense_library_book_row": True},
+            placement_info=PlacementInfo(
+                parent_surface_id=bookcases[level_index * 2 + row_index // 4]
+                .support_surfaces[row_index % 4 + 1]
+                .surface_id,
+                position_2d=np.array([0.0, 0.0]),
+                rotation_2d=0.0,
+            ),
+        )
+        for level_index in range(3)
+        for row_index in range(8)
+    ]
+    scene = SimpleNamespace(
+        text_description="large multi-level library with thousands of books",
+        objects={obj.object_id: obj for obj in [*bookcases, *rows]},
+    )
+
+    with pytest.raises(ModelBehaviorError, match=r"4\.000m placed 8, required 12"):
+        StatefulManipulandAgent._validate_dense_library_book_rows(scene)
 
 
 def test_dense_library_book_row_gate_rejects_physically_invalid_tagged_rows(

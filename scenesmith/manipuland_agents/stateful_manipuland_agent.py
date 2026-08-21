@@ -1286,7 +1286,7 @@ class StatefulManipulandAgent(BaseStatefulAgent, BaseManipulandAgent):
             if level is not None:
                 counts[level] += 1
 
-        required_per_level = 4
+        required_per_level = 12
         deficits = [
             (level, counts[level])
             for level in sorted(levels)
