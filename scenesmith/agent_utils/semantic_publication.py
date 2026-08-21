@@ -134,6 +134,19 @@ clear measurement or spatial observation.
 """
 
 
+_EXPECTED_FINAL_ARTIFACT_CLASSES = {
+    "scene_type": frozenset({"scene", "space"}),
+    "level": frozenset({"level"}),
+    "repeated_zone": frozenset({"space", "scene_object"}),
+    "hero_object": frozenset({"scene_object"}),
+    "opening": frozenset({"opening"}),
+    "connector": frozenset({"connector"}),
+    "object_group": frozenset({"scene_object"}),
+    "spatial_constraint": frozenset({"scene", "space", "scene_object"}),
+    "style": frozenset({"scene", "space", "scene_object"}),
+}
+
+
 def _artifact_dimensions(obj: Any) -> tuple[float, float, float] | None:
     if obj.bbox_min is None or obj.bbox_max is None:
         return None
@@ -148,12 +161,46 @@ def semantic_artifact_inventory(
 ) -> tuple[SemanticArtifact, ...]:
     """Build a bounded, provider-neutral final artifact inventory."""
 
+    if house_layout is not None and house_layout.room_specs:
+        minimum_x = min(float(room.position[0]) for room in house_layout.room_specs)
+        minimum_y = min(float(room.position[1]) for room in house_layout.room_specs)
+        maximum_x = max(
+            float(room.position[0]) + float(room.length)
+            for room in house_layout.room_specs
+        )
+        maximum_y = max(
+            float(room.position[1]) + float(room.width)
+            for room in house_layout.room_specs
+        )
+        minimum_z = min(float(level.elevation) for level in house_layout.levels)
+        maximum_z = max(
+            float(level.elevation) + float(level.nominal_height)
+            for level in house_layout.levels
+        )
+        scene_dimensions = (
+            maximum_x - minimum_x,
+            maximum_y - minimum_y,
+            maximum_z - minimum_z,
+        )
+    else:
+        scene_dimensions = (
+            max((space.dimensions_m[0] for space in blueprint.spaces), default=0.0),
+            max((space.dimensions_m[1] for space in blueprint.spaces), default=0.0),
+            max(
+                (
+                    level.elevation_m + level.clear_height_m
+                    for level in blueprint.levels
+                ),
+                default=0.0,
+            ),
+        )
     artifacts: list[SemanticArtifact] = [
         SemanticArtifact(
             artifact_id=blueprint.blueprint_id,
             artifact_class="scene",
             name="compiled scene",
             description=blueprint.source_prompt,
+            dimensions_m=scene_dimensions,
         )
     ]
     if house_layout is None:
@@ -380,6 +427,22 @@ def certify_semantic_publication(
                 f"{claim.observed_count} but bound {len(set(claim.artifact_ids))} artifacts"
             )
             continue
+        expected_classes = _EXPECTED_FINAL_ARTIFACT_CLASSES.get(
+            requirement.kind, frozenset()
+        )
+        incompatible = sorted(
+            artifact_id
+            for artifact_id in claim.artifact_ids
+            if expected_classes
+            and inventory[artifact_id].artifact_class not in expected_classes
+        )
+        if incompatible:
+            failures.append(
+                f"{requirement.requirement_id} {requirement.subject!r}: evidence "
+                f"artifacts have incompatible classes {incompatible}; expected "
+                f"{sorted(expected_classes)}"
+            )
+            continue
         expected = _expected_count(requirement)
         count_ok = (
             claim.observed_count == expected
@@ -403,7 +466,7 @@ def certify_semantic_publication(
                 inventory[artifact_id].dimensions_m
                 for artifact_id in claim.artifact_ids
             ]
-            if not any(
+            if not dimensions or not all(
                 observed is not None
                 and all(
                     observed[index] + 1e-9 >= minimum
@@ -420,16 +483,27 @@ def certify_semantic_publication(
                 )
                 continue
         if requirement.polarity != "forbidden" and requirement.relations:
-            relation_results = {item.predicate: item for item in claim.relation_results}
+            relation_results = {
+                (item.predicate, item.target): item for item in claim.relation_results
+            }
             missing_relations = [
-                relation.predicate
+                f"{relation.predicate} -> {relation.target}"
                 for relation in requirement.relations
-                if relation.predicate not in relation_results
-                or not relation_results[relation.predicate].satisfied
-                or not relation_results[relation.predicate].evidence_artifact_ids
+                if (relation.predicate, relation.target) not in relation_results
+                or not relation_results[(relation.predicate, relation.target)].satisfied
+                or not relation_results[
+                    (relation.predicate, relation.target)
+                ].evidence_artifact_ids
                 or not set(
-                    relation_results[relation.predicate].evidence_artifact_ids
+                    relation_results[
+                        (relation.predicate, relation.target)
+                    ].evidence_artifact_ids
                 ).issubset(inventory)
+                or not set(
+                    relation_results[
+                        (relation.predicate, relation.target)
+                    ].evidence_artifact_ids
+                ).intersection(claim.artifact_ids)
             ]
             if missing_relations:
                 failures.append(

@@ -40,6 +40,7 @@ from scenesmith.agent_utils.scene_blueprint import (
 from scenesmith.agent_utils.house import OpeningType
 from scenesmith.agent_utils.semantic_ledger import initialize_semantic_ledger
 from scenesmith.agent_utils.semantic_publication import (
+    RelationVerification,
     RequirementVerificationClaim,
     SemanticArtifact,
     SemanticPublicationError,
@@ -333,6 +334,9 @@ def test_strategy_attempts_are_provider_checked_evidenced_and_idempotent(tmp_pat
 
 def _spatial_compilation(graph, *, role_count=10, include_constraint=True):
     requirement = graph.requirements[0]
+    expected_count = int(
+        requirement.quantity.value or requirement.quantity.interpreted_minimum or 1
+    )
     level = LevelBlueprint(
         level_id="level-primary",
         name="Primary",
@@ -360,7 +364,7 @@ def _spatial_compilation(graph, *, role_count=10, include_constraint=True):
         target_ids=(group.group_id,),
         parameters={
             "requirement_id": requirement.requirement_id,
-            "planned_instances": 10,
+            "planned_instances": expected_count,
             "verification_criteria": ["exactly ten instances"],
             **(
                 {"minimum_dimensions_m": list(requirement.scale.minimum_dimensions_m)}
@@ -401,7 +405,7 @@ def _spatial_compilation(graph, *, role_count=10, include_constraint=True):
                 owner_stage="asset",
                 artifact_ids=(group.group_id,),
                 role_key="velorian assembly",
-                planned_instances=10,
+                planned_instances=expected_count,
                 rationale="The LLM compiled the exact repeated artifact count.",
             ),
         ),
@@ -486,11 +490,11 @@ def test_topology_gate_rejects_nine_of_ten_constructed_openings():
     graph = _graph(kind="opening")
     compilation = _opening_compilation(graph)
 
-    def layout(opening_count):
+    def layout(opening_count, opening_type=OpeningType.OPEN):
         openings = [
             SimpleNamespace(
                 opening_id=f"actual-opening-{index}",
-                opening_type=OpeningType.OPEN,
+                opening_type=opening_type,
                 width=2.0,
                 height=3.0,
             )
@@ -505,6 +509,12 @@ def test_topology_gate_rejects_nine_of_ten_constructed_openings():
 
     with pytest.raises(SpatialCompilationError, match="missing constructed"):
         validate_constructed_topology(compilation, graph, layout(9))
+    with pytest.raises(SpatialCompilationError, match="missing constructed"):
+        validate_constructed_topology(
+            compilation,
+            graph,
+            layout(10, OpeningType.DOOR),
+        )
     manifest = validate_constructed_topology(compilation, graph, layout(10))
     assert manifest.passed
     assert manifest.evidence[0].observed_count == 10
@@ -688,6 +698,110 @@ def test_publication_rejects_undersized_hero_and_unproven_relationship():
             compilation,
             full_sized,
             _verification(graph, [item.artifact_id for item in full_sized]),
+            physics_verified=True,
+            physics_evidence_refs=("physics:clean",),
+        )
+
+
+def test_publication_rejects_generic_room_substituted_for_missing_hero():
+    graph = _graph(
+        prompt="Exactly 1 velorian fighter dominates the chamber.",
+    )
+    compilation = _spatial_compilation(graph, role_count=1)
+    generic_room = SemanticArtifact(
+        artifact_id="generic-room",
+        artifact_class="space",
+        name="generic room",
+        dimensions_m=(30.0, 20.0, 10.0),
+    )
+
+    with pytest.raises(SemanticPublicationError, match="incompatible classes"):
+        certify_semantic_publication(
+            graph,
+            compilation,
+            (generic_room,),
+            _verification(graph, (generic_room.artifact_id,)),
+            physics_verified=True,
+            physics_evidence_refs=("physics:clean",),
+        )
+
+
+def test_publication_requires_every_repeated_artifact_to_meet_scale_minimum():
+    graph = _graph(
+        scale=RequirementScale(
+            qualitative_label="fighter-sized",
+            minimum_dimensions_m=(3.0, 2.0, 2.0),
+            rationale="Every repeated cell must contain the serviced artifact.",
+        )
+    )
+    compilation = _spatial_compilation(graph)
+    artifacts = tuple(
+        SemanticArtifact(
+            artifact_id=f"bay-{index}",
+            artifact_class="scene_object",
+            name=f"Bay {index}",
+            dimensions_m=((3.0, 2.0, 2.0) if index < 9 else (1.0, 1.0, 1.0)),
+        )
+        for index in range(10)
+    )
+
+    with pytest.raises(SemanticPublicationError, match="minimum dimensions"):
+        certify_semantic_publication(
+            graph,
+            compilation,
+            artifacts,
+            _verification(graph, tuple(item.artifact_id for item in artifacts)),
+            physics_verified=True,
+            physics_evidence_refs=("physics:clean",),
+        )
+
+
+def test_publication_rejects_relationship_claim_for_wrong_target():
+    graph = _graph(
+        prompt="Exactly 1 velorian fighter dominates the chamber.",
+        relations=(
+            RequirementRelation(
+                predicate="centered_in",
+                target="primary chamber",
+                rationale="The fighter is the central focal object.",
+            ),
+        ),
+    )
+    compilation = _spatial_compilation(graph, role_count=1)
+    fighter = SemanticArtifact(
+        artifact_id="fighter",
+        artifact_class="scene_object",
+        name="Velorian fighter",
+        dimensions_m=(8.0, 5.0, 2.5),
+    )
+    verification = _verification(graph, (fighter.artifact_id,)).model_copy(
+        update={
+            "claims": (
+                _verification(graph, (fighter.artifact_id,))
+                .claims[0]
+                .model_copy(
+                    update={
+                        "relation_results": (
+                            RelationVerification(
+                                predicate="centered_in",
+                                target="service corridor",
+                                satisfied=True,
+                                evidence_artifact_ids=(fighter.artifact_id,),
+                                measurement="Centered in the wrong target.",
+                            ),
+                        )
+                    }
+                ),
+            )
+        }
+    )
+
+    with pytest.raises(SemanticPublicationError, match="primary chamber"):
+        certify_semantic_publication(
+            graph,
+            compilation,
+            (fighter,),
+            verification,
             physics_verified=True,
             physics_evidence_refs=("physics:clean",),
         )
