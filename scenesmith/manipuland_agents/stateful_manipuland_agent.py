@@ -23,6 +23,7 @@ from scenesmith.agent_utils.blender.process_provider import RenderAllocation
 from scenesmith.agent_utils.physical_feasibility import (
     apply_per_furniture_postprocessing,
 )
+from scenesmith.agent_utils.physics_validation import compute_scene_collisions
 from scenesmith.agent_utils.placement_noise import PlacementNoiseMode
 from scenesmith.agent_utils.rendering_manager import RenderingManager
 from scenesmith.agent_utils.room import (
@@ -824,17 +825,19 @@ class StatefulManipulandAgent(BaseStatefulAgent, BaseManipulandAgent):
                     (center_x - 0.12 * span_x, center_y + 0.12 * span_y),
                 ]
                 for position_x, position_y in candidates:
-                    raw_result = self.manipuland_tools._place_manipuland_on_surface_impl(
-                        asset_id=str(asset.object_id),
-                        surface_id=str(surface.surface_id),
-                        position_x=position_x,
-                        position_z=position_y,
-                        rotation_degrees=0.0,
-                        _action_metadata={
-                            "furniture_id": str(self.current_furniture_id),
-                            "surface_id": str(surface.surface_id),
-                            "placement_method": "deterministic_llm_fallback",
-                        },
+                    raw_result = (
+                        self.manipuland_tools._place_manipuland_on_surface_impl(
+                            asset_id=str(asset.object_id),
+                            surface_id=str(surface.surface_id),
+                            position_x=position_x,
+                            position_z=position_y,
+                            rotation_degrees=0.0,
+                            _action_metadata={
+                                "furniture_id": str(self.current_furniture_id),
+                                "surface_id": str(surface.surface_id),
+                                "placement_method": "deterministic_llm_fallback",
+                            },
+                        )
                     )
                     try:
                         success = bool(json.loads(raw_result).get("success"))
@@ -938,6 +941,118 @@ class StatefulManipulandAgent(BaseStatefulAgent, BaseManipulandAgent):
             ),
         )
 
+    @staticmethod
+    def _dense_book_row_owner_by_surface(
+        scene: RoomScene,
+    ) -> dict[UniqueID, UniqueID]:
+        return {
+            surface.surface_id: obj.object_id
+            for obj in scene.objects.values()
+            if obj.object_type == ObjectType.FURNITURE
+            for surface in obj.support_surfaces
+        }
+
+    @classmethod
+    def _physically_invalid_dense_book_row_ids(
+        cls,
+        scene: RoomScene,
+        cfg: DictConfig,
+        *,
+        row_ids: set[UniqueID] | None = None,
+    ) -> set[UniqueID]:
+        """Return tagged rows with collision beyond allowed owner support contact."""
+
+        if row_ids is None:
+            row_ids = {
+                obj.object_id
+                for obj in scene.objects.values()
+                if obj.object_type == ObjectType.MANIPULAND
+                and bool((obj.metadata or {}).get("dense_library_book_row"))
+            }
+        if not row_ids:
+            return set()
+
+        physics_cfg = cfg.physics_validation
+        collisions = compute_scene_collisions(
+            scene=scene,
+            penetration_threshold=physics_cfg.object_penetration_threshold_m,
+            floor_penetration_tolerance=physics_cfg.floor_penetration_tolerance_m,
+            current_furniture_id=None,
+            manipuland_furniture_tolerance_m=0.0,
+        )
+        owner_by_surface = cls._dense_book_row_owner_by_surface(scene)
+        owner_tolerance = float(physics_cfg.manipuland_furniture_tolerance_m)
+        invalid: set[UniqueID] = set()
+        for collision in collisions:
+            pair = {
+                UniqueID(collision.object_a_id),
+                UniqueID(collision.object_b_id),
+            }
+            colliding_rows = pair & row_ids
+            for row_id in colliding_rows:
+                row = scene.get_object(row_id)
+                owner_id = (
+                    owner_by_surface.get(row.placement_info.parent_surface_id)
+                    if row is not None and row.placement_info is not None
+                    else None
+                )
+                other_ids = pair - {row_id}
+                is_tolerated_owner_contact = (
+                    owner_id is not None
+                    and owner_id in other_ids
+                    and collision.penetration_depth <= owner_tolerance
+                )
+                if not is_tolerated_owner_contact:
+                    invalid.add(row_id)
+        return invalid
+
+    def _dense_book_row_pose_is_collision_free(
+        self,
+        furniture_id: UniqueID,
+        row_id: UniqueID,
+    ) -> bool:
+        """Validate a tentative row against its owner and room structure."""
+
+        furniture = self.scene.get_object(furniture_id)
+        row = self.scene.get_object(row_id)
+        if furniture is None or row is None:
+            return False
+        subset = RoomScene(
+            room_geometry=self.scene.room_geometry,
+            scene_dir=self.scene.scene_dir,
+            room_id=self.scene.room_id,
+            room_type=self.scene.room_type,
+            objects={furniture.object_id: furniture, row.object_id: row},
+            text_description=self.scene.text_description,
+        )
+        invalid = self._physically_invalid_dense_book_row_ids(
+            subset,
+            self.cfg,
+            row_ids={row_id},
+        )
+        if invalid:
+            console_logger.warning(
+                "Rejected dense book-row pose for %s on %s due to deep collision",
+                row_id,
+                furniture_id,
+            )
+        return not invalid
+
+    @staticmethod
+    def _dense_book_rows_on_furniture(
+        scene: RoomScene,
+        furniture: SceneObject,
+    ) -> list[SceneObject]:
+        surface_ids = {surface.surface_id for surface in furniture.support_surfaces}
+        return [
+            obj
+            for obj in scene.objects.values()
+            if obj.object_type == ObjectType.MANIPULAND
+            and bool((obj.metadata or {}).get("dense_library_book_row"))
+            and obj.placement_info is not None
+            and obj.placement_info.parent_surface_id in surface_ids
+        ]
+
     def _place_dense_book_rows_deterministically(
         self,
         furniture: SceneObject,
@@ -949,7 +1064,11 @@ class StatefulManipulandAgent(BaseStatefulAgent, BaseManipulandAgent):
         ):
             return 0
         row_asset = self._ensure_dense_book_row_asset()
-        if row_asset is None or row_asset.bbox_min is None or row_asset.bbox_max is None:
+        if (
+            row_asset is None
+            or row_asset.bbox_min is None
+            or row_asset.bbox_max is None
+        ):
             return 0
 
         row_height = float(row_asset.bbox_max[2] - row_asset.bbox_min[2])
@@ -964,9 +1083,7 @@ class StatefulManipulandAgent(BaseStatefulAgent, BaseManipulandAgent):
         for surface in self._internal_bookcase_surfaces(furniture):
             if surface.surface_id in existing_surface_ids:
                 continue
-            clearance = float(
-                surface.bounding_box_max[2] - surface.bounding_box_min[2]
-            )
+            clearance = float(surface.bounding_box_max[2] - surface.bounding_box_min[2])
             if row_height > clearance + 1e-6:
                 continue
             minimum = surface.bounding_box_min
@@ -974,18 +1091,23 @@ class StatefulManipulandAgent(BaseStatefulAgent, BaseManipulandAgent):
             center_x = float((minimum[0] + maximum[0]) / 2.0)
             center_y = float((minimum[1] + maximum[1]) / 2.0)
             span_x = float(maximum[0] - minimum[0])
-            candidates = (
+            positions = (
                 (center_x, center_y),
                 (center_x - 0.10 * span_x, center_y),
                 (center_x + 0.10 * span_x, center_y),
             )
-            for position_x, position_y in candidates:
+            candidates = (
+                (position_x, position_y, rotation_degrees)
+                for rotation_degrees in (0.0, 180.0)
+                for position_x, position_y in positions
+            )
+            for position_x, position_y, rotation_degrees in candidates:
                 raw_result = self.manipuland_tools._place_manipuland_on_surface_impl(
                     asset_id=str(row_asset.object_id),
                     surface_id=str(surface.surface_id),
                     position_x=position_x,
                     position_z=position_y,
-                    rotation_degrees=0.0,
+                    rotation_degrees=rotation_degrees,
                     _action_metadata={
                         "furniture_id": str(self.current_furniture_id),
                         "surface_id": str(surface.surface_id),
@@ -1003,13 +1125,23 @@ class StatefulManipulandAgent(BaseStatefulAgent, BaseManipulandAgent):
                     self.scene.get_object(UniqueID(object_id)) if object_id else None
                 )
                 if placed_object is not None:
+                    if not self._dense_book_row_pose_is_collision_free(
+                        furniture.object_id,
+                        placed_object.object_id,
+                    ):
+                        self.scene.remove_object(placed_object.object_id)
+                        continue
                     placed_object.metadata["dense_library_book_row"] = True
                 placed += 1
                 break
         return placed
 
     @staticmethod
-    def _validate_dense_library_book_rows(scene: RoomScene) -> int:
+    def _validate_dense_library_book_rows(
+        scene: RoomScene,
+        *,
+        invalid_row_ids: set[UniqueID] | None = None,
+    ) -> int:
         """Require surviving intrinsic book rows on every authored library story."""
 
         normalized = str(getattr(scene, "text_description", "")).casefold()
@@ -1045,6 +1177,21 @@ class StatefulManipulandAgent(BaseStatefulAgent, BaseManipulandAgent):
         if len(levels) < 2:
             return 0
 
+        invalid_row_ids = invalid_row_ids or set()
+        tagged_invalid = sorted(
+            str(obj.object_id)
+            for obj in scene.objects.values()
+            if obj.object_id in invalid_row_ids
+            and obj.object_type == ObjectType.MANIPULAND
+            and bool((obj.metadata or {}).get("dense_library_book_row"))
+        )
+        if tagged_invalid:
+            raise ModelBehaviorError(
+                "Dense library contains physically invalid tagged book rows: "
+                f"{', '.join(tagged_invalid)}. The detail stage cannot publish "
+                "this checkpoint."
+            )
+
         counts = {level: 0 for level in levels}
         for obj in scene.objects.values():
             if (
@@ -1079,7 +1226,10 @@ class StatefulManipulandAgent(BaseStatefulAgent, BaseManipulandAgent):
         """Identify interchangeable instances without an LLM call."""
         if furniture.geometry_path is None:
             return None
-        return (str(furniture.geometry_path.resolve()), round(furniture.scale_factor, 6))
+        return (
+            str(furniture.geometry_path.resolve()),
+            round(furniture.scale_factor, 6),
+        )
 
     def _clone_manipulands_between_identical_furniture(
         self, source_id: UniqueID, target_id: UniqueID
@@ -1136,8 +1286,12 @@ class StatefulManipulandAgent(BaseStatefulAgent, BaseManipulandAgent):
                     placement_method="template_transfer",
                 ),
                 metadata=original.metadata.copy(),
-                bbox_min=(original.bbox_min.copy() if original.bbox_min is not None else None),
-                bbox_max=(original.bbox_max.copy() if original.bbox_max is not None else None),
+                bbox_min=(
+                    original.bbox_min.copy() if original.bbox_min is not None else None
+                ),
+                bbox_max=(
+                    original.bbox_max.copy() if original.bbox_max is not None else None
+                ),
                 immutable=original.immutable,
                 scale_factor=original.scale_factor,
             )
@@ -1325,8 +1479,8 @@ class StatefulManipulandAgent(BaseStatefulAgent, BaseManipulandAgent):
                         furniture_description=furniture_description,
                     )
 
-                    book_rows_placed = (
-                        self._place_dense_book_rows_deterministically(furniture)
+                    book_rows_placed = self._place_dense_book_rows_deterministically(
+                        furniture
                     )
                     if book_rows_placed:
                         console_logger.info(
@@ -1336,8 +1490,20 @@ class StatefulManipulandAgent(BaseStatefulAgent, BaseManipulandAgent):
                             furniture_id,
                         )
 
-                    # Run multi-agent workflow.
-                    await self._run_furniture_workflow(furniture_id)
+                    dense_rows = self._dense_book_rows_on_furniture(
+                        self.scene,
+                        furniture,
+                    )
+                    if len(dense_rows) >= 4:
+                        console_logger.info(
+                            "Skipping manipuland LLM workflow for %s: %d clean "
+                            "deterministic book rows already satisfy this bookcase",
+                            furniture_id,
+                            len(dense_rows),
+                        )
+                    else:
+                        # Run multi-agent workflow.
+                        await self._run_furniture_workflow(furniture_id)
 
                     # Per-furniture post-processing (after manipulands placed).
                     if self.cfg.per_furniture_postprocessing.enabled:
@@ -1367,7 +1533,14 @@ class StatefulManipulandAgent(BaseStatefulAgent, BaseManipulandAgent):
                     # Continue to next furniture piece.
                     continue
 
-        dense_book_rows = self._validate_dense_library_book_rows(self.scene)
+        invalid_dense_book_rows = self._physically_invalid_dense_book_row_ids(
+            self.scene,
+            self.cfg,
+        )
+        dense_book_rows = self._validate_dense_library_book_rows(
+            self.scene,
+            invalid_row_ids=invalid_dense_book_rows,
+        )
         if dense_book_rows:
             console_logger.info(
                 "Dense library book-row completion passed with %d surviving rows",

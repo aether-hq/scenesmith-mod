@@ -1,3 +1,5 @@
+import json
+
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -15,6 +17,7 @@ from scenesmith.agent_utils.room import (
     SupportSurface,
     UniqueID,
 )
+from scenesmith.agent_utils.physics_validation import CollisionPair
 from scenesmith.manipuland_agents.stateful_manipuland_agent import (
     StatefulManipulandAgent,
 )
@@ -74,7 +77,11 @@ def test_identical_furniture_transfers_surface_relative_arrangement(tmp_path: Pa
     scene = RoomScene(
         room_geometry=object(),
         scene_dir=tmp_path,
-        objects={source.object_id: source, target.object_id: target, pillow.object_id: pillow},
+        objects={
+            source.object_id: source,
+            target.object_id: target,
+            pillow.object_id: pillow,
+        },
     )
     agent = object.__new__(StatefulManipulandAgent)
     agent.scene = scene
@@ -226,9 +233,7 @@ def test_dense_library_places_intrinsic_catalog_book_rows_on_internal_tiers(
         metadata={
             "asset_source": "polyhaven",
             "catalog_id": "polyhaven__book_encyclopedia_set_01",
-            "ontology_path": (
-                "polyhaven/Office & Stationery/Books & Documents/Books"
-            ),
+            "ontology_path": ("polyhaven/Office & Stationery/Books & Documents/Books"),
             "catalog_semantics": "Book Encyclopedia Set 01",
         },
     )
@@ -264,6 +269,98 @@ def test_dense_library_places_intrinsic_catalog_book_rows_on_internal_tiers(
     assert {call["surface_id"] for call in placements} == {
         f"bookcase_0_surface_{index}" for index in range(1, 6)
     }
+
+
+def test_dense_library_book_rows_retry_and_rollback_deep_owner_collisions(
+    tmp_path: Path,
+):
+    furniture = _dense_bookcase("bookcase_0", 0.0, tmp_path)
+    row_asset = SceneObject(
+        object_id=UniqueID("encyclopedia_book_row_asset_0"),
+        object_type=ObjectType.MANIPULAND,
+        name="encyclopedia_book_row",
+        description="upright encyclopedia book set",
+        transform=RigidTransform(),
+        geometry_path=tmp_path / "book_encyclopedia_set_01.gltf",
+        bbox_min=np.array([-0.013, -0.066, 0.0]),
+        bbox_max=np.array([0.350, 0.054, 0.156]),
+        metadata={"catalog_id": "polyhaven__book_encyclopedia_set_01"},
+    )
+    scene = RoomScene(
+        room_geometry=object(),
+        scene_dir=tmp_path,
+        objects={furniture.object_id: furniture},
+    )
+    placement_calls: dict[UniqueID, dict] = {}
+    placement_attempts: list[dict] = []
+
+    class FakeTools:
+        support_surfaces = {
+            str(surface.surface_id): surface for surface in furniture.support_surfaces
+        }
+
+        def _place_manipuland_on_surface_impl(self, **kwargs):
+            object_id = scene.generate_unique_id("encyclopedia_book_row")
+            placement_calls[object_id] = kwargs
+            placement_attempts.append(kwargs)
+            scene.add_object(
+                SceneObject(
+                    object_id=object_id,
+                    object_type=ObjectType.MANIPULAND,
+                    name="encyclopedia_book_row",
+                    description="upright encyclopedia book set",
+                    transform=RigidTransform(),
+                    geometry_path=row_asset.geometry_path,
+                    bbox_min=row_asset.bbox_min,
+                    bbox_max=row_asset.bbox_max,
+                    metadata=row_asset.metadata.copy(),
+                    placement_info=PlacementInfo(
+                        parent_surface_id=UniqueID(kwargs["surface_id"]),
+                        position_2d=np.array(
+                            [kwargs["position_x"], kwargs["position_z"]]
+                        ),
+                        rotation_2d=np.deg2rad(kwargs["rotation_degrees"]),
+                    ),
+                )
+            )
+            return json.dumps({"success": True, "object_id": str(object_id)})
+
+    agent = object.__new__(StatefulManipulandAgent)
+    agent.current_furniture_id = furniture.object_id
+    agent.current_furniture_selection = SimpleNamespace(
+        suggested_items="dense rows of visible leather-bound books"
+    )
+    agent.manipuland_tools = FakeTools()
+    agent.asset_manager = SimpleNamespace(
+        list_available_assets=lambda: [row_asset],
+        generate_assets=lambda _request: (_ for _ in ()).throw(
+            AssertionError("intrinsic catalog row should be reused")
+        ),
+    )
+    agent.scene = scene
+
+    def collision_free(_furniture_id, object_id):
+        call = placement_calls[object_id]
+        return call["rotation_degrees"] == 180.0 and call["position_x"] > 0.0
+
+    agent._dense_book_row_pose_is_collision_free = collision_free
+
+    placed = agent._place_dense_book_rows_deterministically(furniture)
+
+    surviving = [
+        obj
+        for obj in scene.objects.values()
+        if obj.object_type == ObjectType.MANIPULAND
+    ]
+    assert placed == 5
+    assert len(surviving) == 5
+    assert all(obj.metadata.get("dense_library_book_row") for obj in surviving)
+    assert all(
+        placement_calls[obj.object_id]["rotation_degrees"] == 180.0
+        and placement_calls[obj.object_id]["position_x"] > 0.0
+        for obj in surviving
+    )
+    assert len(placement_attempts) > len(surviving)
 
 
 def test_requested_book_row_description_is_not_intrinsic_catalog_evidence(
@@ -340,6 +437,112 @@ def test_dense_library_book_row_gate_accepts_four_rows_per_story(tmp_path: Path)
     assert StatefulManipulandAgent._validate_dense_library_book_rows(scene) == 12
 
 
+def test_dense_library_book_row_gate_rejects_physically_invalid_tagged_rows(
+    tmp_path: Path,
+):
+    bookcases = [
+        _dense_bookcase(f"bookcase_{int(level)}", level, tmp_path)
+        for level in (0.0, 4.0, 8.0)
+    ]
+    rows = [
+        SimpleNamespace(
+            object_id=UniqueID(f"book_row_{level_index}_{row_index}"),
+            object_type=ObjectType.MANIPULAND,
+            metadata={"dense_library_book_row": True},
+            placement_info=PlacementInfo(
+                parent_surface_id=bookcases[level_index]
+                .support_surfaces[row_index + 1]
+                .surface_id,
+                position_2d=np.array([0.0, 0.0]),
+                rotation_2d=0.0,
+            ),
+        )
+        for level_index in range(3)
+        for row_index in range(4)
+    ]
+    scene = SimpleNamespace(
+        text_description="large multi-level library with thousands of books",
+        objects={obj.object_id: obj for obj in [*bookcases, *rows]},
+    )
+
+    with pytest.raises(ModelBehaviorError, match="physically invalid"):
+        StatefulManipulandAgent._validate_dense_library_book_rows(
+            scene,
+            invalid_row_ids={rows[0].object_id},
+        )
+
+
+def test_dense_library_physics_allows_only_shallow_owner_support_contact(
+    tmp_path: Path,
+    monkeypatch,
+):
+    bookcase = _dense_bookcase("bookcase_0", 0.0, tmp_path)
+    rows = [
+        SceneObject(
+            object_id=UniqueID(f"book_row_{index}"),
+            object_type=ObjectType.MANIPULAND,
+            name="encyclopedia_book_row",
+            description="upright encyclopedia book set",
+            transform=RigidTransform(),
+            geometry_path=tmp_path / "book_row.gltf",
+            metadata={"dense_library_book_row": True},
+            placement_info=PlacementInfo(
+                parent_surface_id=bookcase.support_surfaces[index + 1].surface_id,
+                position_2d=np.array([0.0, 0.0]),
+                rotation_2d=0.0,
+            ),
+        )
+        for index in range(3)
+    ]
+    scene = RoomScene(
+        room_geometry=object(),
+        scene_dir=tmp_path,
+        objects={obj.object_id: obj for obj in [bookcase, *rows]},
+    )
+    collisions = [
+        CollisionPair(
+            bookcase.name,
+            str(bookcase.object_id),
+            rows[0].name,
+            str(rows[0].object_id),
+            0.019,
+        ),
+        CollisionPair(
+            bookcase.name,
+            str(bookcase.object_id),
+            rows[1].name,
+            str(rows[1].object_id),
+            0.021,
+        ),
+        CollisionPair(
+            "wall",
+            "room_geometry",
+            rows[2].name,
+            str(rows[2].object_id),
+            0.005,
+        ),
+    ]
+    monkeypatch.setattr(
+        "scenesmith.manipuland_agents.stateful_manipuland_agent.compute_scene_collisions",
+        lambda **_kwargs: collisions,
+    )
+    cfg = SimpleNamespace(
+        physics_validation=SimpleNamespace(
+            object_penetration_threshold_m=0.001,
+            floor_penetration_tolerance_m=0.05,
+            manipuland_furniture_tolerance_m=0.02,
+        )
+    )
+
+    invalid = StatefulManipulandAgent._physically_invalid_dense_book_row_ids(
+        scene,
+        cfg,
+    )
+
+    assert rows[0].object_id not in invalid
+    assert invalid == {rows[1].object_id, rows[2].object_id}
+
+
 def test_patient_support_zone_rejects_equipment_and_mislabeled_tape(tmp_path: Path):
     bed = SceneObject(
         object_id=UniqueID("bed_0"),
@@ -376,7 +579,5 @@ def test_patient_support_zone_rejects_equipment_and_mislabeled_tape(tmp_path: Pa
     )
 
     assert ManipulandTools._support_semantics_allow(bed, monitor)[0] is False
-    assert (
-        ManipulandTools._support_semantics_allow(bed, mislabeled_blanket)[0] is False
-    )
+    assert ManipulandTools._support_semantics_allow(bed, mislabeled_blanket)[0] is False
     assert ManipulandTools._support_semantics_allow(bed, pillow) == (True, None)
