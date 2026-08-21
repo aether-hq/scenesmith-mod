@@ -62,6 +62,13 @@ from scenesmith.agent_utils.scene_blueprint import (
     floor_plan_submission_from_blueprint,
     persist_scene_blueprint,
 )
+from scenesmith.agent_utils.scene_requirements import (
+    analyze_requirement_candidates,
+    literal_candidates_from_prompt,
+    merge_requirement_interpretations,
+    persist_requirement_graph,
+    requirement_graph_from_prompt,
+)
 from scenesmith.agent_utils.scene_candidates import (
     CandidateTournament,
     create_candidate_tournament,
@@ -764,6 +771,55 @@ class StatefulFloorPlanAgent(BaseStatefulAgent, BaseFloorPlanAgent):
         self.layout.house_prompt = styled_prompt
         if design_system and style_bible:
             persist_design_contract(design_system, style_bible, self.logger.output_dir)
+
+        literal_candidates = literal_candidates_from_prompt(styled_prompt)
+        configured_model = getattr(getattr(self.cfg, "openai", None), "model", None)
+        try:
+            if not configured_model:
+                raise RuntimeError("semantic obligation model is not configured")
+            interpretations, analysis_result = await analyze_requirement_candidates(
+                styled_prompt,
+                literal_candidates,
+                model=str(configured_model),
+                run_config=self._create_run_config(),
+                model_settings=self._get_model_settings(settings_key="designer"),
+            )
+            log_agent_usage(
+                result=analysis_result,
+                agent_name="SEMANTIC OBLIGATION ANALYST",
+            )
+            self.requirement_graph = merge_requirement_interpretations(
+                styled_prompt,
+                literal_candidates,
+                interpretations,
+                analysis_model=str(configured_model),
+            )
+        except Exception as exc:
+            # Step 2 is intentionally shadow-only. Preserve every source clause as
+            # unclassified if the semantic route fails; enforcement will treat an
+            # unclassified hard obligation as non-publishable when that gate lands.
+            console_logger.exception(
+                "Semantic obligation analysis failed; preserving literal candidates"
+            )
+            self.requirement_graph = requirement_graph_from_prompt(
+                styled_prompt,
+                analysis_model=(str(configured_model) if configured_model else None),
+                analysis_error=f"{type(exc).__name__}: {exc}",
+            )
+        persist_requirement_graph(
+            self.requirement_graph,
+            self.logger.output_dir / "scene_requirement_graph.json",
+        )
+        console_logger.info(
+            "Semantic requirement shadow graph %s captured %d literal candidates "
+            "and %d obligations (analysis=%s, hash=%s)",
+            self.requirement_graph.graph_id,
+            len(self.requirement_graph.candidates),
+            len(self.requirement_graph.requirements),
+            self.requirement_graph.analysis_status,
+            self.requirement_graph.content_hash,
+        )
+
         self.blueprint = blueprint_from_prompt(
             styled_prompt,
             mode=self.mode,

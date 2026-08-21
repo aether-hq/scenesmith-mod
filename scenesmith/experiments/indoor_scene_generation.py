@@ -52,6 +52,12 @@ from scenesmith.agent_utils.physical_feasibility import (
     apply_physical_feasibility_postprocessing,
 )
 from scenesmith.agent_utils.room import AgentType, ObjectType, RoomScene
+from scenesmith.agent_utils.scene_blueprint import SceneBlueprint
+from scenesmith.agent_utils.scene_requirements import (
+    audit_requirement_graph,
+    load_requirement_graph,
+    persist_shadow_audit,
+)
 from scenesmith.agent_utils.sceneeval_exporter import (
     SceneEvalExportConfig,
     SceneEvalExporter,
@@ -525,8 +531,8 @@ def _copy_checkpoint_for_stage(
     """Copy only the checkpoint state needed to resume from start_stage.
 
     Unlike copytree of entire scene, this explicitly copies only required files:
-    - Scene-level: floor_plans/, house_layout.json, scene_blueprint.json, and
-      legacy room_geometry/
+    - Scene-level: floor_plans/, house_layout.json, scene_blueprint.json,
+      scene_requirement_graph.json, and legacy room_geometry/
     - Room-level: checkpoint directory + referenced assets
 
     NOT copied (ensuring fresh start for resumed stage):
@@ -580,6 +586,12 @@ def _copy_checkpoint_for_stage(
     scene_blueprint = source_scene_dir / "scene_blueprint.json"
     if scene_blueprint.exists():
         shutil.copy(scene_blueprint, target_scene_dir / "scene_blueprint.json")
+    requirement_graph = source_scene_dir / "scene_requirement_graph.json"
+    if requirement_graph.exists():
+        shutil.copy(
+            requirement_graph,
+            target_scene_dir / "scene_requirement_graph.json",
+        )
 
     checkpoint_name = STAGE_CHECKPOINTS[start_stage]
     asset_dirs = STAGE_ASSET_DIRS[start_stage]
@@ -1077,6 +1089,48 @@ def _generate_room(
             )
 
     _validate_final_dense_library_book_rows(scene, manipuland_agent)
+
+    # This audit is intentionally observational until its requirement extraction
+    # has been calibrated against the regression corpus. It exposes silent prompt
+    # loss without changing the current build verdict.
+    requirement_graph_path = room_dir.parent / "scene_requirement_graph.json"
+    scene_blueprint_path = room_dir.parent / "scene_blueprint.json"
+    if requirement_graph_path.is_file() and scene_blueprint_path.is_file():
+        try:
+            requirement_graph = load_requirement_graph(requirement_graph_path)
+            scene_blueprint = SceneBlueprint.model_validate_json(
+                scene_blueprint_path.read_text(encoding="utf-8")
+            )
+            shadow_audit = audit_requirement_graph(
+                requirement_graph,
+                blueprint=scene_blueprint,
+                scene=scene,
+                house_layout=house_layout,
+            )
+            persist_shadow_audit(shadow_audit, room_dir / "semantic_shadow_audit.json")
+            missing_subjects = [
+                requirement.subject
+                for requirement, result in zip(
+                    requirement_graph.requirements,
+                    shadow_audit.results,
+                    strict=True,
+                )
+                if result.status == "missing"
+            ]
+            console_logger.warning(
+                "Semantic shadow audit: satisfied=%d missing=%d ambiguous=%d; "
+                "missing obligations=%s",
+                shadow_audit.satisfied_count,
+                shadow_audit.missing_count,
+                shadow_audit.ambiguous_count,
+                missing_subjects,
+            )
+        except Exception as exc:
+            console_logger.warning(
+                "Semantic shadow audit could not be completed; build verdict is "
+                "unchanged in shadow mode: %s",
+                exc,
+            )
 
     # Log and export final scene.
     logger.log_scene(scene=scene, name="final_scene")

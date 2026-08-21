@@ -118,6 +118,10 @@ def test_wall_resume_copies_canonical_checkpoint_without_legacy_room_geometry(
             }
         )
     )
+    requirement_graph = source / "scene_requirement_graph.json"
+    requirement_graph.write_text(
+        '{"schema_version":1,"graph_id":"requirements-test","requirements":[]}'
+    )
     checkpoint = source / "room_room" / "scene_states" / "scene_after_furniture"
     checkpoint.mkdir(parents=True)
     (checkpoint / "scene_state.json").write_text("{}")
@@ -128,6 +132,9 @@ def test_wall_resume_copies_canonical_checkpoint_without_legacy_room_geometry(
         target / "floor_plans" / "room" / "structural" / "platform.glb"
     ).read_text() == "platform"
     assert (target / "house_layout.json").is_file()
+    assert (target / "scene_requirement_graph.json").read_bytes() == (
+        requirement_graph.read_bytes()
+    )
     assert (
         target
         / "room_room"

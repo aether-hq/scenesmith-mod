@@ -1,0 +1,100 @@
+{
+  "schema_version": 1,
+  "domains": [
+    {"scene": "aquaculture hatchery", "entity": "nutrient skimmer", "plural": "nutrient skimmers", "destination": "filtration annex"},
+    {"scene": "clockwork foundry", "entity": "escapement bench", "plural": "escapement benches", "destination": "spring vault"},
+    {"scene": "mycology laboratory", "entity": "spore carousel", "plural": "spore carousels", "destination": "incubation annex"},
+    {"scene": "avalanche station", "entity": "beacon sled", "plural": "beacon sleds", "destination": "rescue tunnel"},
+    {"scene": "lunar archive", "entity": "regolith folio", "plural": "regolith folios", "destination": "vacuum stacks"},
+    {"scene": "textile mill", "entity": "jacquard cradle", "plural": "jacquard cradles", "destination": "dye loft"},
+    {"scene": "desalination plant", "entity": "membrane cassette", "plural": "membrane cassettes", "destination": "brine gallery"},
+    {"scene": "geothermal vault", "entity": "brine manifold", "plural": "brine manifolds", "destination": "thermal annex"},
+    {"scene": "insectarium", "entity": "chrysalis rack", "plural": "chrysalis racks", "destination": "emergence chamber"},
+    {"scene": "perfumery", "entity": "essence organ", "plural": "essence organs", "destination": "maceration room"},
+    {"scene": "ceramics kiln hall", "entity": "glaze trolley", "plural": "glaze trolleys", "destination": "firing chamber"},
+    {"scene": "drone apiary", "entity": "pollination pod", "plural": "pollination pods", "destination": "charging hive"},
+    {"scene": "submarine chapel", "entity": "pressure icon", "plural": "pressure icons", "destination": "dive vestibule"},
+    {"scene": "cryogenic museum", "entity": "frost reliquary", "plural": "frost reliquaries", "destination": "thaw lock"},
+    {"scene": "orbital farm", "entity": "aeroponic gantry", "plural": "aeroponic gantries", "destination": "nutrient lock"},
+    {"scene": "acoustic laboratory", "entity": "resonance harp", "plural": "resonance harps", "destination": "anechoic chamber"},
+    {"scene": "coral nursery", "entity": "reef lattice", "plural": "reef lattices", "destination": "salinity lock"},
+    {"scene": "quantum theater", "entity": "photon dais", "plural": "photon dais", "destination": "coherence wing"},
+    {"scene": "botanical seed bank", "entity": "germination drum", "plural": "germination drums", "destination": "cold archive"},
+    {"scene": "meteorology deck", "entity": "radiosonde carousel", "plural": "radiosonde carousels", "destination": "forecast bridge"},
+    {"scene": "archaeological laboratory", "entity": "shard table", "plural": "shard tables", "destination": "catalog chamber"},
+    {"scene": "battery recycling hall", "entity": "cathode separator", "plural": "cathode separators", "destination": "electrolyte lock"},
+    {"scene": "telescope workshop", "entity": "mirror cradle", "plural": "mirror cradles", "destination": "polishing vault"},
+    {"scene": "fungal kitchen", "entity": "fermentation island", "plural": "fermentation islands", "destination": "culture pantry"},
+    {"scene": "paper conservation studio", "entity": "humidity cabinet", "plural": "humidity cabinets", "destination": "drying archive"},
+    {"scene": "volcanic observatory", "entity": "seismograph plinth", "plural": "seismograph plinths", "destination": "magma shelter"}
+  ],
+  "templates": [
+    {
+      "template_id": "exact-digit",
+      "prompt": "A {scene} with 7 {plural}.",
+      "expected": {"subject": "{entity}", "kind": "object_group", "quantity_mode": "exact", "quantity_value": 7}
+    },
+    {
+      "template_id": "exact-word",
+      "prompt": "A {scene} with three {plural}.",
+      "expected": {"subject": "{entity}", "kind": "object_group", "quantity_mode": "exact", "quantity_value": 3}
+    },
+    {
+      "template_id": "huge-centered",
+      "prompt": "A {scene} with a huge {entity} in the center.",
+      "expected": {"subject": "{entity}", "kind": "hero_object", "quantity_mode": "exact", "quantity_value": 1, "scale": "huge", "relation": ["centered_in", "primary space"]}
+    },
+    {
+      "template_id": "enormous-centered",
+      "prompt": "A {scene} featuring an enormous {entity} at the centre.",
+      "expected": {"subject": "{entity}", "kind": "hero_object", "quantity_mode": "exact", "quantity_value": 1, "scale": "enormous", "relation": ["centered_in", "primary space"]}
+    },
+    {
+      "template_id": "many-around",
+      "prompt": "A {scene} with many {plural} around the main floor.",
+      "expected": {"subject": "{entity}", "kind": "object_group", "quantity_mode": "minimum", "quantity_value": 3, "relation": ["distributed_across", "main floor"]}
+    },
+    {
+      "template_id": "several-across",
+      "prompt": "A {scene} containing several {plural} across the work area.",
+      "expected": {"subject": "{entity}", "kind": "object_group", "quantity_mode": "minimum", "quantity_value": 3, "relation": ["distributed_across", "work area"]}
+    },
+    {
+      "template_id": "qualitative-thousands",
+      "prompt": "A {scene} with thousands of {plural}.",
+      "expected": {"subject": "{entity}", "kind": "object_group", "quantity_mode": "qualitative", "quantity_label": "thousands"}
+    },
+    {
+      "template_id": "giant-opening",
+      "prompt": "A {scene} with a giant opening into the {destination}.",
+      "expected": {"subject": "opening", "kind": "opening", "quantity_mode": "exact", "quantity_value": 1, "scale": "giant", "relation": ["connects_to", "{destination}"]}
+    },
+    {
+      "template_id": "multiple-hatches",
+      "prompt": "A {scene} with multiple small hatches to the {destination}.",
+      "expected": {"subject": "hatch", "kind": "opening", "quantity_mode": "minimum", "quantity_value": 3, "scale": "small", "relation": ["connects_to", "{destination}"]}
+    },
+    {
+      "template_id": "sized-zones",
+      "prompt": "A {scene}. There are four calibration zones, each big enough for a {entity}.",
+      "expected": {"subject": "calibration zone", "kind": "repeated_zone", "quantity_mode": "exact", "quantity_value": 4, "relation": ["sized_for", "{entity}"]}
+    }
+  ],
+  "curated": [
+    {"case_id": "negated-without", "prompt": "A clean laboratory without five flux cradles.", "absent_subject": "flux cradle"},
+    {"case_id": "negated-no", "prompt": "No huge amber pylon belongs in this room.", "absent_subject": "amber pylon"},
+    {"case_id": "negated-avoid", "prompt": "Avoid multiple cobalt trolleys near the entrance.", "absent_subject": "cobalt trolley"},
+    {"case_id": "optional-could", "prompt": "The studio could include three vellum drums.", "absent_subject": "vellum drum"},
+    {"case_id": "optional-might", "prompt": "The gallery might have a giant prism organ in the center.", "absent_subject": "prism organ"},
+    {"case_id": "contradictory-counts", "prompt": "A hall with exactly two echo plinths and exactly three echo plinths.", "expected_exact_counts": {"subject": "echo plinth", "values": [2, 3]}},
+    {"case_id": "mixed-casing", "prompt": "A LABORATORY with TEN QUARTZ CRADLES.", "expected": {"subject": "quartz cradle", "kind": "object_group", "quantity_mode": "exact", "quantity_value": 10}},
+    {"case_id": "hyphenated-hero", "prompt": "A depot with a massive phase-array in the middle.", "expected": {"subject": "phase array", "kind": "hero_object", "quantity_mode": "exact", "quantity_value": 1, "scale": "massive", "relation": ["centered_in", "primary space"]}},
+    {"case_id": "arched-typo", "prompt": "A hall with huge archted windows.", "expected": {"subject": "arched window", "kind": "opening", "quantity_mode": "minimum", "quantity_value": 2, "scale": "huge"}},
+    {"case_id": "explicit-levels", "prompt": "A three-level archive with exhibits.", "expected": {"subject": "level", "kind": "level", "quantity_mode": "exact", "quantity_value": 3}},
+    {"case_id": "multilevel", "prompt": "A multi-level workshop with equipment.", "expected": {"subject": "level", "kind": "level", "quantity_mode": "minimum", "quantity_value": 2}},
+    {"case_id": "connector", "prompt": "A gallery where a spiral staircase connects the floors.", "expected": {"subject": "spiral staircase", "kind": "connector", "quantity_mode": "minimum", "quantity_value": 1, "relation": ["connects", "floors"]}},
+    {"case_id": "enumerated-distribution", "prompt": "A depot where coils, relays, capacitors, and so on are across the service deck.", "expected_subjects": ["coil", "relay", "capacitor"], "relation": ["distributed_across", "service deck"]},
+    {"case_id": "bare-trailing-item", "prompt": "A salon with large windows, alabaster figures, and so on.", "expected": {"subject": "alabaster figure", "kind": "object_group", "quantity_mode": "minimum", "quantity_value": 1}},
+    {"case_id": "authored-style", "prompt": "A reading hall, as it has a solarpunk, lavish decor.", "expected": {"subject": "solarpunk", "kind": "style", "quantity_mode": "qualitative", "quantity_label": "authored style"}}
+  ]
+}
