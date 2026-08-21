@@ -2821,12 +2821,19 @@ class BlenderRenderer(
             # Fallback to north.
             camera_obj.rotation_euler = (math.pi / 2, 0, math.pi)
 
-    def save_blend_file(self, params: RenderParams, output_path: Path) -> Path:
+    def save_blend_file(
+        self,
+        params: RenderParams,
+        output_path: Path,
+        additional_visuals: list[dict[str, object]] | None = None,
+    ) -> Path:
         """Save the scene as a .blend file.
 
         Args:
             params: Rendering parameters containing scene path (glTF).
             output_path: Path where .blend file will be saved.
+            additional_visuals: Compiled GLB visuals that Drake omitted from
+                its exported scene, each with a room-frame translation/yaw.
 
         Returns:
             Path to the saved .blend file.
@@ -2834,6 +2841,45 @@ class BlenderRenderer(
         # Setup scene and import glTF (reuse existing methods).
         self._setup_scene(params)
         self._import_and_organize_gltf(params.scene)
+
+        for visual in additional_visuals or []:
+            visual_path = Path(str(visual["path"]))
+            if visual_path.suffix.lower() not in {".glb", ".gltf"}:
+                raise ValueError(f"Supplemental visual must be GLB/GLTF: {visual_path}")
+            if not visual_path.is_file():
+                raise FileNotFoundError(
+                    f"Supplemental visual does not exist: {visual_path}"
+                )
+            translation = tuple(float(value) for value in visual["translation"])
+            if len(translation) != 3 or not all(math.isfinite(v) for v in translation):
+                raise ValueError(
+                    "Supplemental visual translation must be 3D and finite"
+                )
+            yaw = float(visual.get("yaw_radians", 0.0))
+            if not math.isfinite(yaw):
+                raise ValueError("Supplemental visual yaw must be finite")
+
+            bpy.ops.object.select_all(action="DESELECT")
+            bpy.ops.import_scene.gltf(filepath=str(visual_path))
+            imported = tuple(bpy.context.selected_objects)
+            imported_ids = {id(obj) for obj in imported}
+            transform = Matrix.Translation(Vector(translation)) @ Matrix.Rotation(
+                yaw, 4, "Z"
+            )
+            roots = [
+                obj
+                for obj in imported
+                if obj.parent is None or id(obj.parent) not in imported_ids
+            ]
+            for root in roots:
+                root.matrix_world = transform @ root.matrix_world
+            role = str(visual.get("role", "structural_detail"))
+            source_id = str(visual.get("source_id", visual_path.stem))
+            for obj in imported:
+                if obj.type != "MESH":
+                    continue
+                obj["aether_role"] = role
+                obj["aether_source_id"] = source_id
 
         # Ensure output directory exists.
         output_path.parent.mkdir(parents=True, exist_ok=True)

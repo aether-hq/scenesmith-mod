@@ -3140,6 +3140,49 @@ class HouseScene:
 
         return directive
 
+    def _platform_blender_visuals(self) -> list[dict[str, object]]:
+        """Return PBR platform visuals omitted by Drake's glTF renderer.
+
+        Platform SDFs keep their collision OBJ as the authoritative physics
+        geometry.  Drake's RenderEngineGltfClient does not currently forward a
+        nested GLB visual referenced by an SDF, so the Blender export imports
+        that authenticated compiled visual separately in the same room frame.
+        """
+
+        visuals: list[dict[str, object]] = []
+        for platform in self.layout.platforms:
+            sdf_path = self.layout.platform_geometry_paths.get(platform.platform_id)
+            if sdf_path is None:
+                raise ValueError(
+                    f"Platform geometry has not been compiled for: {platform.platform_id}"
+                )
+            visual_uri = ET.parse(sdf_path).findtext(".//visual/geometry/mesh/uri")
+            if not visual_uri or Path(visual_uri).suffix.lower() not in {
+                ".glb",
+                ".gltf",
+            }:
+                # OBJ-backed visuals are already forwarded by Drake and must
+                # not be duplicated in the Blender presentation artifact.
+                continue
+            visual_path = Path(visual_uri)
+            if not visual_path.is_absolute():
+                visual_path = sdf_path.parent / visual_path
+            if not visual_path.is_file():
+                raise FileNotFoundError(
+                    f"Compiled platform visual does not exist: {visual_path}"
+                )
+            x, y, z, yaw = self._get_room_transform(platform.space_id)
+            visuals.append(
+                {
+                    "path": str(visual_path),
+                    "translation": [x, y, z],
+                    "yaw_radians": yaw,
+                    "role": "structural_detail",
+                    "source_id": platform.platform_id,
+                }
+            )
+        return visuals
+
     def _export_blend(self, output_dir: Path, cfg: dict | DictConfig) -> None:
         """Export Blender file for all rooms to combined directory.
 
@@ -3176,6 +3219,7 @@ class HouseScene:
                 server_startup_delay=rendering_cfg["server_startup_delay"],
                 port_cleanup_delay=rendering_cfg["port_cleanup_delay"],
                 scene_dir=self.house_dir,
+                additional_visuals=self._platform_blender_visuals(),
             )
             console_logger.info(f"Saved combined blend file: {blend_output_path}")
         except Exception as e:

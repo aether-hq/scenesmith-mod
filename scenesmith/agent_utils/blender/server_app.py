@@ -49,7 +49,7 @@ class BlenderRenderApp(flask.Flask):
         self._overlay_config: dict[str, str | int] | None = None
 
         # Storage for blend export configuration.
-        self._blend_config: dict[str, str] | None = None
+        self._blend_config: dict[str, object] | None = None
 
         # Storage for floor plan rendering configuration.
         # NOTE: Same single-threaded assumption as overlay config.
@@ -528,8 +528,15 @@ class BlenderRenderApp(flask.Flask):
 
             params = self._parse_params(request=flask.request)
             output_path = Path(self._blend_config["output_path"])
+            additional_visuals = self._blend_config.get("additional_visuals", [])
+            if not isinstance(additional_visuals, list):
+                raise ValueError("additional_visuals must be a list")
 
-            self._blender.save_blend_file(params=params, output_path=output_path)
+            self._blender.save_blend_file(
+                params=params,
+                output_path=output_path,
+                additional_visuals=additional_visuals,
+            )
 
             total_time = time.time() - request_start
             console_logger.info(

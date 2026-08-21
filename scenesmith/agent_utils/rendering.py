@@ -1449,6 +1449,7 @@ def save_directive_as_blend(
     port_cleanup_delay: float = 0.1,
     scene_dir: Path | None = None,
     max_retries: int = 3,
+    additional_visuals: list[dict[str, object]] | None = None,
 ) -> Path:
     """Export a Drake model directive to a .blend file.
 
@@ -1490,7 +1491,10 @@ def save_directive_as_blend(
         try:
             # Configure server for blend export.
             config_url = f"{server.get_url()}/set_blend_config"
-            config_payload = {"output_path": str(output_path.absolute())}
+            config_payload = {
+                "output_path": str(output_path.absolute()),
+                "additional_visuals": additional_visuals or [],
+            }
 
             response = requests.post(config_url, json=config_payload, timeout=10)
             if response.status_code != 200:

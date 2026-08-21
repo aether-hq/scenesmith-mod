@@ -13,6 +13,7 @@ from scenesmith.agent_utils.house import (
     ConnectionType,
     Door,
     HouseLayout,
+    HouseScene,
     Opening,
     OpeningType,
     PlacedRoom,
@@ -932,6 +933,57 @@ class TestV2StructuralLayout(unittest.TestCase):
             assert all(image.uri.startswith("data:image/") for image in gltf.images)
             assert gltf.accessors[primitive.indices].count == (
                 len(compile_platform(platform).visual_mesh.triangles) * 3
+            )
+
+    def test_house_blender_platform_visuals_keep_room_frame_transform(self) -> None:
+        platform = PlatformSpec(
+            platform_id="renaissance_gallery",
+            space_id="library",
+            footprint=Footprint2D.rectangle(8, 6),
+            elevation=4.0,
+        )
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            scene_dir = Path(temporary_directory)
+            visual_path = scene_dir / "renaissance_gallery.glb"
+            sdf_path = visual_path.with_suffix(".sdf")
+            visual_path.touch()
+            sdf_path.write_text(
+                "<sdf><model><link><visual><geometry><mesh>"
+                "<uri>renaissance_gallery.glb</uri>"
+                "</mesh></geometry></visual></link></model></sdf>",
+                encoding="utf-8",
+            )
+            layout = HouseLayout(
+                room_specs=[RoomSpec("library", level_id="upper")],
+                levels=[LevelSpec("upper", elevation=3.0)],
+                placed_rooms=[
+                    PlacedRoom(
+                        "library",
+                        (10, 20),
+                        8,
+                        6,
+                        level_id="upper",
+                        yaw=math.pi / 2,
+                    )
+                ],
+                platforms=[platform],
+                platform_geometry_paths={platform.platform_id: sdf_path},
+                house_dir=scene_dir,
+            )
+
+            visuals = HouseScene(layout=layout)._platform_blender_visuals()
+
+            self.assertEqual(
+                visuals,
+                [
+                    {
+                        "path": str(visual_path),
+                        "translation": [14.0, 23.0, 3.0],
+                        "yaw_radians": math.pi / 2,
+                        "role": "structural_detail",
+                        "source_id": platform.platform_id,
+                    }
+                ],
             )
 
     def test_textured_landing_retains_obj_collision_mesh(self) -> None:

@@ -1,5 +1,6 @@
 import hashlib
 import io
+import math
 import tempfile
 import unittest
 
@@ -8,7 +9,7 @@ from unittest.mock import MagicMock, Mock, patch
 
 import flask
 
-from mathutils import Vector
+from mathutils import Matrix, Vector
 
 from scenesmith.agent_utils.blender import (
     BlenderRenderApp,
@@ -87,6 +88,67 @@ class TestBlenderRenderer(unittest.TestCase):
         )
         self.assertEqual(renderer._blend_file, self.blend_file)
         self.assertEqual(renderer._bpy_settings_file, self.settings_file)
+
+    @patch("scenesmith.agent_utils.blender.renderer.bpy")
+    def test_save_blend_file_imports_supplemental_structural_visuals(self, mock_bpy):
+        visual_path = self.temp_dir / "renaissance_gallery.glb"
+        visual_path.touch()
+        imported_root = MagicMock()
+        imported_root.parent = None
+        imported_root.matrix_world = Matrix.Identity(4)
+        imported_root.type = "EMPTY"
+        imported_mesh = MagicMock()
+        imported_mesh.parent = imported_root
+        imported_mesh.type = "MESH"
+        mock_bpy.context.selected_objects = [imported_root, imported_mesh]
+        renderer = BlenderRenderer()
+        params = RenderParams(
+            scene=Path("/tmp/test.gltf"),
+            scene_sha256="abc123",
+            image_type="color",
+            width=4,
+            height=4,
+            near=0.1,
+            far=100.0,
+            focal_x=2.0,
+            focal_y=2.0,
+            fov_x=1.0,
+            fov_y=1.0,
+            center_x=2.0,
+            center_y=2.0,
+        )
+
+        with (
+            patch.object(renderer, "_setup_scene"),
+            patch.object(renderer, "_import_and_organize_gltf"),
+        ):
+            renderer.save_blend_file(
+                params,
+                self.blend_file,
+                additional_visuals=[
+                    {
+                        "path": str(visual_path),
+                        "translation": [10.0, 20.0, 3.0],
+                        "yaw_radians": math.pi / 2,
+                        "role": "structural_detail",
+                        "source_id": "renaissance_gallery",
+                    }
+                ],
+            )
+
+        mock_bpy.ops.import_scene.gltf.assert_called_once_with(
+            filepath=str(visual_path)
+        )
+        self.assertEqual(
+            tuple(imported_root.matrix_world.translation), (10.0, 20.0, 3.0)
+        )
+        imported_mesh.__setitem__.assert_any_call("aether_role", "structural_detail")
+        imported_mesh.__setitem__.assert_any_call(
+            "aether_source_id", "renaissance_gallery"
+        )
+        mock_bpy.ops.wm.save_as_mainfile.assert_called_once_with(
+            filepath=str(self.blend_file)
+        )
 
     @patch("scenesmith.agent_utils.blender.scene_setup_mixin.bpy")
     @patch("scenesmith.agent_utils.blender.renderer.bpy")
