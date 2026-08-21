@@ -487,7 +487,7 @@ def _copy_checkpoint_for_stage(
     """Copy only the checkpoint state needed to resume from start_stage.
 
     Unlike copytree of entire scene, this explicitly copies only required files:
-    - Scene-level: room_geometry/, floor_plans/, house_layout.json
+    - Scene-level: floor_plans/, house_layout.json, and legacy room_geometry/
     - Room-level: checkpoint directory + referenced assets
 
     NOT copied (ensuring fresh start for resumed stage):
@@ -515,11 +515,14 @@ def _copy_checkpoint_for_stage(
 
     target_scene_dir.mkdir(parents=True, exist_ok=True)
 
-    # Copy scene-level directories.
-    shutil.copytree(
-        source_scene_dir / "room_geometry",
-        target_scene_dir / "room_geometry",
-    )
+    # Current checkpoints keep structural geometry under floor_plans/. Older
+    # checkpoints also wrote a scene-root room_geometry/ compatibility tree.
+    legacy_room_geometry = source_scene_dir / "room_geometry"
+    if legacy_room_geometry.exists():
+        shutil.copytree(
+            legacy_room_geometry,
+            target_scene_dir / "room_geometry",
+        )
     shutil.copytree(
         source_scene_dir / "floor_plans",
         target_scene_dir / "floor_plans",

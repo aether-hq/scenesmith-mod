@@ -11,6 +11,9 @@ from unittest.mock import AsyncMock, MagicMock
 from scenesmith.floor_plan_agents.stateful_floor_plan_agent import (
     StatefulFloorPlanAgent,
 )
+from scenesmith.experiments.indoor_scene_generation import (
+    _copy_checkpoint_for_stage,
+)
 
 
 def test_valid_layout_is_atomically_checkpointed_before_critique(tmp_path):
@@ -85,3 +88,46 @@ def test_generation_refuses_to_export_an_invalid_partial_layout(tmp_path):
 
     agent._generate_all_room_geometries.assert_not_called()
     agent._export_floor_plan.assert_not_called()
+
+
+def test_wall_resume_copies_canonical_checkpoint_without_legacy_room_geometry(
+    tmp_path,
+):
+    source = tmp_path / "source" / "scene_000"
+    target = tmp_path / "target" / "scene_000"
+    (source / "floor_plans" / "room" / "structural").mkdir(parents=True)
+    (source / "floor_plans" / "room" / "structural" / "platform.glb").write_text(
+        "platform"
+    )
+    (source / "house_layout.json").write_text('{"rooms": []}')
+    checkpoint = source / "room_room" / "scene_states" / "scene_after_furniture"
+    checkpoint.mkdir(parents=True)
+    (checkpoint / "scene_state.json").write_text("{}")
+
+    _copy_checkpoint_for_stage(source, target, "wall_mounted")
+
+    assert (
+        target / "floor_plans" / "room" / "structural" / "platform.glb"
+    ).read_text() == "platform"
+    assert (target / "house_layout.json").is_file()
+    assert (
+        target
+        / "room_room"
+        / "scene_states"
+        / "scene_after_furniture"
+        / "scene_state.json"
+    ).is_file()
+    assert not (target / "room_geometry").exists()
+
+
+def test_wall_resume_still_copies_legacy_room_geometry(tmp_path):
+    source = tmp_path / "source" / "scene_000"
+    target = tmp_path / "target" / "scene_000"
+    (source / "floor_plans").mkdir(parents=True)
+    (source / "room_geometry").mkdir(parents=True)
+    (source / "room_geometry" / "room.sdf").write_text("legacy")
+    (source / "house_layout.json").write_text('{"rooms": []}')
+
+    _copy_checkpoint_for_stage(source, target, "wall_mounted")
+
+    assert (target / "room_geometry" / "room.sdf").read_text() == "legacy"
