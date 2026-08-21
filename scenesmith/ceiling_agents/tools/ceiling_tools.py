@@ -7,6 +7,7 @@ This module provides tools for generating and placing ceiling-mounted objects
 import logging
 import math
 
+from dataclasses import replace
 from typing import Any
 
 import numpy as np
@@ -43,6 +44,40 @@ from scenesmith.ceiling_agents.tools.response_dataclasses import (
 console_logger = logging.getLogger(__name__)
 
 CEILING_ATTACHMENT_CLEARANCE_METERS = 0.01
+
+
+def _grand_atrium_chandelier_dimensions(
+    *,
+    description: str,
+    dimensions: list[float],
+    room_bounds: tuple[float, float, float, float],
+    ceiling_height: float,
+) -> list[float]:
+    """Keep an explicit grand atrium chandelier at a visible focal scale."""
+    requested = [float(value) for value in dimensions]
+    if len(requested) != 3:
+        return requested
+
+    min_x, min_y, max_x, max_y = room_bounds
+    room_span = min(float(max_x - min_x), float(max_y - min_y))
+    text = description.casefold()
+    if (
+        "grand" not in text
+        or "chandelier" not in text
+        or room_span < 10.0
+        or ceiling_height < 8.0
+    ):
+        return requested
+
+    maximum_drop = max(
+        CEILING_ATTACHMENT_CLEARANCE_METERS,
+        float(ceiling_height) - CEILING_ATTACHMENT_CLEARANCE_METERS,
+    )
+    return [
+        max(requested[0], 1.4),
+        max(requested[1], 1.4),
+        min(max(requested[2], 1.8), maximum_drop),
+    ]
 
 
 def compute_ceiling_transform(
@@ -445,6 +480,21 @@ class CeilingTools:
     def _generate_assets_impl(self, request: AssetGenerationRequest) -> str:
         """Implementation for generating ceiling assets."""
         try:
+            desired_dimensions = [
+                _grand_atrium_chandelier_dimensions(
+                    description=request.object_descriptions[index],
+                    dimensions=dimensions,
+                    room_bounds=self.room_bounds,
+                    ceiling_height=self.ceiling_height,
+                )
+                for index, dimensions in enumerate(request.desired_dimensions)
+            ]
+            if desired_dimensions != request.desired_dimensions:
+                request = replace(request, desired_dimensions=desired_dimensions)
+                console_logger.info(
+                    "Normalized grand atrium chandelier dimensions to %s",
+                    desired_dimensions,
+                )
             result = self.asset_manager.generate_assets(request=request)
 
             # Convert successful assets to DTOs.
