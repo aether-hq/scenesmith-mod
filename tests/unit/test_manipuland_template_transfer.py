@@ -488,6 +488,101 @@ def test_dense_library_book_row_gate_rejects_eight_rows_per_story(tmp_path: Path
         StatefulManipulandAgent._validate_dense_library_book_rows(scene)
 
 
+def test_dense_library_recovers_variable_capacity_templates_to_twelve_rows(
+    tmp_path: Path,
+    monkeypatch,
+):
+    bookcases = [
+        _dense_bookcase(f"bookcase_{level_index}_{case_index}", level, tmp_path)
+        for level_index, level in enumerate((0.0, 4.0, 8.0))
+        for case_index in range(6 if level_index == 0 else 3)
+    ]
+    rows = []
+    for level_index, level in enumerate((0.0, 4.0, 8.0)):
+        cases_at_level = [
+            bookcase
+            for bookcase in bookcases
+            if float(bookcase.transform.translation()[2]) == level
+        ]
+        rows_per_case = 2 if level_index == 0 else 4
+        for case_index, bookcase in enumerate(cases_at_level[:3]):
+            for row_index in range(rows_per_case):
+                surface = bookcase.support_surfaces[row_index + 1]
+                rows.append(
+                    SceneObject(
+                        object_id=UniqueID(
+                            f"book_row_{level_index}_{case_index}_{row_index}"
+                        ),
+                        object_type=ObjectType.MANIPULAND,
+                        name="encyclopedia_book_row",
+                        description="upright encyclopedia book set",
+                        transform=surface.transform,
+                        geometry_path=tmp_path / "book_row.gltf",
+                        metadata={
+                            "dense_library_book_row": True,
+                            "dense_library_owner_bound": str(bookcase.object_id),
+                        },
+                        bbox_min=np.array([-0.1, -0.05, 0.0]),
+                        bbox_max=np.array([0.1, 0.05, 0.2]),
+                        placement_info=PlacementInfo(
+                            parent_surface_id=surface.surface_id,
+                            position_2d=np.array([0.0, 0.0]),
+                            rotation_2d=0.0,
+                        ),
+                    )
+                )
+    accented_source = next(
+        bookcase for bookcase in bookcases if str(bookcase.object_id) == "bookcase_0_2"
+    )
+    accent_surface = accented_source.support_surfaces[1]
+    accent = SceneObject(
+        object_id=UniqueID("candlestick_0"),
+        object_type=ObjectType.MANIPULAND,
+        name="candlestick",
+        description="antique brass candlestick",
+        transform=accent_surface.transform,
+        geometry_path=tmp_path / "candlestick.gltf",
+        placement_info=PlacementInfo(
+            parent_surface_id=accent_surface.surface_id,
+            position_2d=np.array([0.1, 0.0]),
+            rotation_2d=0.0,
+        ),
+    )
+    scene = RoomScene(
+        room_geometry=object(),
+        scene_dir=tmp_path,
+        text_description="large multi-level library with thousands of books",
+        objects={obj.object_id: obj for obj in [*bookcases, *rows, accent]},
+    )
+    monkeypatch.setattr(
+        "scenesmith.manipuland_agents.stateful_manipuland_agent.compute_scene_collisions",
+        lambda **_kwargs: [],
+    )
+    agent = object.__new__(StatefulManipulandAgent)
+    agent.scene = scene
+    agent.cfg = SimpleNamespace(
+        physics_validation=SimpleNamespace(
+            object_penetration_threshold_m=0.001,
+            floor_penetration_tolerance_m=0.05,
+            manipuland_furniture_tolerance_m=0.02,
+        )
+    )
+
+    recovered = agent._recover_dense_library_book_row_deficits()
+
+    assert recovered == 6
+    assert StatefulManipulandAgent._validate_dense_library_book_rows(scene) == 36
+    recovered_rows = [
+        obj
+        for obj in scene.objects.values()
+        if obj.placement_info is not None
+        and obj.placement_info.placement_method == "template_transfer"
+    ]
+    assert len(recovered_rows) == 6
+    assert all(row.metadata.get("dense_library_book_row") for row in recovered_rows)
+    assert all(row.name != "candlestick" for row in recovered_rows)
+
+
 def test_dense_library_book_row_gate_rejects_physically_invalid_tagged_rows(
     tmp_path: Path,
 ):
