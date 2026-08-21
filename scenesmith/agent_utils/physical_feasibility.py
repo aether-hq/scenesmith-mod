@@ -1768,6 +1768,16 @@ def apply_physical_feasibility_postprocessing(
             projection_restored,
         )
 
+    pre_simulation_furniture_transforms: dict[UniqueID, RigidTransform] = {}
+    if not weld_furniture and not projection_restored:
+        pre_simulation_furniture_transforms = {
+            obj.object_id: RigidTransform(
+                obj.transform.rotation(), obj.transform.translation().copy()
+            )
+            for obj in scene.objects.values()
+            if obj.object_type == ObjectType.FURNITURE
+        }
+
     # Stage 2: Simulation (runs regardless of projection result).
     if simulation_enabled and not projection_restored:
         scene, simulation_removed_ids = apply_forward_simulation(
@@ -1795,6 +1805,60 @@ def apply_physical_feasibility_postprocessing(
             "Rejected invalid simulation output for %d furniture item(s)",
             simulation_restored,
         )
+
+    if simulation_enabled and pre_simulation_furniture_transforms:
+        post_simulation_collisions = compute_scene_collisions(
+            scene=scene,
+            penetration_threshold=validation_object_penetration_threshold_m,
+            floor_penetration_tolerance=validation_floor_penetration_tolerance_m,
+            current_furniture_id=None,
+        )
+        if post_simulation_collisions:
+            colliding_furniture_ids: set[UniqueID] = set()
+            for collision in post_simulation_collisions:
+                for object_id in (
+                    getattr(collision, "object_a_id", None),
+                    getattr(collision, "object_b_id", None),
+                ):
+                    if object_id is None:
+                        continue
+                    unique_id = UniqueID(object_id)
+                    obj = scene.get_object(unique_id)
+                    if (
+                        obj is not None
+                        and obj.object_type == ObjectType.FURNITURE
+                        and unique_id in pre_simulation_furniture_transforms
+                    ):
+                        colliding_furniture_ids.add(unique_id)
+            for object_id in colliding_furniture_ids:
+                obj = scene.get_object(object_id)
+                if obj is None:
+                    continue
+                transform = pre_simulation_furniture_transforms[object_id]
+                obj.transform = RigidTransform(
+                    transform.rotation(), transform.translation().copy()
+                )
+            repaired_collisions = compute_scene_collisions(
+                scene=scene,
+                penetration_threshold=validation_object_penetration_threshold_m,
+                floor_penetration_tolerance=validation_floor_penetration_tolerance_m,
+                current_furniture_id=None,
+            )
+            if repaired_collisions:
+                projection_success = False
+                console_logger.error(
+                    "Post-simulation furniture collision repair remains invalid: "
+                    "%d collision(s) after restoring %d implicated item(s)",
+                    len(repaired_collisions),
+                    len(colliding_furniture_ids),
+                )
+            else:
+                console_logger.warning(
+                    "Restored %d furniture item(s) after simulation introduced "
+                    "%d collision(s); authoritative full-scene recheck passed",
+                    len(colliding_furniture_ids),
+                    len(post_simulation_collisions),
+                )
 
     if (
         projection_attempt_failed

@@ -12,6 +12,7 @@ import numpy as np
 from pydrake.all import RigidTransform, RollPitchYaw, RotationMatrix
 
 from scenesmith.agent_utils.house import RoomGeometry
+from scenesmith.agent_utils.physics_validation import CollisionPair
 from scenesmith.agent_utils.physical_feasibility import (
     _apply_floor_penetration_fallback,
     _get_colliding_object_ids,
@@ -773,6 +774,110 @@ class TestApplyPhysicalFeasibilityPostprocessing(PhysicalFeasibilityTestCase):
                         )
 
                 self.assertFalse(success)
+
+    def test_successful_projection_restores_new_post_simulation_collision(
+        self,
+    ) -> None:
+        """Simulation cannot publish a collision absent from its clean input."""
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            scene = self._create_non_overlapping_boxes_scene(Path(tmp_dir))
+            box = scene.get_object(UniqueID("box_1"))
+            original_position = box.transform.translation().copy()
+            collision = CollisionPair(
+                "floor",
+                "room_geometry",
+                box.name,
+                str(box.object_id),
+                0.0877,
+            )
+
+            def sink_table(*, scene, **_kwargs):
+                moved = scene.get_object(UniqueID("box_1"))
+                position = moved.transform.translation().copy()
+                position[2] -= 0.08
+                moved.transform = RigidTransform(p=position)
+                return scene, []
+
+            with (
+                patch(
+                    "scenesmith.agent_utils.physical_feasibility."
+                    "apply_non_penetration_projection",
+                    side_effect=lambda *, scene, **_kwargs: (scene, True),
+                ),
+                patch(
+                    "scenesmith.agent_utils.physical_feasibility."
+                    "apply_forward_simulation",
+                    side_effect=sink_table,
+                ),
+                patch(
+                    "scenesmith.agent_utils.physical_feasibility."
+                    "compute_scene_collisions",
+                    side_effect=([collision], []),
+                ) as collisions,
+            ):
+                processed, success, _ = apply_physical_feasibility_postprocessing(
+                    scene=scene,
+                    weld_furniture=False,
+                    projection_enabled=True,
+                    simulation_enabled=True,
+                )
+
+        self.assertTrue(success)
+        self.assertTrue(
+            np.allclose(
+                processed.get_object(UniqueID("box_1")).transform.translation(),
+                original_position,
+            )
+        )
+        self.assertEqual(collisions.call_count, 2)
+
+    def test_successful_projection_rejects_dirty_restored_scene(self) -> None:
+        """A targeted restore must still pass an authoritative full recheck."""
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            scene = self._create_non_overlapping_boxes_scene(Path(tmp_dir))
+            box = scene.get_object(UniqueID("box_1"))
+            collision = CollisionPair(
+                "floor",
+                "room_geometry",
+                box.name,
+                str(box.object_id),
+                0.0877,
+            )
+
+            def sink_table(*, scene, **_kwargs):
+                moved = scene.get_object(UniqueID("box_1"))
+                position = moved.transform.translation().copy()
+                position[2] -= 0.08
+                moved.transform = RigidTransform(p=position)
+                return scene, []
+
+            with (
+                patch(
+                    "scenesmith.agent_utils.physical_feasibility."
+                    "apply_non_penetration_projection",
+                    side_effect=lambda *, scene, **_kwargs: (scene, True),
+                ),
+                patch(
+                    "scenesmith.agent_utils.physical_feasibility."
+                    "apply_forward_simulation",
+                    side_effect=sink_table,
+                ),
+                patch(
+                    "scenesmith.agent_utils.physical_feasibility."
+                    "compute_scene_collisions",
+                    return_value=[collision],
+                ),
+            ):
+                _, success, _ = apply_physical_feasibility_postprocessing(
+                    scene=scene,
+                    weld_furniture=False,
+                    projection_enabled=True,
+                    simulation_enabled=True,
+                )
+
+        self.assertFalse(success)
 
     def test_ejected_projection_is_restored_and_simulation_is_skipped(self) -> None:
         """A closed room collider cannot replace the valid placement checkpoint."""
