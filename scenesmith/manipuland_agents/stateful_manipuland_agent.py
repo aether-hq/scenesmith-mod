@@ -14,8 +14,10 @@ from pathlib import Path
 from typing import Any
 
 from agents import Agent, FunctionTool, custom_span
+from agents.exceptions import ModelBehaviorError
 from omegaconf import DictConfig
 
+from scenesmith.agent_utils.asset_manager import AssetGenerationRequest
 from scenesmith.agent_utils.base_stateful_agent import BaseStatefulAgent
 from scenesmith.agent_utils.blender.process_provider import RenderAllocation
 from scenesmith.agent_utils.physical_feasibility import (
@@ -847,6 +849,232 @@ class StatefulManipulandAgent(BaseStatefulAgent, BaseManipulandAgent):
         return placed
 
     @staticmethod
+    def _is_intrinsic_catalog_book_row_asset(asset: SceneObject) -> bool:
+        """Require catalog evidence for the visible multi-book row artifact."""
+
+        if asset.object_type != ObjectType.MANIPULAND:
+            return False
+        catalog_id = str((asset.metadata or {}).get("catalog_id") or "").casefold()
+        return catalog_id.endswith("book_encyclopedia_set_01")
+
+    @staticmethod
+    def _requests_dense_book_rows(
+        furniture: SceneObject,
+        selection: FurnitureSelection | None,
+    ) -> bool:
+        if selection is None:
+            return False
+        furniture_text = f"{furniture.name} {furniture.description}".casefold()
+        suggestion_text = str(selection.suggested_items or "").casefold()
+        return (
+            any(term in furniture_text for term in ("shelf", "bookcase"))
+            and "dense rows" in suggestion_text
+            and "book" in suggestion_text
+        )
+
+    def _ensure_dense_book_row_asset(self) -> SceneObject | None:
+        """Reuse or acquire the exact authored encyclopedia-set catalog mesh."""
+
+        available = self.asset_manager.list_available_assets()
+        row_asset = next(
+            (
+                asset
+                for asset in available
+                if self._is_intrinsic_catalog_book_row_asset(asset)
+            ),
+            None,
+        )
+        if row_asset is not None:
+            return row_asset
+
+        selection = self.current_furniture_selection
+        result = self.asset_manager.generate_assets(
+            AssetGenerationRequest(
+                object_descriptions=[
+                    "upright encyclopedia book set row with tightly packed visible "
+                    "leather-bound volumes and spines facing forward"
+                ],
+                short_names=["encyclopedia_book_row"],
+                object_type=ObjectType.MANIPULAND,
+                desired_dimensions=[[0.45, 0.12, 0.22]],
+                style_context=str(getattr(selection, "style_notes", "") or ""),
+            )
+        )
+        return next(
+            (
+                asset
+                for asset in result.successful_assets
+                if self._is_intrinsic_catalog_book_row_asset(asset)
+            ),
+            None,
+        )
+
+    @staticmethod
+    def _internal_bookcase_surfaces(
+        furniture: SceneObject,
+    ) -> list[SupportSurface]:
+        """Return authored support planes inside an upright bookcase shell."""
+
+        if furniture.bbox_min is None or furniture.bbox_max is None:
+            return []
+        object_height = float(furniture.bbox_max[2] - furniture.bbox_min[2])
+        if object_height <= 0.0:
+            return []
+        object_elevation = float(furniture.transform.translation()[2])
+        bottom = object_elevation + float(furniture.bbox_min[2])
+        top = object_elevation + float(furniture.bbox_max[2])
+        edge_margin = max(0.10, 0.075 * object_height)
+        return sorted(
+            [
+                surface
+                for surface in furniture.support_surfaces
+                if bottom + edge_margin
+                < float(surface.transform.translation()[2])
+                < top - edge_margin
+            ],
+            key=lambda surface: (
+                float(surface.transform.translation()[2]),
+                str(surface.surface_id),
+            ),
+        )
+
+    def _place_dense_book_rows_deterministically(
+        self,
+        furniture: SceneObject,
+    ) -> int:
+        """Place one proven multi-book artifact on every compatible internal tier."""
+
+        if not self._requests_dense_book_rows(
+            furniture, self.current_furniture_selection
+        ):
+            return 0
+        row_asset = self._ensure_dense_book_row_asset()
+        if row_asset is None or row_asset.bbox_min is None or row_asset.bbox_max is None:
+            return 0
+
+        row_height = float(row_asset.bbox_max[2] - row_asset.bbox_min[2])
+        existing_surface_ids = {
+            obj.placement_info.parent_surface_id
+            for obj in getattr(self.scene, "objects", {}).values()
+            if obj.object_type == ObjectType.MANIPULAND
+            and obj.placement_info is not None
+            and bool((obj.metadata or {}).get("dense_library_book_row"))
+        }
+        placed = 0
+        for surface in self._internal_bookcase_surfaces(furniture):
+            if surface.surface_id in existing_surface_ids:
+                continue
+            clearance = float(
+                surface.bounding_box_max[2] - surface.bounding_box_min[2]
+            )
+            if row_height > clearance + 1e-6:
+                continue
+            minimum = surface.bounding_box_min
+            maximum = surface.bounding_box_max
+            center_x = float((minimum[0] + maximum[0]) / 2.0)
+            center_y = float((minimum[1] + maximum[1]) / 2.0)
+            span_x = float(maximum[0] - minimum[0])
+            candidates = (
+                (center_x, center_y),
+                (center_x - 0.10 * span_x, center_y),
+                (center_x + 0.10 * span_x, center_y),
+            )
+            for position_x, position_y in candidates:
+                raw_result = self.manipuland_tools._place_manipuland_on_surface_impl(
+                    asset_id=str(row_asset.object_id),
+                    surface_id=str(surface.surface_id),
+                    position_x=position_x,
+                    position_z=position_y,
+                    rotation_degrees=0.0,
+                    _action_metadata={
+                        "furniture_id": str(self.current_furniture_id),
+                        "surface_id": str(surface.surface_id),
+                        "placement_method": "deterministic_dense_book_row",
+                    },
+                )
+                try:
+                    result = json.loads(raw_result)
+                except (json.JSONDecodeError, TypeError):
+                    result = {}
+                if not result.get("success"):
+                    continue
+                object_id = result.get("object_id")
+                placed_object = (
+                    self.scene.get_object(UniqueID(object_id)) if object_id else None
+                )
+                if placed_object is not None:
+                    placed_object.metadata["dense_library_book_row"] = True
+                placed += 1
+                break
+        return placed
+
+    @staticmethod
+    def _validate_dense_library_book_rows(scene: RoomScene) -> int:
+        """Require surviving intrinsic book rows on every authored library story."""
+
+        normalized = str(getattr(scene, "text_description", "")).casefold()
+        explicit_dense_library = (
+            "library" in normalized
+            and "large" in normalized
+            and "thousand" in normalized
+            and bool(re.search(r"\bmulti[ -]?level\b", normalized))
+        )
+        if not explicit_dense_library:
+            return 0
+
+        bookcases = [
+            obj
+            for obj in scene.objects.values()
+            if obj.object_type == ObjectType.FURNITURE
+            and any(
+                term in f"{obj.name} {obj.description}".casefold()
+                for term in ("shelf", "bookcase")
+            )
+        ]
+        support_levels: dict[UniqueID, float] = {}
+        levels: set[float] = set()
+        for bookcase in bookcases:
+            try:
+                level = round(float(bookcase.transform.translation()[2]), 3)
+            except (AttributeError, IndexError, TypeError, ValueError):
+                continue
+            levels.add(level)
+            support_levels.update(
+                {surface.surface_id: level for surface in bookcase.support_surfaces}
+            )
+        if len(levels) < 2:
+            return 0
+
+        counts = {level: 0 for level in levels}
+        for obj in scene.objects.values():
+            if (
+                obj.object_type != ObjectType.MANIPULAND
+                or not bool((obj.metadata or {}).get("dense_library_book_row"))
+                or obj.placement_info is None
+            ):
+                continue
+            level = support_levels.get(obj.placement_info.parent_surface_id)
+            if level is not None:
+                counts[level] += 1
+
+        required_per_level = 4
+        deficits = [
+            (level, counts[level])
+            for level in sorted(levels)
+            if counts[level] < required_per_level
+        ]
+        if deficits:
+            details = "; ".join(
+                f"{level:.3f}m placed {placed}, required {required_per_level}"
+                for level, placed in deficits
+            )
+            raise ModelBehaviorError(
+                "Dense library book-row coverage deficits: "
+                f"{details}. The detail stage cannot publish this checkpoint."
+            )
+        return sum(counts.values())
+
+    @staticmethod
     def _furniture_template_key(furniture: SceneObject) -> tuple[str, float] | None:
         """Identify interchangeable instances without an LLM call."""
         if furniture.geometry_path is None:
@@ -1097,6 +1325,17 @@ class StatefulManipulandAgent(BaseStatefulAgent, BaseManipulandAgent):
                         furniture_description=furniture_description,
                     )
 
+                    book_rows_placed = (
+                        self._place_dense_book_rows_deterministically(furniture)
+                    )
+                    if book_rows_placed:
+                        console_logger.info(
+                            "Deterministically populated %d internal bookcase tiers "
+                            "for %s",
+                            book_rows_placed,
+                            furniture_id,
+                        )
+
                     # Run multi-agent workflow.
                     await self._run_furniture_workflow(furniture_id)
 
@@ -1128,6 +1367,12 @@ class StatefulManipulandAgent(BaseStatefulAgent, BaseManipulandAgent):
                     # Continue to next furniture piece.
                     continue
 
+        dense_book_rows = self._validate_dense_library_book_rows(self.scene)
+        if dense_book_rows:
+            console_logger.info(
+                "Dense library book-row completion passed with %d surviving rows",
+                dense_book_rows,
+            )
         console_logger.info("Manipuland placement complete")
 
     async def _analyze_furniture_for_placement(

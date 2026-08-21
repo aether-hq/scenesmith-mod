@@ -498,8 +498,20 @@ class SceneAnalyzer:
             design_context = _load_manipuland_design_context(scene)
             if design_context is not None and design_context.rich_collection:
                 max_furniture = max(max_furniture, min(9, len(candidates)))
+                shelving_candidates = [
+                    candidate
+                    for candidate in candidates
+                    if any(
+                        term
+                        in (
+                            f"{getattr(candidate[2], 'name', '')} "
+                            f"{getattr(candidate[2], 'description', '')}"
+                        ).casefold()
+                        for term in ("shelf", "bookcase")
+                    )
+                ]
                 selected_candidates = _select_surfaces_across_levels(
-                    candidates,
+                    shelving_candidates or candidates,
                     limit=max_furniture,
                 )
             else:

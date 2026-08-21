@@ -2,7 +2,9 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
+import pytest
 
+from agents.exceptions import ModelBehaviorError
 from pydrake.math import RigidTransform, RollPitchYaw
 
 from scenesmith.agent_utils.room import (
@@ -174,6 +176,168 @@ def test_deterministic_fallback_places_semantic_cached_assets(tmp_path: Path):
         "monitor_0",
     }
     assert len({(call["position_x"], call["position_z"]) for call in placements}) == 3
+
+
+def _bookcase_surface(surface_id: str, elevation: float) -> SupportSurface:
+    return SupportSurface(
+        surface_id=UniqueID(surface_id),
+        bounding_box_min=np.array([-0.32, -0.15, 0.0]),
+        bounding_box_max=np.array([0.32, 0.15, 0.35]),
+        transform=RigidTransform(p=[0.0, 0.0, elevation]),
+    )
+
+
+def _dense_bookcase(object_id: str, elevation: float, tmp_path: Path):
+    local_heights = (0.01, 0.30, 0.60, 0.90, 1.20, 1.50, 2.01)
+    return SceneObject(
+        object_id=UniqueID(object_id),
+        object_type=ObjectType.FURNITURE,
+        name="renaissance_bookcase",
+        description="full-height Renaissance library bookcase",
+        transform=RigidTransform(p=[0.0, 0.0, elevation]),
+        geometry_path=tmp_path / "bookcase.gltf",
+        bbox_min=np.array([-0.5, -0.18, 0.0]),
+        bbox_max=np.array([0.5, 0.18, 2.0]),
+        metadata={
+            "asset_source": "hssd",
+            "catalog_id": "hssd__e3631a629a1ac3b71a75dff721192b90d26246e0",
+            "ontology_path": "hssd/wordnet/bookcase.n.01",
+        },
+        support_surfaces=[
+            _bookcase_surface(f"{object_id}_surface_{index}", elevation + height)
+            for index, height in enumerate(local_heights)
+        ],
+    )
+
+
+def test_dense_library_places_intrinsic_catalog_book_rows_on_internal_tiers(
+    tmp_path: Path,
+):
+    furniture = _dense_bookcase("bookcase_0", 4.0, tmp_path)
+    row_asset = SceneObject(
+        object_id=UniqueID("encyclopedia_book_row_0"),
+        object_type=ObjectType.MANIPULAND,
+        name="encyclopedia_book_row",
+        description="upright encyclopedia book set",
+        transform=RigidTransform(),
+        geometry_path=tmp_path / "book_encyclopedia_set_01.gltf",
+        bbox_min=np.array([-0.225, -0.06, 0.0]),
+        bbox_max=np.array([0.225, 0.06, 0.22]),
+        metadata={
+            "asset_source": "polyhaven",
+            "catalog_id": "polyhaven__book_encyclopedia_set_01",
+            "ontology_path": (
+                "polyhaven/Office & Stationery/Books & Documents/Books"
+            ),
+            "catalog_semantics": "Book Encyclopedia Set 01",
+        },
+    )
+    placements = []
+
+    class FakeTools:
+        support_surfaces = {
+            str(surface.surface_id): surface for surface in furniture.support_surfaces
+        }
+
+        def _place_manipuland_on_surface_impl(self, **kwargs):
+            placements.append(kwargs)
+            return '{"success":true,"object_id":"encyclopedia_book_row_1"}'
+
+    agent = object.__new__(StatefulManipulandAgent)
+    agent.current_furniture_id = furniture.object_id
+    agent.current_furniture_selection = SimpleNamespace(
+        suggested_items="dense rows of visible leather-bound books"
+    )
+    agent.manipuland_tools = FakeTools()
+    agent.asset_manager = SimpleNamespace(
+        list_available_assets=lambda: [row_asset],
+        generate_assets=lambda _request: (_ for _ in ()).throw(
+            AssertionError("intrinsic catalog row should be reused")
+        ),
+    )
+    agent.scene = SimpleNamespace(get_object=lambda _object_id: None)
+
+    placed = agent._place_dense_book_rows_deterministically(furniture)
+
+    assert placed == 5
+    assert all(call["asset_id"] == row_asset.object_id for call in placements)
+    assert {call["surface_id"] for call in placements} == {
+        f"bookcase_0_surface_{index}" for index in range(1, 6)
+    }
+
+
+def test_requested_book_row_description_is_not_intrinsic_catalog_evidence(
+    tmp_path: Path,
+):
+    requested_only = SceneObject(
+        object_id=UniqueID("encyclopedia_book_row_0"),
+        object_type=ObjectType.MANIPULAND,
+        name="encyclopedia_book_row",
+        description="upright encyclopedia book set row with visible books",
+        transform=RigidTransform(),
+        geometry_path=tmp_path / "flat_book.gltf",
+        metadata={"catalog_id": "objaverse__generic_flat_book"},
+    )
+
+    assert not StatefulManipulandAgent._is_intrinsic_catalog_book_row_asset(
+        requested_only
+    )
+
+
+def test_dense_library_book_row_gate_requires_each_authored_story(tmp_path: Path):
+    bookcases = [
+        _dense_bookcase(f"bookcase_{int(level)}", level, tmp_path)
+        for level in (0.0, 4.0, 8.0)
+    ]
+    rows = [
+        SimpleNamespace(
+            object_id=UniqueID(f"book_row_{index}"),
+            object_type=ObjectType.MANIPULAND,
+            metadata={"dense_library_book_row": True},
+            placement_info=PlacementInfo(
+                parent_surface_id=bookcases[0].support_surfaces[index + 1].surface_id,
+                position_2d=np.array([0.0, 0.0]),
+                rotation_2d=0.0,
+            ),
+        )
+        for index in range(4)
+    ]
+    scene = SimpleNamespace(
+        text_description="large multi-level library with thousands of books",
+        objects={obj.object_id: obj for obj in [*bookcases, *rows]},
+    )
+
+    with pytest.raises(ModelBehaviorError, match=r"4\.000m.*0.*4"):
+        StatefulManipulandAgent._validate_dense_library_book_rows(scene)
+
+
+def test_dense_library_book_row_gate_accepts_four_rows_per_story(tmp_path: Path):
+    bookcases = [
+        _dense_bookcase(f"bookcase_{int(level)}", level, tmp_path)
+        for level in (0.0, 4.0, 8.0)
+    ]
+    rows = [
+        SimpleNamespace(
+            object_id=UniqueID(f"book_row_{level_index}_{row_index}"),
+            object_type=ObjectType.MANIPULAND,
+            metadata={"dense_library_book_row": True},
+            placement_info=PlacementInfo(
+                parent_surface_id=bookcases[level_index]
+                .support_surfaces[row_index + 1]
+                .surface_id,
+                position_2d=np.array([0.0, 0.0]),
+                rotation_2d=0.0,
+            ),
+        )
+        for level_index in range(3)
+        for row_index in range(4)
+    ]
+    scene = SimpleNamespace(
+        text_description="large multi-level library with thousands of books",
+        objects={obj.object_id: obj for obj in [*bookcases, *rows]},
+    )
+
+    assert StatefulManipulandAgent._validate_dense_library_book_rows(scene) == 12
 
 
 def test_patient_support_zone_rejects_equipment_and_mislabeled_tape(tmp_path: Path):

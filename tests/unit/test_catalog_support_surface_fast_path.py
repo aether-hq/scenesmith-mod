@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import numpy as np
 
 from pydrake.all import RigidTransform
@@ -7,6 +9,7 @@ from scenesmith.agent_utils.room import (
     SceneObject,
     UniqueID,
     _catalog_aabb_support_surfaces,
+    extract_and_propagate_support_surfaces,
 )
 from scenesmith.agent_utils.support_surface_extraction import (
     SupportSurfaceExtractionConfig,
@@ -53,3 +56,48 @@ def test_non_catalog_object_keeps_hsm_path():
     obj = make_object("custom table", "manual", [0.5, 1.0, 0.8])
 
     assert _catalog_aabb_support_surfaces(obj, SupportSurfaceExtractionConfig()) is None
+
+
+def test_intrinsic_hssd_bookcase_keeps_authored_tier_surface_path():
+    obj = make_object("renaissance bookshelf", "hssd", [0.5, 0.18, 2.0])
+    obj.metadata.update(
+        {
+            "catalog_id": "hssd__e3631a629a1ac3b71a75dff721192b90d26246e0",
+            "ontology_path": "hssd/wordnet/bookcase.n.01",
+            "catalog_semantics": "Revolve Lexington Tall Bookcase, Walnut",
+        }
+    )
+
+    assert _catalog_aabb_support_surfaces(obj, SupportSurfaceExtractionConfig()) is None
+
+
+def test_intrinsic_hssd_bookcase_loads_authored_tiers_from_catalog_id():
+    obj = make_object("renaissance bookshelf", "hssd", [0.5, 0.18, 2.0])
+    obj.geometry_path = Path("unused_when_prevalidated_surfaces_exist.gltf")
+    obj.metadata.update(
+        {
+            "catalog_id": "hssd__e3631a629a1ac3b71a75dff721192b90d26246e0",
+            "ontology_path": "hssd/wordnet/bookcase.n.01",
+            "catalog_semantics": "Revolve Lexington Tall Bookcase, Walnut",
+        }
+    )
+
+    class FakeScene:
+        objects = {obj.object_id: obj}
+        next_surface = 0
+
+        def generate_surface_id(self):
+            result = UniqueID(f"S_{self.next_surface}")
+            self.next_surface += 1
+            return result
+
+    surfaces = extract_and_propagate_support_surfaces(
+        FakeScene(), obj, SupportSurfaceExtractionConfig()
+    )
+
+    internal_heights = [
+        float(surface.transform.translation()[2])
+        for surface in surfaces
+        if 0.15 < float(surface.transform.translation()[2]) < 1.85
+    ]
+    assert len(internal_heights) >= 5

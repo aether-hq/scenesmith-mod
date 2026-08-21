@@ -89,6 +89,21 @@ def _support_surface(object_id: str, elevation: float):
     )
 
 
+def _reading_table(object_id: str, elevation: float):
+    return SimpleNamespace(
+        object_id=object_id,
+        object_type=ObjectType.FURNITURE,
+        immutable=False,
+        bbox_min=np.array([-1.0, -0.45, 0.0]),
+        bbox_max=np.array([1.0, 0.45, 0.75]),
+        name="library_reading_table_large",
+        description="large patron reading table",
+        transform=SimpleNamespace(
+            translation=lambda: np.array([0.0, 0.0, elevation])
+        ),
+    )
+
+
 def _deterministic_analyzer(max_furniture: int = 3):
     return SceneAnalyzer(
         vlm_service=Mock(),
@@ -181,6 +196,48 @@ def test_collection_library_details_use_blueprint_style_across_levels(tmp_path):
         "dense rows of visible" in selection.suggested_items
         for selection in selections
     )
+
+
+def test_collection_library_prioritizes_bookcases_over_ground_tables(tmp_path):
+    scene_dir = tmp_path / "scene_000" / "room_room"
+    scene_dir.mkdir(parents=True)
+    (scene_dir.parent / "scene_blueprint.json").write_text(
+        json.dumps(
+            {
+                "source_prompt": "multi-level library with thousands of books",
+                "furniture_groups": [
+                    {"roles": {"bookshelf": 15}, "density": "layered"}
+                ],
+            }
+        )
+    )
+    bookcases = [
+        _support_surface(f"bookcase_{int(level)}_{index}", level)
+        for level in (0.0, 4.0, 8.0)
+        for index in range(4)
+    ]
+    tables = [_reading_table(f"table_{index}", 0.0) for index in range(5)]
+    objects = {obj.object_id: obj for obj in [*bookcases, *tables]}
+    scene = SimpleNamespace(
+        scene_dir=scene_dir,
+        text_description="large multi-level library with thousands of books",
+        objects=objects,
+        room_geometry=SimpleNamespace(floor=None),
+    )
+
+    selections = _deterministic_analyzer().analyze_furniture_for_manipulands(
+        scene, prompt_enum=Mock()
+    )
+
+    selected = [objects[str(selection.furniture_id)] for selection in selections]
+    assert len(selected) == 9
+    assert all("bookcase" in obj.name for obj in selected)
+    selected_levels = [obj.transform.translation()[2] for obj in selected]
+    assert {level: selected_levels.count(level) for level in set(selected_levels)} == {
+        0.0: 3,
+        4.0: 3,
+        8.0: 3,
+    }
 
 
 def test_ordinary_room_keeps_configured_sparse_surface_limit(tmp_path):

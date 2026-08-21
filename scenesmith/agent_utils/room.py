@@ -1699,9 +1699,15 @@ def _catalog_aabb_support_surfaces(
         "objaverse",
         "polyhaven",
     }
+    ontology_path = str(furniture_object.metadata.get("ontology_path") or "")
+    intrinsic_shelving = any(
+        term in ontology_path.casefold()
+        for term in ("bookcase", "bookshelf", "shelving")
+    )
     if (
         not config.use_catalog_aabb_fast_path
         or furniture_object.metadata.get("asset_source") not in catalog_sources
+        or intrinsic_shelving
         or furniture_object.bbox_min is None
         or furniture_object.bbox_max is None
     ):
@@ -1783,22 +1789,29 @@ def extract_and_propagate_support_surfaces(
         )
 
     surfaces = _catalog_aabb_support_surfaces(furniture_object, config)
+    hssd_mesh_id = ""
     if surfaces is not None:
         source = "canonical catalog AABB"
+    else:
+        hssd_mesh_id = str(furniture_object.metadata.get("hssd_mesh_id") or "")
+        if not hssd_mesh_id:
+            catalog_id = str(furniture_object.metadata.get("catalog_id") or "")
+            if catalog_id.startswith("hssd__"):
+                hssd_mesh_id = catalog_id.removeprefix("hssd__")
+
     # Check if HSSD asset with pre-validated surfaces.
     # Determine surface loading strategy and source.
-    elif (
+    if surfaces is None and (
         furniture_object.metadata.get("asset_source") == "hssd"
-        and "hssd_mesh_id" in furniture_object.metadata
+        and hssd_mesh_id
         and not config.recompute_hssd_surfaces
     ):
         from scenesmith.agent_utils.hssd_retrieval.support_surface_loader import (
             load_hssd_support_surfaces,
         )
 
-        mesh_id = furniture_object.metadata["hssd_mesh_id"]
         surfaces = load_hssd_support_surfaces(
-            mesh_id=mesh_id, config=config, scene=scene
+            mesh_id=hssd_mesh_id, config=config, scene=scene
         )
         source = "HSSD"
 
@@ -1811,7 +1824,7 @@ def extract_and_propagate_support_surfaces(
                 mesh_path=furniture_object.geometry_path, config=config
             )
             source = "HSM (HSSD fallback)"
-    else:
+    elif surfaces is None:
         # Extract all surfaces using HSM algorithm.
         # For articulated objects with per-link meshes, use per-link extraction
         # for accurate link association.
