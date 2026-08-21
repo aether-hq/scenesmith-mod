@@ -3183,6 +3183,19 @@ class HouseScene:
             )
         return visuals
 
+    def _architectural_blender_visuals(
+        self, output_dir: Path
+    ) -> list[dict[str, object]]:
+        """Return deterministic style-specific, presentation-only structure."""
+
+        from scenesmith.agent_utils.renaissance_dressing import (
+            write_renaissance_dressing_visuals,
+        )
+
+        return write_renaissance_dressing_visuals(
+            self.layout, output_dir / "architectural_dressing"
+        )
+
     def _export_blend(self, output_dir: Path, cfg: dict | DictConfig) -> None:
         """Export Blender file for all rooms to combined directory.
 
@@ -3219,7 +3232,10 @@ class HouseScene:
                 server_startup_delay=rendering_cfg["server_startup_delay"],
                 port_cleanup_delay=rendering_cfg["port_cleanup_delay"],
                 scene_dir=self.house_dir,
-                additional_visuals=self._platform_blender_visuals(),
+                additional_visuals=[
+                    *self._platform_blender_visuals(),
+                    *self._architectural_blender_visuals(output_dir),
+                ],
             )
             console_logger.info(f"Saved combined blend file: {blend_output_path}")
         except Exception as e:
