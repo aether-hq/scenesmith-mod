@@ -55,9 +55,12 @@ from scenesmith.agent_utils.house import (
 from scenesmith.agent_utils.placement_noise import PlacementNoiseMode
 from scenesmith.agent_utils.rendering import save_directive_as_blend
 from scenesmith.agent_utils.requirement_blueprint_compiler import (
+    SpatialCompilationError,
     blueprint_with_obligation_brief,
     compile_requirement_blueprint,
     persist_spatial_compilation,
+    persist_topology_manifest,
+    validate_constructed_topology,
 )
 from scenesmith.agent_utils.room import AgentType, ObjectType, SceneObject, UniqueID
 from scenesmith.agent_utils.scene_blueprint import (
@@ -90,6 +93,7 @@ from scenesmith.agent_utils.semantic_ledger import (
     load_or_initialize_semantic_ledger,
     persist_semantic_ledger,
     persist_semantic_ledger_summary,
+    transition_requirement,
 )
 from scenesmith.agent_utils.semantic_strategies import (
     SemanticCapabilityProfile,
@@ -97,8 +101,10 @@ from scenesmith.agent_utils.semantic_strategies import (
     assert_capability_preflight_passed,
     capability_preflight,
     initialize_strategy_journal,
+    load_strategy_journal,
     persist_capability_manifest,
     persist_strategy_journal,
+    record_strategy_attempt,
 )
 from scenesmith.agent_utils.workflow_tools import WorkflowTools
 from scenesmith.floor_plan_agents.base_floor_plan_agent import BaseFloorPlanAgent
@@ -1018,6 +1024,107 @@ class StatefulFloorPlanAgent(BaseStatefulAgent, BaseFloorPlanAgent):
                 "Floor-plan stage did not produce a structurally valid checkpoint; "
                 "the incomplete room was not exported. Resume the build to retry "
                 "the layout stage."
+            )
+        if capability_manifest is not None:
+            topology_manifest_path = (
+                self.logger.output_dir / "semantic_topology_manifest.json"
+            )
+            strategy_journal_path = (
+                self.logger.output_dir / "semantic_strategy_journal.json"
+            )
+            strategy_journal = load_strategy_journal(strategy_journal_path)
+            try:
+                topology_manifest = validate_constructed_topology(
+                    spatial_compilation,
+                    self.requirement_graph,
+                    self.layout,
+                )
+            except SpatialCompilationError as exc:
+                diagnostic = str(exc)
+                failed_plans = [
+                    plan
+                    for plan in capability_manifest.plans
+                    if plan.requirement_id in diagnostic
+                ]
+                for plan in failed_plans:
+                    if (
+                        plan.selected_strategy is not None
+                        and plan.selected_provider is not None
+                    ):
+                        strategy_journal = record_strategy_attempt(
+                            strategy_journal,
+                            capability_manifest,
+                            attempt_key=f"topology-failed:{plan.requirement_id}",
+                            requirement_id=plan.requirement_id,
+                            strategy=plan.selected_strategy,
+                            provider_id=plan.selected_provider,
+                            stage="topology",
+                            outcome="failed",
+                            diagnostic=diagnostic,
+                        )
+                    self.semantic_ledger = transition_requirement(
+                        self.semantic_ledger,
+                        plan.requirement_id,
+                        "failed",
+                        event_key=f"topology:failed:{plan.requirement_id}",
+                        actor="spatial_topology_gate",
+                        stage="topology",
+                        evidence_refs=(str(topology_manifest_path),),
+                        failure_reason=diagnostic,
+                    )
+                persist_strategy_journal(strategy_journal, strategy_journal_path)
+                persist_semantic_ledger(
+                    self.semantic_ledger,
+                    self.logger.output_dir / "semantic_obligation_ledger.json",
+                )
+                persist_semantic_ledger_summary(
+                    self.semantic_ledger,
+                    self.logger.output_dir / "semantic_obligation_summary.json",
+                )
+                raise
+            persist_topology_manifest(topology_manifest, topology_manifest_path)
+            for evidence in topology_manifest.evidence:
+                plan = next(
+                    item
+                    for item in capability_manifest.plans
+                    if item.requirement_id == evidence.requirement_id
+                )
+                evidence_refs = tuple(
+                    f"topology:{artifact_id}"
+                    for artifact_id in evidence.actual_artifact_ids
+                ) or (str(topology_manifest_path),)
+                if (
+                    plan.selected_strategy is not None
+                    and plan.selected_provider is not None
+                ):
+                    strategy_journal = record_strategy_attempt(
+                        strategy_journal,
+                        capability_manifest,
+                        attempt_key=f"topology:{evidence.requirement_id}",
+                        requirement_id=evidence.requirement_id,
+                        strategy=plan.selected_strategy,
+                        provider_id=plan.selected_provider,
+                        stage="topology",
+                        outcome="succeeded",
+                        evidence_refs=evidence_refs,
+                    )
+                self.semantic_ledger = transition_requirement(
+                    self.semantic_ledger,
+                    evidence.requirement_id,
+                    "constructed",
+                    event_key=f"topology:constructed:{evidence.requirement_id}",
+                    actor="spatial_topology_gate",
+                    stage="topology",
+                    evidence_refs=evidence_refs,
+                )
+            persist_strategy_journal(strategy_journal, strategy_journal_path)
+            persist_semantic_ledger(
+                self.semantic_ledger,
+                self.logger.output_dir / "semantic_obligation_ledger.json",
+            )
+            persist_semantic_ledger_summary(
+                self.semantic_ledger,
+                self.logger.output_dir / "semantic_obligation_summary.json",
             )
 
         # Final critique.

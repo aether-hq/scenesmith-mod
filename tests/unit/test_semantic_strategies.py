@@ -1,6 +1,7 @@
 """Tests for generic semantic fulfillment capability preflight."""
 
 from datetime import UTC, datetime
+from types import SimpleNamespace
 
 import pytest
 
@@ -25,15 +26,18 @@ from scenesmith.agent_utils.requirement_blueprint_compiler import (
     blueprint_with_obligation_brief,
     load_spatial_compilation,
     persist_spatial_compilation,
+    validate_constructed_topology,
     validate_spatial_compilation,
 )
 from scenesmith.agent_utils.scene_blueprint import (
     BlueprintConstraint,
     FurnitureGroupBlueprint,
     LevelBlueprint,
+    OpeningBlueprint,
     SceneBlueprint,
     SpaceBlueprint,
 )
+from scenesmith.agent_utils.house import OpeningType
 from scenesmith.agent_utils.semantic_ledger import initialize_semantic_ledger
 from scenesmith.agent_utils.semantic_publication import (
     RequirementVerificationClaim,
@@ -448,6 +452,102 @@ def test_spatial_compilation_persists_and_obligation_brief_reaches_room_prompt(
     assert load_spatial_compilation(path) == compilation
     assert graph.requirements[0].requirement_id in blueprint.spaces[0].prompt
     assert '"planned_instances":10' in blueprint.spaces[0].prompt
+
+
+def _opening_compilation(graph):
+    base = _spatial_compilation(graph)
+    openings = tuple(
+        OpeningBlueprint(
+            opening_id=f"opening-{index}",
+            kind="open_connection",
+            host_space_id=base.blueprint.spaces[0].space_id,
+            width_m=2.0,
+            height_m=3.0,
+        )
+        for index in range(10)
+    )
+    blueprint = base.blueprint.model_copy(
+        update={
+            "openings": openings,
+            "locked_ids": tuple(item.opening_id for item in openings),
+        }
+    )
+    binding = base.bindings[0].model_copy(
+        update={
+            "owner_stage": "topology",
+            "artifact_ids": tuple(item.opening_id for item in openings),
+            "role_key": None,
+        }
+    )
+    return base.model_copy(update={"blueprint": blueprint, "bindings": (binding,)})
+
+
+def test_topology_gate_rejects_nine_of_ten_constructed_openings():
+    graph = _graph(kind="opening")
+    compilation = _opening_compilation(graph)
+
+    def layout(opening_count):
+        openings = [
+            SimpleNamespace(
+                opening_id=f"actual-opening-{index}",
+                opening_type=OpeningType.OPEN,
+                width=2.0,
+                height=3.0,
+            )
+            for index in range(opening_count)
+        ]
+        return SimpleNamespace(
+            levels=[],
+            room_specs=[SimpleNamespace(room_id="space-primary")],
+            connectors=[],
+            room_geometries={"space-primary": SimpleNamespace(openings=openings)},
+        )
+
+    with pytest.raises(SpatialCompilationError, match="missing constructed"):
+        validate_constructed_topology(compilation, graph, layout(9))
+    manifest = validate_constructed_topology(compilation, graph, layout(10))
+    assert manifest.passed
+    assert manifest.evidence[0].observed_count == 10
+
+
+def test_topology_gate_rejects_ordinary_opening_for_llm_authored_massive_scale():
+    graph = _graph(
+        kind="opening",
+        scale=RequirementScale(
+            qualitative_label="massive",
+            minimum_dimensions_m=(6.0, 0.2, 5.0),
+            rationale="The LLM judged the opening must admit the dominant vehicle.",
+        ),
+    )
+    compilation = _opening_compilation(graph)
+
+    def layout(width, height):
+        openings = [
+            SimpleNamespace(
+                opening_id=f"actual-opening-{index}",
+                opening_type=OpeningType.OPEN,
+                width=width,
+                height=height,
+            )
+            for index in range(10)
+        ]
+        return SimpleNamespace(
+            levels=[],
+            room_specs=[SimpleNamespace(room_id="space-primary")],
+            connectors=[],
+            room_geometries={"space-primary": SimpleNamespace(openings=openings)},
+        )
+
+    with pytest.raises(
+        SpatialCompilationError,
+        match=r"missing constructed open_connection opening >= 6m × 5m",
+    ):
+        validate_constructed_topology(compilation, graph, layout(1.0, 2.1))
+    assert validate_constructed_topology(
+        compilation,
+        graph,
+        layout(6.0, 5.0),
+    ).passed
 
 
 def _verification(graph, artifact_ids, *, observed_count=None, status="satisfied"):

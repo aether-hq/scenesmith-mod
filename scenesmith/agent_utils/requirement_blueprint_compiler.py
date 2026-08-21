@@ -57,6 +57,21 @@ class SpatialCompilationError(ValueError):
     """The spatial compilation omitted or weakened an immutable obligation."""
 
 
+class TopologyRequirementEvidence(CompilerModel):
+    requirement_id: str
+    actual_artifact_ids: tuple[str, ...]
+    observed_count: int
+    diagnostic: str
+
+
+class TopologyStageManifest(CompilerModel):
+    schema_version: Literal[1] = 1
+    graph_id: str
+    graph_hash: str
+    evidence: tuple[TopologyRequirementEvidence, ...]
+    passed: Literal[True] = True
+
+
 class _Runner(Protocol):
     @staticmethod
     async def run(*args: Any, **kwargs: Any) -> Any: ...
@@ -394,6 +409,206 @@ def blueprint_with_obligation_brief(
     )
 
 
+def validate_constructed_topology(
+    compilation: SpatialRequirementCompilation,
+    graph: SceneRequirementGraph,
+    house_layout: Any,
+) -> TopologyStageManifest:
+    """Verify topology-owned bindings against the constructed HouseLayout."""
+
+    blueprint = compilation.blueprint
+    bindings = {item.requirement_id: item for item in compilation.bindings}
+    requirements = {item.requirement_id: item for item in graph.requirements}
+    blueprint_artifact_classes = _artifact_collections(blueprint)
+    actual_levels = {item.level_id: item for item in house_layout.levels}
+    actual_spaces = {item.room_id: item for item in house_layout.room_specs}
+    actual_connectors = {item.connector_id: item for item in house_layout.connectors}
+    actual_openings: dict[str, list[tuple[str, Any]]] = {}
+    for room_id, room_geometry in house_layout.room_geometries.items():
+        for opening in room_geometry.openings:
+            actual_openings.setdefault(opening.opening_id, []).append(
+                (room_id, opening)
+            )
+    used_openings: set[str] = set()
+    used_connectors: set[str] = set()
+    evidence: list[TopologyRequirementEvidence] = []
+
+    for requirement_id, binding in bindings.items():
+        requirement = requirements[requirement_id]
+        if requirement.polarity == "forbidden":
+            continue
+        bound_classes = {
+            blueprint_artifact_classes[artifact_id]
+            for artifact_id in binding.artifact_ids
+        }
+        actual_ids: tuple[str, ...] = ()
+        if requirement.kind == "scene_type":
+            if not actual_spaces:
+                raise SpatialCompilationError(
+                    f"{requirement_id} {requirement.subject!r}: constructed topology "
+                    "contains no primary space"
+                )
+            actual_ids = tuple(sorted(actual_spaces))
+        elif requirement.kind == "level":
+            expected = _planned_instances(requirement)
+            observed = len(actual_levels)
+            count_ok = (
+                observed == expected
+                if requirement.quantity.mode == "exact"
+                else observed >= expected
+            )
+            if not count_ok:
+                raise SpatialCompilationError(
+                    f"{requirement_id} {requirement.subject!r}: expected "
+                    f"{requirement.quantity.mode} {expected} constructed levels, "
+                    f"observed {observed}"
+                )
+            actual_ids = tuple(sorted(actual_levels))
+        elif requirement.kind == "repeated_zone" and "space" in bound_classes:
+            missing = set(binding.artifact_ids) - set(actual_spaces)
+            if missing:
+                raise SpatialCompilationError(
+                    f"{requirement_id} {requirement.subject!r}: bound structural "
+                    f"zones were not constructed: {sorted(missing)}"
+                )
+            actual_ids = binding.artifact_ids
+        elif requirement.kind == "connector":
+            expected_connectors = [
+                connector
+                for connector in blueprint.connectors
+                if connector.connector_id in binding.artifact_ids
+            ]
+            matched: list[str] = []
+            for expected_connector in expected_connectors:
+                expected_endpoints = {
+                    (
+                        expected_connector.start.space_id,
+                        expected_connector.start.level_id,
+                    ),
+                    (
+                        expected_connector.end.space_id,
+                        expected_connector.end.level_id,
+                    ),
+                }
+                match = next(
+                    (
+                        connector
+                        for connector in actual_connectors.values()
+                        if connector.connector_id not in used_connectors
+                        and getattr(
+                            connector.connector_type,
+                            "value",
+                            connector.connector_type,
+                        )
+                        == expected_connector.kind
+                        and connector.width + 1e-9 >= expected_connector.width_m
+                        and {
+                            (connector.start.space_id, connector.start.level_id),
+                            (connector.end.space_id, connector.end.level_id),
+                        }
+                        == expected_endpoints
+                    ),
+                    None,
+                )
+                if match is None:
+                    raise SpatialCompilationError(
+                        f"{requirement_id} {requirement.subject!r}: missing "
+                        f"constructed {expected_connector.kind} connector with "
+                        f"width >= {expected_connector.width_m:g}m"
+                    )
+                used_connectors.add(match.connector_id)
+                matched.append(match.connector_id)
+            actual_ids = tuple(matched)
+        elif requirement.kind == "opening":
+            expected_openings = sorted(
+                (
+                    opening
+                    for opening in blueprint.openings
+                    if opening.opening_id in binding.artifact_ids
+                ),
+                key=lambda item: item.width_m * item.height_m,
+                reverse=True,
+            )
+            matched = []
+            kind_aliases = {
+                "door": {"door"},
+                "window": {"window"},
+                "open_connection": {"open", "open_connection"},
+            }
+            for expected_opening in expected_openings:
+                minimum_width = expected_opening.width_m
+                minimum_height = expected_opening.height_m
+                if (
+                    requirement.scale is not None
+                    and requirement.scale.minimum_dimensions_m
+                ):
+                    minimum_width = max(
+                        minimum_width,
+                        requirement.scale.minimum_dimensions_m[0],
+                    )
+                    minimum_height = max(
+                        minimum_height,
+                        requirement.scale.minimum_dimensions_m[2],
+                    )
+                match = next(
+                    (
+                        (opening_id, opening_records)
+                        for opening_id, opening_records in sorted(
+                            actual_openings.items(),
+                            key=lambda item: max(
+                                record[1].width * record[1].height for record in item[1]
+                            ),
+                            reverse=True,
+                        )
+                        if opening_id not in used_openings
+                        and any(
+                            getattr(
+                                opening.opening_type,
+                                "value",
+                                opening.opening_type,
+                            )
+                            in kind_aliases[expected_opening.kind]
+                            and opening.width + 1e-9 >= minimum_width
+                            and opening.height + 1e-9 >= minimum_height
+                            for _, opening in opening_records
+                        )
+                        and expected_opening.host_space_id
+                        in {room_id for room_id, _ in opening_records}
+                        and (
+                            expected_opening.connects_to_space_id is None
+                            or expected_opening.connects_to_space_id
+                            in {room_id for room_id, _ in opening_records}
+                        )
+                    ),
+                    None,
+                )
+                if match is None:
+                    raise SpatialCompilationError(
+                        f"{requirement_id} {requirement.subject!r}: missing "
+                        f"constructed {expected_opening.kind} opening >= "
+                        f"{minimum_width:g}m × {minimum_height:g}m"
+                    )
+                opening_id, _ = match
+                used_openings.add(opening_id)
+                matched.append(opening_id)
+            actual_ids = tuple(matched)
+        else:
+            continue
+        evidence.append(
+            TopologyRequirementEvidence(
+                requirement_id=requirement_id,
+                actual_artifact_ids=actual_ids,
+                observed_count=len(actual_ids),
+                diagnostic=(f"Constructed topology preserved {requirement.subject!r}."),
+            )
+        )
+    return TopologyStageManifest(
+        graph_id=graph.graph_id,
+        graph_hash=graph.content_hash,
+        evidence=tuple(evidence),
+    )
+
+
 def persist_spatial_compilation(
     compilation: SpatialRequirementCompilation, output_path: Path
 ) -> None:
@@ -419,6 +634,27 @@ def load_spatial_compilation(path: Path) -> SpatialRequirementCompilation:
     return SpatialRequirementCompilation.model_validate_json(
         path.read_text(encoding="utf-8")
     )
+
+
+def persist_topology_manifest(
+    manifest: TopologyStageManifest, output_path: Path
+) -> None:
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{output_path.name}.", dir=output_path.parent
+    )
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            handle.write(manifest.model_dump_json(indent=2) + "\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary_name, output_path)
+    except Exception:
+        try:
+            os.unlink(temporary_name)
+        except FileNotFoundError:
+            pass
+        raise
 
 
 async def compile_requirement_blueprint(

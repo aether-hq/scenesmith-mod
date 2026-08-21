@@ -640,6 +640,12 @@ def _copy_checkpoint_for_stage(
             spatial_compilation,
             target_scene_dir / "semantic_spatial_compilation.json",
         )
+    topology_manifest = source_scene_dir / "semantic_topology_manifest.json"
+    if topology_manifest.exists():
+        shutil.copy(
+            topology_manifest,
+            target_scene_dir / "semantic_topology_manifest.json",
+        )
 
     checkpoint_name = STAGE_CHECKPOINTS[start_stage]
     asset_dirs = STAGE_ASSET_DIRS[start_stage]
@@ -1335,15 +1341,23 @@ def _generate_room(
                     outcome="succeeded",
                     evidence_refs=evidence_refs or (str(verification_path),),
                 )
-            semantic_ledger = transition_requirement(
-                semantic_ledger,
-                requirement.requirement_id,
-                "constructed",
-                event_key=f"semantic-final:constructed:{requirement.requirement_id}",
-                actor="semantic_publication_gate",
-                stage="construction",
-                evidence_refs=evidence_refs or (str(verification_path),),
+            current_entry = next(
+                item
+                for item in semantic_ledger.entries
+                if item.requirement_id == requirement.requirement_id
             )
+            if current_entry.current_status == "strategy_assigned":
+                semantic_ledger = transition_requirement(
+                    semantic_ledger,
+                    requirement.requirement_id,
+                    "constructed",
+                    event_key=(
+                        f"semantic-final:constructed:{requirement.requirement_id}"
+                    ),
+                    actor="semantic_publication_gate",
+                    stage="construction",
+                    evidence_refs=evidence_refs or (str(verification_path),),
+                )
             semantic_ledger = transition_requirement(
                 semantic_ledger,
                 requirement.requirement_id,
@@ -2327,7 +2341,6 @@ class IndoorSceneGenerationExperiment(BaseExperiment):
         # Create scene directory.
         scene_dir = output_dir / f"scene_{scene_id:03d}"
         scene_dir.mkdir(parents=True, exist_ok=True)
-
         # Always create log file.
         log_path = scene_dir / "scene.log"
 
