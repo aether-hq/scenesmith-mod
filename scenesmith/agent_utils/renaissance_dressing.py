@@ -214,14 +214,14 @@ def _append_cornices(
                 )
 
 
-def _append_gallery_finials(
+def _append_gallery_panels(
     *,
     layout: HouseLayout,
     room_id: str,
     gold: list[trimesh.Trimesh],
     burgundy: list[trimesh.Trimesh],
 ) -> int:
-    finial_count = 0
+    panel_count = 0
     for platform in layout.platforms:
         if platform.space_id != room_id:
             continue
@@ -233,21 +233,53 @@ def _append_gallery_finials(
                 edge_length = float(np.linalg.norm(end_xy - start_xy))
                 intervals = max(1, math.ceil(edge_length / 0.75))
                 for index in range(intervals):
-                    fraction = index / intervals
-                    point = start_xy + (end_xy - start_xy) * fraction
-                    finial = trimesh.creation.icosphere(subdivisions=1, radius=0.11)
-                    finial.apply_translation(
-                        (point[0], point[1], platform.elevation + 1.08)
+                    interval_start = start_xy + (end_xy - start_xy) * (
+                        index / intervals
                     )
-                    gold.append(finial)
-                    medallion = trimesh.creation.icosphere(subdivisions=1, radius=0.075)
-                    midpoint = point + (end_xy - start_xy) / (2.0 * intervals)
-                    medallion.apply_translation(
-                        (midpoint[0], midpoint[1], platform.elevation + 0.62)
+                    interval_end = start_xy + (end_xy - start_xy) * (
+                        (index + 1) / intervals
                     )
-                    burgundy.append(medallion)
-                    finial_count += 1
-    return finial_count
+                    edge_direction = (interval_end - interval_start) / np.linalg.norm(
+                        interval_end - interval_start
+                    )
+                    panel_start = interval_start + edge_direction * 0.07
+                    panel_end = interval_end - edge_direction * 0.07
+                    lower_z = platform.elevation + 0.34
+                    upper_z = platform.elevation + 0.84
+
+                    for z in (lower_z, upper_z):
+                        gold.append(
+                            _beam(
+                                np.array([panel_start[0], panel_start[1], z]),
+                                np.array([panel_end[0], panel_end[1], z]),
+                                0.035,
+                            )
+                        )
+                    for point in (panel_start, panel_end):
+                        gold.append(
+                            _beam(
+                                np.array([point[0], point[1], lower_z]),
+                                np.array([point[0], point[1], upper_z]),
+                                0.035,
+                            )
+                        )
+
+                    midpoint = (interval_start + interval_end) / 2.0
+                    burgundy.append(
+                        _beam(
+                            np.array([midpoint[0], midpoint[1], lower_z + 0.03]),
+                            np.array([midpoint[0], midpoint[1], upper_z - 0.03]),
+                            0.05,
+                        )
+                    )
+                    for z in (platform.elevation + 0.28, platform.elevation + 0.91):
+                        collar = trimesh.creation.box(extents=(0.11, 0.11, 0.05))
+                        collar.apply_translation(
+                            (interval_start[0], interval_start[1], z)
+                        )
+                        gold.append(collar)
+                    panel_count += 1
+    return panel_count
 
 
 def _colored_mesh(
@@ -297,7 +329,7 @@ def write_renaissance_dressing_visuals(
             gold=gold,
             burgundy=burgundy,
         )
-        finial_count = _append_gallery_finials(
+        panel_count = _append_gallery_panels(
             layout=layout,
             room_id=room.room_id,
             gold=gold,
@@ -331,7 +363,7 @@ def write_renaissance_dressing_visuals(
                 "role": "room_structure",
                 "source_id": f"renaissance_dressing_{room.room_id}",
                 "arched_window_surrounds": arch_count,
-                "gallery_finials": finial_count,
+                "gallery_panels": panel_count,
             }
         )
     return visuals

@@ -100,13 +100,18 @@ def test_renaissance_library_emits_colorized_architectural_dressing() -> None:
         assert visuals[0]["role"] == "room_structure"
         assert visuals[0]["source_id"] == "renaissance_dressing_library"
         assert visuals[0]["arched_window_surrounds"] == 1
-        assert visuals[0]["gallery_finials"] >= 20
+        assert visuals[0]["gallery_panels"] >= 20
+        assert "gallery_finials" not in visuals[0]
         artifact = Path(str(visuals[0]["path"]))
         assert artifact.is_file()
         scene = trimesh.load(artifact, force="scene")
         names = set(scene.geometry)
         assert any("antique_gold" in name for name in names)
         assert any("burgundy" in name for name in names)
+        assert all(
+            geometry.metadata.get("shape") != "radius"
+            for geometry in scene.geometry.values()
+        )
         bounds = scene.bounds
         assert bounds[0][0] <= -5.9 and bounds[1][0] >= 5.9
         assert bounds[1][1] >= 11.6
