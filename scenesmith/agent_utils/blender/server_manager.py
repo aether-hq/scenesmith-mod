@@ -349,27 +349,57 @@ class BlenderServer:
 
         console_logger.debug(f"Waiting for server to be ready (timeout: {timeout}s)")
 
-        start_time = time.time()
-        max_retries = int(timeout)  # Check once per second.
+        started_at = time.monotonic()
+        deadline = started_at + timeout
+        next_progress_at = started_at + 10.0
+        last_error: Exception | None = None
 
-        for i in range(max_retries):
-            try:
-                response = requests.get(f"{self.get_url()}/", timeout=5)
-                if response.status_code == 200:
-                    elapsed = time.time() - start_time
-                    console_logger.debug(f"Server is ready after {elapsed}s")
-                    return
-            except requests.RequestException as e:
-                elapsed = time.time() - start_time
-                if elapsed >= timeout:
+        try:
+            while True:
+                now = time.monotonic()
+                remaining = deadline - now
+                if remaining <= 0:
+                    break
+
+                if self._server_process and self._server_process.poll() is not None:
                     raise RuntimeError(
-                        f"Server failed to become ready within {timeout}s: {e}"
+                        "BlenderServer exited before becoming ready "
+                        f"({self.get_process_status()})"
                     )
-                if i < max_retries - 1:
-                    time.sleep(1)
-                    continue
 
-        raise RuntimeError(f"Server did not become ready within {timeout}s")
+                try:
+                    response = requests.get(
+                        f"{self.get_url()}/", timeout=min(5.0, remaining)
+                    )
+                    if response.status_code == 200:
+                        elapsed = time.monotonic() - started_at
+                        console_logger.debug(f"Server is ready after {elapsed}s")
+                        return
+                    last_error = RuntimeError(f"HTTP {response.status_code}")
+                except requests.RequestException as error:
+                    last_error = error
+
+                now = time.monotonic()
+                if now >= deadline:
+                    break
+                if now >= next_progress_at:
+                    console_logger.info(
+                        "Still waiting for BlenderServer readiness after %.1fs " "(%s)",
+                        now - started_at,
+                        self.get_process_status(),
+                    )
+                    next_progress_at = now + 10.0
+                time.sleep(min(1.0, deadline - now))
+
+            detail = f": {last_error}" if last_error else ""
+            raise RuntimeError(
+                f"Server failed to become ready within {timeout}s{detail}"
+            )
+        except Exception:
+            # Most callers start and wait inside their constructor, before the
+            # owning agent exists and can run its normal cleanup path.
+            self.stop()
+            raise
 
     def render_multiview_for_analysis(
         self,

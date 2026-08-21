@@ -8,6 +8,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, Mock, patch
 
 import flask
+import requests
 
 from mathutils import Matrix, Vector
 
@@ -628,6 +629,41 @@ class TestBlenderServer(unittest.TestCase):
 
         status = server.get_process_status()
         self.assertEqual(status, "Exited with code 0")
+
+    def test_readiness_timeout_uses_monotonic_deadline_and_cleans_child(self):
+        """A wall-clock rollback must not extend startup or orphan the child."""
+        server = BlenderServer(port=8026, port_cleanup_delay=0.0)
+        server._actual_port = 8026
+        server._running = True
+        server._server_process = Mock()
+        server._server_process.pid = 42
+        server._server_process.poll.return_value = None
+        server._server_process.wait.return_value = 0
+        ticks = iter((10.0, 10.0, 12.1))
+
+        with (
+            patch(
+                "scenesmith.agent_utils.blender.server_manager.requests.get",
+                side_effect=requests.ConnectionError("connection refused"),
+            ) as get,
+            patch(
+                "scenesmith.agent_utils.blender.server_manager.time.monotonic",
+                side_effect=lambda: next(ticks, 12.1),
+            ),
+            patch(
+                "scenesmith.agent_utils.blender.server_manager.time.time",
+                side_effect=(100.0, 40.0, 40.0),
+            ),
+            patch("scenesmith.agent_utils.blender.server_manager.time.sleep"),
+        ):
+            with self.assertRaisesRegex(
+                RuntimeError, "failed to become ready within 2.0s.*connection refused"
+            ):
+                server.wait_until_ready(timeout=2.0)
+
+        get.assert_called_once()
+        self.assertFalse(server.is_running())
+        self.assertIsNone(server._server_process)
 
 
 class TestPortUtilities(unittest.TestCase):
