@@ -7,6 +7,9 @@ import xml.etree.ElementTree as ET
 
 from pathlib import Path
 
+import numpy as np
+
+from pydrake.math import RigidTransform
 from pygltflib import GLTF2
 
 from scenesmith.agent_utils.house import (
@@ -36,6 +39,7 @@ from scenesmith.agent_utils.semantic_environments import (
     FormationType,
     SemanticEnvironmentSpec,
 )
+from scenesmith.agent_utils.room import ObjectType, RoomScene, SceneObject, UniqueID
 from scenesmith.agent_utils.structural_compiler import TriangleMesh, compile_platform
 from scenesmith.agent_utils.structural_geometry import (
     SCHEMA_VERSION,
@@ -1047,8 +1051,7 @@ class TestV2StructuralLayout(unittest.TestCase):
             room_materials={
                 "library": RoomMaterials(
                     floor_material=Material.from_path(
-                        Path(__file__).parents[2]
-                        / "data/materials/WoodFloor014"
+                        Path(__file__).parents[2] / "data/materials/WoodFloor014"
                     )
                 )
             },
@@ -1080,6 +1083,78 @@ class TestV2StructuralLayout(unittest.TestCase):
                 ],
             )
 
+    def test_house_blender_populates_validated_renaissance_bookcase_run(self) -> None:
+        prompt = "large multi-level Renaissance library with thousands of books"
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            scene_dir = Path(temporary_directory)
+            layout = HouseLayout(
+                room_specs=[RoomSpec("library", length=13, width=13)],
+                placed_rooms=[PlacedRoom("library", (0, 0), 13, 13)],
+                house_prompt=prompt,
+                house_dir=scene_dir,
+            )
+            room = RoomScene(
+                room_geometry=object(),
+                scene_dir=scene_dir / "room_library",
+                room_id="library",
+                text_description=prompt,
+            )
+            for index, x in enumerate((-1.05, 0.0, 1.05)):
+                owner_id = UniqueID(f"bookcase_{index}")
+                room.add_object(
+                    SceneObject(
+                        object_id=owner_id,
+                        object_type=ObjectType.FURNITURE,
+                        name="renaissance_bookcase",
+                        description="full-height Renaissance library bookcase",
+                        transform=RigidTransform(p=[x, 5.2, 0.0]),
+                        bbox_min=np.array([-0.48, -0.18, 0.0]),
+                        bbox_max=np.array([0.48, 0.18, 2.0]),
+                        metadata={"dense_library_grouped_run": 0.0},
+                    )
+                )
+                for row_index in range(3):
+                    room.add_object(
+                        SceneObject(
+                            object_id=UniqueID(f"book_row_{index}_{row_index}"),
+                            object_type=ObjectType.MANIPULAND,
+                            name="encyclopedia_book_row",
+                            description="visible encyclopedia set",
+                            transform=RigidTransform(),
+                            metadata={
+                                "dense_library_book_row": True,
+                                "dense_library_owner_bound": str(owner_id),
+                            },
+                        )
+                    )
+            room.add_object(
+                SceneObject(
+                    object_id=UniqueID("isolated_bookcase"),
+                    object_type=ObjectType.FURNITURE,
+                    name="renaissance_bookcase",
+                    description="isolated full-height bookcase",
+                    transform=RigidTransform(p=[-5.0, -5.0, 0.0]),
+                    bbox_min=np.array([-0.48, -0.18, 0.0]),
+                    bbox_max=np.array([0.48, 0.18, 2.0]),
+                )
+            )
+
+            visuals = HouseScene(
+                layout=layout,
+                rooms={"library": room},
+            )._renaissance_bookcase_blender_visuals(scene_dir / "bookcase_dressing")
+
+            self.assertEqual(len(visuals), 1)
+            self.assertEqual(visuals[0]["populated_bookcases"], 3)
+            self.assertEqual(visuals[0]["shelf_tiers_per_bookcase"], 6)
+            self.assertGreaterEqual(visuals[0]["visible_book_spines"], 180)
+            gltf = GLTF2().load(visuals[0]["path"])
+            node_names = {node.name for node in gltf.nodes}
+            self.assertIn("renaissance_bookcase_walnut", node_names)
+            self.assertIn("renaissance_bookcase_antique_gold", node_names)
+            self.assertGreaterEqual(len(gltf.meshes), 8)
+            self.assertGreaterEqual(len(gltf.materials), 8)
+
     def test_textured_landing_retains_obj_collision_mesh(self) -> None:
         platform = PlatformSpec(
             platform_id="stair_landing",
@@ -1092,8 +1167,7 @@ class TestV2StructuralLayout(unittest.TestCase):
             room_materials={
                 "library": RoomMaterials(
                     floor_material=Material.from_path(
-                        Path(__file__).parents[2]
-                        / "data/materials/WoodFloor014"
+                        Path(__file__).parents[2] / "data/materials/WoodFloor014"
                     )
                 )
             },
@@ -1105,9 +1179,7 @@ class TestV2StructuralLayout(unittest.TestCase):
                 platform.platform_id
             ]
             sdf = ET.parse(sdf_path)
-            assert sdf.findtext(".//visual/geometry/mesh/uri") == (
-                "stair_landing.glb"
-            )
+            assert sdf.findtext(".//visual/geometry/mesh/uri") == ("stair_landing.glb")
             assert sdf.findtext(".//collision/geometry/mesh/uri") == (
                 "stair_landing.collision.obj"
             )

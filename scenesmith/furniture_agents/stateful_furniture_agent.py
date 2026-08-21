@@ -252,6 +252,11 @@ def _bookcase_wall_run_level_counts(
             continue
         level = _nearest_level(obj, support_elevations)
         if level is not None:
+            metadata = getattr(obj, "metadata", None)
+            if not isinstance(metadata, dict):
+                metadata = {}
+                obj.metadata = metadata
+            metadata.pop("dense_library_grouped_run", None)
             by_level[level].append(obj)
 
     def pose_and_footprint(obj: Any) -> tuple[float, float, float, float, float] | None:
@@ -299,17 +304,23 @@ def _bookcase_wall_run_level_counts(
                     adjacency[right_index].add(left_index)
 
         largest = 0
+        largest_component: list[int] = []
         remaining = set(adjacency)
         while remaining:
             stack = [remaining.pop()]
-            component_size = 0
+            component: list[int] = []
             while stack:
                 current = stack.pop()
-                component_size += 1
+                component.append(current)
                 neighbors = adjacency[current] & remaining
                 remaining.difference_update(neighbors)
                 stack.extend(neighbors)
-            largest = max(largest, component_size)
+            if len(component) > largest:
+                largest = len(component)
+                largest_component = component
+        if largest >= 3:
+            for index in largest_component:
+                posed[index][0].metadata["dense_library_grouped_run"] = elevation
         largest_runs[elevation] = largest
     return largest_runs
 

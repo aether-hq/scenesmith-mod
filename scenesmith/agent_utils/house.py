@@ -3259,6 +3259,21 @@ class HouseScene:
             self.layout, output_dir / "architectural_dressing"
         )
 
+    def _renaissance_bookcase_blender_visuals(
+        self, output_dir: Path
+    ) -> list[dict[str, object]]:
+        """Return populated presentation shells for validated library wall runs."""
+
+        from scenesmith.agent_utils.renaissance_dressing import (
+            write_renaissance_bookcase_visuals,
+        )
+
+        return write_renaissance_bookcase_visuals(
+            self.layout,
+            self.rooms,
+            output_dir,
+        )
+
     def _export_blend(self, output_dir: Path, cfg: dict | DictConfig) -> None:
         """Export Blender file for all rooms to combined directory.
 
@@ -3299,6 +3314,9 @@ class HouseScene:
                     *self._room_floor_blender_visuals(),
                     *self._platform_blender_visuals(),
                     *self._architectural_blender_visuals(output_dir),
+                    *self._renaissance_bookcase_blender_visuals(
+                        output_dir / "bookcase_dressing"
+                    ),
                 ],
             )
             console_logger.info(f"Saved combined blend file: {blend_output_path}")

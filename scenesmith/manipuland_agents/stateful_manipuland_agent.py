@@ -1430,6 +1430,10 @@ class StatefulManipulandAgent(BaseStatefulAgent, BaseManipulandAgent):
             )
 
         counts = {level: 0 for level in levels}
+        owner_by_surface = StatefulManipulandAgent._dense_book_row_owner_by_surface(
+            scene
+        )
+        row_counts_by_owner = {bookcase.object_id: 0 for bookcase in bookcases}
         for obj in scene.objects.values():
             if (
                 obj.object_type != ObjectType.MANIPULAND
@@ -1440,6 +1444,9 @@ class StatefulManipulandAgent(BaseStatefulAgent, BaseManipulandAgent):
             level = support_levels.get(obj.placement_info.parent_surface_id)
             if level is not None:
                 counts[level] += 1
+                owner_id = owner_by_surface.get(obj.placement_info.parent_surface_id)
+                if owner_id in row_counts_by_owner:
+                    row_counts_by_owner[owner_id] += 1
 
         required_per_level = 12
         deficits = [
@@ -1454,6 +1461,34 @@ class StatefulManipulandAgent(BaseStatefulAgent, BaseManipulandAgent):
             )
             raise ModelBehaviorError(
                 "Dense library book-row coverage deficits: "
+                f"{details}. The detail stage cannot publish this checkpoint."
+            )
+
+        grouped_run_deficits: list[tuple[float, int]] = []
+        for level in sorted(levels):
+            grouped_bookcases = [
+                bookcase
+                for bookcase in bookcases
+                if bookcase_levels.get(bookcase.object_id) == level
+                and (bookcase.metadata or {}).get("dense_library_grouped_run")
+                is not None
+            ]
+            if not grouped_bookcases:
+                continue
+            populated = sum(
+                row_counts_by_owner.get(bookcase.object_id, 0) >= 3
+                for bookcase in grouped_bookcases
+            )
+            if populated < 3:
+                grouped_run_deficits.append((level, populated))
+        if grouped_run_deficits:
+            details = "; ".join(
+                f"populated bookcase wall run at {level:.3f}m has {populated}, "
+                "required 3"
+                for level, populated in grouped_run_deficits
+            )
+            raise ModelBehaviorError(
+                "Dense library grouped-run population deficits: "
                 f"{details}. The detail stage cannot publish this checkpoint."
             )
         return sum(counts.values())
@@ -1603,7 +1638,22 @@ class StatefulManipulandAgent(BaseStatefulAgent, BaseManipulandAgent):
                 for bookcase in level_bookcases
             }
             level_count = sum(len(rows) for rows in rows_by_bookcase.values())
-            if level_count >= required_per_level:
+            grouped_bookcase_ids = {
+                bookcase.object_id
+                for bookcase in level_bookcases
+                if (bookcase.metadata or {}).get("dense_library_grouped_run")
+                is not None
+            }
+
+            def populated_grouped_cases() -> int:
+                return sum(
+                    len(rows_by_bookcase[bookcase_id]) >= 3
+                    for bookcase_id in grouped_bookcase_ids
+                )
+
+            if level_count >= required_per_level and (
+                not grouped_bookcase_ids or populated_grouped_cases() >= 3
+            ):
                 continue
 
             targets = [
@@ -1611,6 +1661,12 @@ class StatefulManipulandAgent(BaseStatefulAgent, BaseManipulandAgent):
                 for bookcase in level_bookcases
                 if not rows_by_bookcase[bookcase.object_id]
             ]
+            targets.sort(
+                key=lambda bookcase: (
+                    (bookcase.metadata or {}).get("dense_library_grouped_run") is None,
+                    str(bookcase.object_id),
+                )
+            )
             for target in targets:
                 target_key = self._furniture_template_key(target)
                 if target_key is None:
@@ -1661,7 +1717,9 @@ class StatefulManipulandAgent(BaseStatefulAgent, BaseManipulandAgent):
                 ]
                 recovered += len(surviving)
                 level_count += len(surviving)
-                if level_count >= required_per_level:
+                if level_count >= required_per_level and (
+                    not grouped_bookcase_ids or populated_grouped_cases() >= 3
+                ):
                     break
 
         return recovered

@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 import re
 
+from collections import Counter
 from pathlib import Path
 
 import numpy as np
@@ -21,6 +22,15 @@ from scenesmith.utils.gltf_generation import get_zup_to_yup_matrix
 
 ANTIQUE_GOLD = np.array([184, 134, 48, 255], dtype=np.uint8)
 BURGUNDY = np.array([92, 18, 38, 255], dtype=np.uint8)
+WALNUT = np.array([73, 39, 24, 255], dtype=np.uint8)
+BOOK_SPINE_COLORS = (
+    np.array([112, 24, 39, 255], dtype=np.uint8),
+    np.array([34, 68, 55, 255], dtype=np.uint8),
+    np.array([31, 53, 91, 255], dtype=np.uint8),
+    np.array([151, 102, 30, 255], dtype=np.uint8),
+    np.array([122, 71, 39, 255], dtype=np.uint8),
+    np.array([202, 177, 119, 255], dtype=np.uint8),
+)
 
 
 def _requests_renaissance_dressing(prompt: str) -> bool:
@@ -290,6 +300,285 @@ def _colored_mesh(
     combined.metadata["name"] = name
     combined.apply_transform(get_zup_to_yup_matrix())
     return combined
+
+
+def _pbr_colored_mesh(
+    meshes: list[trimesh.Trimesh],
+    color: np.ndarray,
+    name: str,
+    *,
+    metallic: float = 0.0,
+) -> trimesh.Trimesh:
+    """Combine deterministic primitives under one explicit glTF PBR material."""
+
+    combined = trimesh.util.concatenate(meshes)
+    combined.visual = trimesh.visual.TextureVisuals(
+        material=trimesh.visual.material.PBRMaterial(
+            name=name,
+            baseColorFactor=color,
+            metallicFactor=metallic,
+            roughnessFactor=0.58 if metallic else 0.72,
+        )
+    )
+    combined.metadata["name"] = name
+    combined.apply_transform(get_zup_to_yup_matrix())
+    return combined
+
+
+def _append_populated_bookcase(
+    *,
+    owner: object,
+    along: np.ndarray,
+    inward: np.ndarray,
+    walnut: list[trimesh.Trimesh],
+    gold: list[trimesh.Trimesh],
+    spines: list[list[trimesh.Trimesh]],
+) -> int:
+    """Add a full-height walnut case and deterministic visible book spines."""
+
+    minimum = np.asarray(owner.bbox_min, dtype=float)
+    maximum = np.asarray(owner.bbox_max, dtype=float)
+    dimensions = maximum - minimum
+    width = float(max(dimensions[0], dimensions[1]))
+    depth = float(max(min(dimensions[0], dimensions[1]), 0.24))
+    height = float(dimensions[2])
+    if width < 0.65 or height < 1.6:
+        return 0
+
+    translation = np.asarray(owner.transform.translation(), dtype=float)
+    center_xy = translation[:2]
+    bottom = float(translation[2] + minimum[2])
+    center_z = bottom + height / 2.0
+    front_xy = center_xy + inward * (depth * 0.36)
+    back_xy = center_xy - inward * (depth * 0.38)
+
+    walnut.append(
+        _wall_box(
+            center=np.array([back_xy[0], back_xy[1], center_z]),
+            along=along,
+            inward=inward,
+            along_extent=width * 0.94,
+            depth=0.035,
+            height=height * 0.94,
+        )
+    )
+    for side in (-1.0, 1.0):
+        side_xy = center_xy + along * side * (width / 2.0 - 0.035)
+        walnut.append(
+            _wall_box(
+                center=np.array([side_xy[0], side_xy[1], center_z]),
+                along=along,
+                inward=inward,
+                along_extent=0.07,
+                depth=depth * 0.90,
+                height=height,
+            )
+        )
+        trim_xy = front_xy + along * side * (width / 2.0 - 0.065)
+        gold.append(
+            _wall_box(
+                center=np.array([trim_xy[0], trim_xy[1], center_z]),
+                along=along,
+                inward=inward,
+                along_extent=0.025,
+                depth=0.045,
+                height=height * 0.88,
+            )
+        )
+
+    for z in (bottom + 0.045, bottom + height - 0.045):
+        walnut.append(
+            _wall_box(
+                center=np.array([center_xy[0], center_xy[1], z]),
+                along=along,
+                inward=inward,
+                along_extent=width,
+                depth=depth,
+                height=0.09,
+            )
+        )
+    gold.append(
+        _wall_box(
+            center=np.array([front_xy[0], front_xy[1], bottom + height - 0.105]),
+            along=along,
+            inward=inward,
+            along_extent=width * 0.96,
+            depth=0.055,
+            height=0.055,
+        )
+    )
+
+    tier_fractions = (0.06, 0.205, 0.35, 0.495, 0.64, 0.785)
+    usable_width = width * 0.76
+    books_per_tier = 10
+    book_step = usable_width / books_per_tier
+    book_depth = max(0.06, depth * 0.24)
+    spine_count = 0
+    owner_seed = sum(ord(character) for character in str(owner.object_id))
+    for tier_index, tier_fraction in enumerate(tier_fractions):
+        shelf_z = bottom + height * tier_fraction
+        walnut.append(
+            _wall_box(
+                center=np.array([center_xy[0], center_xy[1], shelf_z]),
+                along=along,
+                inward=inward,
+                along_extent=width * 0.88,
+                depth=depth * 0.84,
+                height=0.035,
+            )
+        )
+        for book_index in range(books_per_tier):
+            pattern = owner_seed + tier_index * 11 + book_index * 7
+            book_width = book_step * (0.72 + 0.06 * (pattern % 4))
+            book_height = height * (0.095 + 0.01 * (pattern % 4))
+            along_offset = -usable_width / 2.0 + (book_index + 0.5) * book_step
+            book_xy = front_xy + along * along_offset
+            spine = _wall_box(
+                center=np.array(
+                    [
+                        book_xy[0],
+                        book_xy[1],
+                        shelf_z + 0.025 + book_height / 2.0,
+                    ]
+                ),
+                along=along,
+                inward=inward,
+                along_extent=book_width,
+                depth=book_depth,
+                height=book_height,
+            )
+            spines[pattern % len(spines)].append(spine)
+            spine_count += 1
+    return spine_count
+
+
+def write_renaissance_bookcase_visuals(
+    layout: HouseLayout,
+    rooms: dict[str, object],
+    output_dir: Path,
+) -> list[dict[str, object]]:
+    """Write populated presentation shells for physically validated wall runs."""
+
+    if not _requests_renaissance_dressing(layout.house_prompt):
+        return []
+    output_dir.mkdir(parents=True, exist_ok=True)
+    visuals: list[dict[str, object]] = []
+    for placed_room in layout.placed_rooms:
+        room = rooms.get(placed_room.room_id)
+        if room is None:
+            continue
+        row_counts = Counter(
+            str((obj.metadata or {}).get("dense_library_owner_bound"))
+            for obj in room.objects.values()
+            if bool((obj.metadata or {}).get("dense_library_book_row"))
+        )
+        grouped: dict[float, list[object]] = {}
+        for obj in room.objects.values():
+            metadata = obj.metadata or {}
+            marker = metadata.get("dense_library_grouped_run")
+            if (
+                marker is None
+                or row_counts[str(obj.object_id)] < 3
+                or obj.bbox_min is None
+                or obj.bbox_max is None
+            ):
+                continue
+            grouped.setdefault(float(marker), []).append(obj)
+
+        walnut: list[trimesh.Trimesh] = []
+        gold: list[trimesh.Trimesh] = []
+        spines: list[list[trimesh.Trimesh]] = [[] for _color in BOOK_SPINE_COLORS]
+        populated = 0
+        spine_count = 0
+        for level in sorted(grouped):
+            owners = grouped[level]
+            if len(owners) < 3:
+                continue
+            points = np.asarray(
+                [owner.transform.translation()[:2] for owner in owners], dtype=float
+            )
+            farthest = max(
+                (
+                    (left, right)
+                    for left in range(len(points))
+                    for right in range(left + 1, len(points))
+                ),
+                key=lambda pair: float(
+                    np.linalg.norm(points[pair[1]] - points[pair[0]])
+                ),
+            )
+            along = points[farthest[1]] - points[farthest[0]]
+            along /= np.linalg.norm(along)
+            inward = np.array([-along[1], along[0]])
+            centroid = np.mean(points, axis=0)
+            if float(np.dot(inward, -centroid)) < 0.0:
+                inward *= -1.0
+            for owner in owners:
+                added = _append_populated_bookcase(
+                    owner=owner,
+                    along=along,
+                    inward=inward,
+                    walnut=walnut,
+                    gold=gold,
+                    spines=spines,
+                )
+                if added:
+                    populated += 1
+                    spine_count += added
+        if populated < 3 or not walnut or not gold:
+            continue
+
+        scene = trimesh.Scene()
+        scene.add_geometry(
+            _pbr_colored_mesh(walnut, WALNUT, "renaissance_bookcase_walnut"),
+            geom_name="renaissance_bookcase_walnut",
+            node_name="renaissance_bookcase_walnut",
+        )
+        scene.add_geometry(
+            _pbr_colored_mesh(
+                gold,
+                ANTIQUE_GOLD,
+                "renaissance_bookcase_antique_gold",
+                metallic=0.55,
+            ),
+            geom_name="renaissance_bookcase_antique_gold",
+            node_name="renaissance_bookcase_antique_gold",
+        )
+        for index, (meshes, color) in enumerate(
+            zip(spines, BOOK_SPINE_COLORS, strict=True)
+        ):
+            if not meshes:
+                continue
+            name = f"renaissance_book_spines_{index}"
+            scene.add_geometry(
+                _pbr_colored_mesh(meshes, color, name),
+                geom_name=name,
+                node_name=name,
+            )
+
+        artifact = output_dir / f"renaissance_bookcases_{placed_room.room_id}.glb"
+        artifact.write_bytes(trimesh.exchange.gltf.export_glb(scene))
+        room_center = [
+            placed_room.position[0] + placed_room.width / 2.0,
+            placed_room.position[1] + placed_room.depth / 2.0,
+        ]
+        visuals.append(
+            {
+                "path": str(artifact),
+                "translation": [
+                    float(room_center[0]),
+                    float(room_center[1]),
+                    float(layout.get_room_elevation(placed_room.room_id)),
+                ],
+                "yaw_radians": float(placed_room.yaw),
+                "role": "structural_detail",
+                "source_id": f"renaissance_bookcases_{placed_room.room_id}",
+                "populated_bookcases": populated,
+                "shelf_tiers_per_bookcase": 6,
+                "visible_book_spines": spine_count,
+            }
+        )
+    return visuals
 
 
 def write_renaissance_dressing_visuals(

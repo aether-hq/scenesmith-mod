@@ -923,6 +923,14 @@ def test_large_multilevel_library_gate_accepts_contiguous_bookcase_wall_runs():
         )
         == 15
     )
+    for elevation in (0.0, 4.0, 8.0):
+        assert (
+            sum(
+                shelf.metadata.get("dense_library_grouped_run") == elevation
+                for shelf in shelves
+            )
+            >= 3
+        )
 
 
 def test_large_multilevel_library_recovery_builds_atomic_bookcase_wall_runs():

@@ -503,6 +503,50 @@ def test_dense_library_book_row_gate_accepts_twelve_rows_per_story(tmp_path: Pat
     assert StatefulManipulandAgent._validate_dense_library_book_rows(scene) == 36
 
 
+def test_dense_library_book_row_gate_rejects_empty_grouped_wall_run(
+    tmp_path: Path,
+):
+    bookcases = [
+        _dense_bookcase(f"bookcase_{level_index}_{case_index}", level, tmp_path)
+        for level_index, level in enumerate((0.0, 4.0, 8.0))
+        for case_index in range(4)
+    ]
+    for level_index, level in enumerate((0.0, 4.0, 8.0)):
+        for bookcase in bookcases[level_index * 4 : level_index * 4 + 3]:
+            bookcase.metadata["dense_library_grouped_run"] = level
+    rows = [
+        SimpleNamespace(
+            object_id=UniqueID(f"book_row_{level_index}_{row_index}"),
+            object_type=ObjectType.MANIPULAND,
+            metadata={
+                "dense_library_book_row": True,
+                "dense_library_owner_bound": str(
+                    bookcases[level_index * 4 + 3].object_id
+                ),
+            },
+            placement_info=PlacementInfo(
+                parent_surface_id=bookcases[level_index * 4 + 3]
+                .support_surfaces[row_index % 6 + 1]
+                .surface_id,
+                position_2d=np.array([0.0, 0.0]),
+                rotation_2d=0.0,
+            ),
+        )
+        for level_index in range(3)
+        for row_index in range(12)
+    ]
+    scene = SimpleNamespace(
+        text_description="large multi-level library with thousands of books",
+        objects={obj.object_id: obj for obj in [*bookcases, *rows]},
+    )
+
+    with pytest.raises(
+        ModelBehaviorError,
+        match=r"populated bookcase wall run at 0\.000m.*0.*required 3",
+    ):
+        StatefulManipulandAgent._validate_dense_library_book_rows(scene)
+
+
 def test_dense_library_book_row_gate_rejects_eight_rows_per_story(tmp_path: Path):
     bookcases = [
         _dense_bookcase(f"bookcase_{level_index}_{case_index}", level, tmp_path)
@@ -631,6 +675,75 @@ def test_dense_library_recovers_variable_capacity_templates_to_twelve_rows(
         for row in recovered_rows
     )
     assert all(row.name != "candlestick" for row in recovered_rows)
+
+
+def test_dense_library_recovery_prioritizes_empty_grouped_wall_run(
+    tmp_path: Path,
+    monkeypatch,
+):
+    bookcases = [
+        _dense_bookcase(f"bookcase_{level_index}_{case_index}", level, tmp_path)
+        for level_index, level in enumerate((0.0, 4.0, 8.0))
+        for case_index in range(6)
+    ]
+    rows = []
+    for level_index, level in enumerate((0.0, 4.0, 8.0)):
+        cases_at_level = bookcases[level_index * 6 : (level_index + 1) * 6]
+        for bookcase in cases_at_level[:3]:
+            bookcase.metadata["dense_library_grouped_run"] = level
+        for case_index, bookcase in enumerate(cases_at_level[3:]):
+            for row_index in range(4):
+                surface = bookcase.support_surfaces[row_index + 1]
+                rows.append(
+                    SceneObject(
+                        object_id=UniqueID(
+                            f"source_row_{level_index}_{case_index}_{row_index}"
+                        ),
+                        object_type=ObjectType.MANIPULAND,
+                        name="encyclopedia_book_row",
+                        description="upright encyclopedia book set",
+                        transform=surface.transform,
+                        geometry_path=tmp_path / "book_row.gltf",
+                        metadata={
+                            "dense_library_book_row": True,
+                            "dense_library_owner_bound": str(bookcase.object_id),
+                        },
+                        bbox_min=np.array([-0.1, -0.05, 0.0]),
+                        bbox_max=np.array([0.1, 0.05, 0.2]),
+                        placement_info=PlacementInfo(
+                            parent_surface_id=surface.surface_id,
+                            position_2d=np.array([0.0, 0.0]),
+                            rotation_2d=0.0,
+                        ),
+                    )
+                )
+    scene = RoomScene(
+        room_geometry=object(),
+        scene_dir=tmp_path,
+        text_description="large multi-level library with thousands of books",
+        objects={obj.object_id: obj for obj in [*bookcases, *rows]},
+    )
+    monkeypatch.setattr(
+        "scenesmith.manipuland_agents.stateful_manipuland_agent.compute_scene_collisions",
+        lambda **_kwargs: [],
+    )
+    agent = object.__new__(StatefulManipulandAgent)
+    agent.scene = scene
+    agent.cfg = SimpleNamespace(
+        physics_validation=SimpleNamespace(
+            object_penetration_threshold_m=0.001,
+            floor_penetration_tolerance_m=0.05,
+            manipuland_furniture_tolerance_m=0.02,
+        )
+    )
+
+    recovered = agent._recover_dense_library_book_row_deficits()
+
+    assert recovered == 36
+    assert StatefulManipulandAgent._validate_dense_library_book_rows(scene) == 72
+    for bookcase in bookcases:
+        if bookcase.metadata.get("dense_library_grouped_run") is not None:
+            assert len(agent._dense_book_rows_on_furniture(scene, bookcase)) >= 3
 
 
 def test_dense_library_recovery_clusters_millimeter_story_drift(
