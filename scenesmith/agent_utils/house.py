@@ -3162,6 +3162,47 @@ class HouseScene:
 
         return directive
 
+    def _room_floor_blender_visuals(self) -> list[dict[str, object]]:
+        """Return PBR polygon-floor finishes omitted by Drake's glTF renderer.
+
+        The compiled room OBJ remains the authoritative visual/collision shell.
+        Polygon rooms add a named, visual-only GLB just above the floor so the
+        selected PBR finish survives the combined Blender export.  As with
+        platform GLBs, Drake does not forward this nested SDF visual, so import
+        only the explicitly named finish in the owning room frame.
+        """
+
+        visuals: list[dict[str, object]] = []
+        for room_id, geometry in self.layout.room_geometries.items():
+            sdf_path = geometry.sdf_path
+            for visual in ET.parse(sdf_path).findall(".//visual"):
+                if "floor_finish" not in visual.get("name", ""):
+                    continue
+                visual_uri = visual.findtext("geometry/mesh/uri")
+                if not visual_uri or Path(visual_uri).suffix.lower() not in {
+                    ".glb",
+                    ".gltf",
+                }:
+                    continue
+                visual_path = Path(visual_uri)
+                if not visual_path.is_absolute():
+                    visual_path = sdf_path.parent / visual_path
+                if not visual_path.is_file():
+                    raise FileNotFoundError(
+                        f"Compiled room floor visual does not exist: {visual_path}"
+                    )
+                x, y, z, yaw = self._get_room_transform(room_id)
+                visuals.append(
+                    {
+                        "path": str(visual_path),
+                        "translation": [x, y, z],
+                        "yaw_radians": yaw,
+                        "role": "structural_detail",
+                        "source_id": f"{room_id}_floor_finish",
+                    }
+                )
+        return visuals
+
     def _platform_blender_visuals(self) -> list[dict[str, object]]:
         """Return PBR platform visuals omitted by Drake's glTF renderer.
 
@@ -3255,6 +3296,7 @@ class HouseScene:
                 port_cleanup_delay=rendering_cfg["port_cleanup_delay"],
                 scene_dir=self.house_dir,
                 additional_visuals=[
+                    *self._room_floor_blender_visuals(),
                     *self._platform_blender_visuals(),
                     *self._architectural_blender_visuals(output_dir),
                 ],

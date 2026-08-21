@@ -1020,6 +1020,66 @@ class TestV2StructuralLayout(unittest.TestCase):
                 ],
             )
 
+    def test_house_blender_room_floor_finish_keeps_room_frame_transform(self) -> None:
+        footprint = Footprint2D.rectangle(6, 5)
+        layout = HouseLayout(
+            room_specs=[
+                RoomSpec(
+                    "library",
+                    length=6,
+                    width=5,
+                    footprint=footprint,
+                    level_id="upper",
+                )
+            ],
+            levels=[LevelSpec("upper", elevation=3.0)],
+            placed_rooms=[
+                PlacedRoom(
+                    "library",
+                    (10, 20),
+                    6,
+                    5,
+                    footprint=footprint,
+                    level_id="upper",
+                    yaw=math.pi / 2,
+                )
+            ],
+            room_materials={
+                "library": RoomMaterials(
+                    floor_material=Material.from_path(
+                        Path(__file__).parents[2]
+                        / "data/materials/WoodFloor014"
+                    )
+                )
+            },
+        )
+
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            paths = layout.compile_polygon_rooms(Path(temporary_directory))
+            sdf_path = paths["library"]
+            # ElementTree does not support XPath contains(), so recover the
+            # exact authored finish URI from the visual name.
+            finish_uri = next(
+                visual.findtext("geometry/mesh/uri")
+                for visual in ET.parse(sdf_path).findall(".//visual")
+                if "floor_finish" in visual.get("name", "")
+            )
+
+            visuals = HouseScene(layout=layout)._room_floor_blender_visuals()
+
+            self.assertEqual(
+                visuals,
+                [
+                    {
+                        "path": str(sdf_path.parent / finish_uri),
+                        "translation": [13.0, 22.5, 3.0],
+                        "yaw_radians": math.pi / 2,
+                        "role": "structural_detail",
+                        "source_id": "library_floor_finish",
+                    }
+                ],
+            )
+
     def test_textured_landing_retains_obj_collision_mesh(self) -> None:
         platform = PlatformSpec(
             platform_id="stair_landing",
