@@ -5,7 +5,7 @@ import tempfile
 import unittest
 
 from pathlib import Path
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 import numpy as np
 import trimesh
@@ -41,6 +41,7 @@ class TestSnapToObject(unittest.TestCase):
         # Unit tests focus on testing snap contracts (rotation, validation, etc.).
         # Integration tests verify end-to-end behavior with real SDF files.
         self.scene_tools = SceneTools(scene=self.mock_scene, cfg=self.cfg)
+        self.scene_tools._snap_collision_depths_for = Mock(return_value={})
 
     def tearDown(self):
         """Clean up test fixtures."""
@@ -107,6 +108,64 @@ class TestSnapToObject(unittest.TestCase):
             places=5,
             msg="Rotation should be preserved during snap",
         )
+
+    def test_snap_rolls_back_new_deep_table_collision(self):
+        """A critic snap cannot commit a newly colliding chair pose."""
+        obj_mesh = self._create_cube_mesh(size=1.0)
+        target_mesh = self._create_cube_mesh(size=1.0)
+        original_transform = RigidTransform(p=[0.0, 0.0, 0.0])
+        chair = SceneObject(
+            object_id=UniqueID("chair"),
+            object_type=ObjectType.FURNITURE,
+            name="reading_chair",
+            description="Reading chair",
+            transform=original_transform,
+            geometry_path=obj_mesh,
+            bbox_min=np.array([-0.5, -0.5, -0.5]),
+            bbox_max=np.array([0.5, 0.5, 0.5]),
+        )
+        table = SceneObject(
+            object_id=UniqueID("table"),
+            object_type=ObjectType.FURNITURE,
+            name="reading_table",
+            description="Reading table",
+            transform=RigidTransform(p=[3.0, 0.0, 0.0]),
+            geometry_path=target_mesh,
+            bbox_min=np.array([-0.5, -0.5, -0.5]),
+            bbox_max=np.array([0.5, 0.5, 0.5]),
+        )
+        self.mock_scene.objects = {
+            chair.object_id: chair,
+            table.object_id: table,
+        }
+        self.mock_scene.get_object = lambda uid: self.mock_scene.objects.get(uid)
+
+        def move_object(*, object_id, new_transform):
+            self.mock_scene.objects[object_id].transform = new_transform
+            return True
+
+        self.mock_scene.move_object = Mock(side_effect=move_object)
+        collision_key = tuple(sorted((str(chair.object_id), str(table.object_id))))
+        self.scene_tools._snap_collision_depths_for.side_effect = [
+            {},
+            {collision_key: 0.1323},
+        ]
+
+        with patch(
+            "scenesmith.furniture_agents.tools.scene_tools."
+            "select_and_execute_snap_algorithm",
+            return_value=(np.array([2.6, 0.0, 0.0]), 2.6),
+        ):
+            result = json.loads(
+                self.scene_tools._snap_to_object_impl(
+                    object_id=str(chair.object_id),
+                    target_id=str(table.object_id),
+                )
+            )
+
+        self.assertFalse(result["success"])
+        np.testing.assert_allclose(chair.transform.translation(), [0.0, 0.0, 0.0])
+        self.assertEqual(self.mock_scene.move_object.call_count, 2)
 
     def test_no_rotation_for_furniture_to_furniture(self):
         """Contract: Rotation only applies to wall snapping, not furniture."""

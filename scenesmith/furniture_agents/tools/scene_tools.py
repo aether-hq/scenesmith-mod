@@ -10,6 +10,7 @@ from omegaconf import DictConfig
 from pydrake.all import RigidTransform, RollPitchYaw, RotationMatrix
 
 from scenesmith.agent_utils.action_logger import log_scene_action
+from scenesmith.agent_utils.physics_validation import compute_scene_collisions
 from scenesmith.agent_utils.room import RoomScene, SceneObject, UniqueID
 from scenesmith.furniture_agents.tools.response_dataclasses import (
     FacingCheckResult,
@@ -574,6 +575,35 @@ class SceneTools:
 
         return (obj, target)
 
+    def _snap_collision_depths_for(
+        self, object_id: UniqueID
+    ) -> dict[tuple[str, str], float]:
+        """Return authoritative hard collision depths involving a snap candidate."""
+        physics_cfg = self.cfg.physics_validation
+        collisions = compute_scene_collisions(
+            scene=self.scene,
+            penetration_threshold=physics_cfg.object_penetration_threshold_m,
+            floor_penetration_tolerance=physics_cfg.floor_penetration_tolerance_m,
+            manipuland_furniture_tolerance_m=(
+                physics_cfg.manipuland_furniture_tolerance_m
+            ),
+        )
+        current = str(object_id)
+        depths: dict[tuple[str, str], float] = {}
+        for collision in collisions:
+            if current not in (collision.object_a_id, collision.object_b_id):
+                continue
+            key = tuple(sorted((collision.object_a_id, collision.object_b_id)))
+            depths[key] = max(depths.get(key, 0.0), collision.penetration_depth)
+        return depths
+
+    def _restore_snap_transform(
+        self, obj: SceneObject, transform: RigidTransform
+    ) -> None:
+        """Restore a snap candidate after a failed transactional mutation."""
+        self.scene.move_object(object_id=obj.object_id, new_transform=transform)
+        obj.transform = transform
+
     @log_scene_action
     def _snap_to_object_impl(
         self, object_id: str, target_id: str, orientation: str = "none"
@@ -608,6 +638,8 @@ class SceneTools:
         original_pos = obj.transform.translation()
         original_rotation = obj.transform.rotation()
         original_rpy = original_rotation.ToRollPitchYaw()
+        original_transform = RigidTransform(R=original_rotation, p=original_pos)
+        original_collision_depths = self._snap_collision_depths_for(obj.object_id)
 
         # ===== Resolve Collisions (BEFORE orientation). =====
         # Conservative AABB push-out to separate objects if penetrating.
@@ -639,8 +671,47 @@ class SceneTools:
             cfg=self.cfg,
         )
         if isinstance(snap_result, str):
+            self._restore_snap_transform(obj, original_transform)
             return snap_result
         movement_vector, distance = snap_result
+
+        # Commit the translated pose before authoritative candidate validation.
+        if distance >= ALREADY_TOUCHING_THRESHOLD_M:
+            new_position = obj.transform.translation() + movement_vector
+            new_transform = RigidTransform(R=obj.transform.rotation(), p=new_position)
+            self.scene.move_object(
+                object_id=obj.object_id,
+                new_transform=new_transform,
+            )
+        else:
+            new_position = obj.transform.translation()
+
+        final_collision_depths = self._snap_collision_depths_for(obj.object_id)
+        collision_regressions = {
+            key: depth
+            for key, depth in final_collision_depths.items()
+            if depth > original_collision_depths.get(key, 0.0) + 1e-6
+        }
+        if collision_regressions:
+            self._restore_snap_transform(obj, original_transform)
+            details = "; ".join(
+                f"{object_a} collides with {object_b} "
+                f"({depth * 100:.1f}cm penetration)"
+                for (object_a, object_b), depth in sorted(collision_regressions.items())
+            )
+            return self._create_snap_error(
+                object_id=object_id,
+                target_id=target_id,
+                error_type=FurnitureErrorType.INVALID_POSITION,
+                message=(
+                    "Snap rejected because it introduced or deepened a hard "
+                    f"collision: {details}. The original pose was restored."
+                ),
+                suggested_action=(
+                    "Keep the current pose or use move_furniture_tool with a clear "
+                    "table-relative position"
+                ),
+            )
 
         # Check if already touching (distance < 1mm threshold).
         if distance < ALREADY_TOUCHING_THRESHOLD_M:
@@ -676,14 +747,6 @@ class SceneTools:
                     float(math.degrees(new_yaw_rad)) if rotation_applied else None
                 ),
             ).to_json()
-
-        # Create new transform (rotation may have been updated above).
-        # Use current position (after collision resolution and orientation).
-        new_position = obj.transform.translation() + movement_vector
-        new_transform = RigidTransform(R=obj.transform.rotation(), p=new_position)
-
-        # Move object.
-        self.scene.move_object(object_id=obj.object_id, new_transform=new_transform)
 
         rotation_msg = ""
         if rotation_applied:

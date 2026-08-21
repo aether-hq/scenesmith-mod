@@ -12,6 +12,7 @@ from scenesmith.agent_utils.room import ObjectType
 from scenesmith.furniture_agents.stateful_furniture_agent import (
     StatefulFurnitureAgent,
     _chair_cluster_poses,
+    _validate_furniture_collision_free,
     _validate_room_kit_completion,
 )
 
@@ -89,6 +90,42 @@ def test_matched_library_kit_rejects_zero_furniture():
         match=r"library-reading-hall-v1.*0 furniture objects.*minimum is 7",
     ):
         _validate_room_kit_completion(_scene_with_furniture(0), _library_kit())
+
+
+def test_furniture_workflow_batch_gate_rejects_deep_snap_collision(monkeypatch):
+    collision = SimpleNamespace(
+        object_a_id="reading_table_1",
+        object_b_id="reading_chair_2",
+        penetration_depth=0.1323,
+        to_description=lambda: (
+            "reading_table_1 collides with reading_chair_2 " "(13.2cm penetration)"
+        ),
+    )
+    monkeypatch.setattr(
+        "scenesmith.furniture_agents.stateful_furniture_agent."
+        "compute_scene_collisions",
+        lambda **_kwargs: [collision],
+    )
+    scene = SimpleNamespace(
+        objects={
+            "reading_table_1": SimpleNamespace(
+                object_id="reading_table_1",
+                object_type=ObjectType.FURNITURE,
+            ),
+            "reading_chair_2": SimpleNamespace(
+                object_id="reading_chair_2",
+                object_type=ObjectType.FURNITURE,
+            ),
+        }
+    )
+    cfg = SimpleNamespace(
+        object_penetration_threshold_m=0.001,
+        floor_penetration_tolerance_m=0.05,
+        manipuland_furniture_tolerance_m=0.02,
+    )
+
+    with pytest.raises(ModelBehaviorError, match=r"13.2cm penetration"):
+        _validate_furniture_collision_free(scene, cfg)
 
 
 def test_matched_library_kit_accepts_required_minimum():

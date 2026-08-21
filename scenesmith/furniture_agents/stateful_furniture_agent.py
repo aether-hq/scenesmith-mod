@@ -26,6 +26,7 @@ from scenesmith.agent_utils.asset_manager import AssetGenerationRequest
 from scenesmith.agent_utils.base_stateful_agent import BaseStatefulAgent
 from scenesmith.agent_utils.blender.process_provider import RenderAllocation
 from scenesmith.agent_utils.placement_noise import PlacementNoiseMode
+from scenesmith.agent_utils.physics_validation import compute_scene_collisions
 from scenesmith.agent_utils.reachability import (
     compute_reachability,
     format_reachability_for_critic,
@@ -402,6 +403,37 @@ def _validate_room_kit_completion(
         role_counts,
     )
     return furniture_count
+
+
+def _validate_furniture_collision_free(scene: RoomScene, physics_cfg: Any) -> None:
+    """Reject hard collisions left by the complete model-authored furniture batch."""
+    furniture_ids = {
+        str(getattr(obj, "object_id", object_id))
+        for object_id, obj in scene.objects.items()
+        if obj.object_type == ObjectType.FURNITURE
+    }
+    collisions = compute_scene_collisions(
+        scene=scene,
+        penetration_threshold=physics_cfg.object_penetration_threshold_m,
+        floor_penetration_tolerance=physics_cfg.floor_penetration_tolerance_m,
+        manipuland_furniture_tolerance_m=(physics_cfg.manipuland_furniture_tolerance_m),
+    )
+    furniture_collisions = [
+        collision
+        for collision in collisions
+        if collision.object_a_id in furniture_ids
+        or collision.object_b_id in furniture_ids
+    ]
+    if furniture_collisions:
+        details = "; ".join(
+            collision.to_description() for collision in furniture_collisions
+        )
+        raise ModelBehaviorError(
+            "Furniture workflow left hard collisions after its final tool batch: "
+            f"{details}. The furniture stage cannot run recovery or publish this "
+            "checkpoint."
+        )
+    console_logger.info("Furniture workflow batch collision gate passed")
 
 
 class StatefulFurnitureAgent(BaseStatefulAgent, BaseFurnitureAgent):
@@ -1098,6 +1130,11 @@ class StatefulFurnitureAgent(BaseStatefulAgent, BaseFurnitureAgent):
             runner_instruction=runner_instruction,
             agent_name="PLANNER (FURNITURE)",
             state_hash=self.scene.content_hash,
+        )
+
+        _validate_furniture_collision_free(
+            self.scene,
+            self.cfg.physics_validation,
         )
 
         if room_kit is not None:
