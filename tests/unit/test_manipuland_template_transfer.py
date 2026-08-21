@@ -238,13 +238,22 @@ def test_dense_library_places_intrinsic_catalog_book_rows_on_internal_tiers(
         },
     )
     placements = []
+    original_noise_profile = SimpleNamespace(
+        position_xy_std_meters=0.01,
+        rotation_yaw_std_degrees=3.0,
+    )
 
     class FakeTools:
         support_surfaces = {
             str(surface.surface_id): surface for surface in furniture.support_surfaces
         }
+        active_noise_profile = original_noise_profile
 
         def _place_manipuland_on_surface_impl(self, **kwargs):
+            kwargs["active_noise"] = (
+                self.active_noise_profile.position_xy_std_meters,
+                self.active_noise_profile.rotation_yaw_std_degrees,
+            )
             placements.append(kwargs)
             return '{"success":true,"object_id":"encyclopedia_book_row_1"}'
 
@@ -269,6 +278,8 @@ def test_dense_library_places_intrinsic_catalog_book_rows_on_internal_tiers(
     assert {call["surface_id"] for call in placements} == {
         f"bookcase_0_surface_{index}" for index in range(1, 6)
     }
+    assert all(call["active_noise"] == (0.0, 0.0) for call in placements)
+    assert agent.manipuland_tools.active_noise_profile is original_noise_profile
 
 
 def test_dense_library_book_rows_retry_and_rollback_deep_owner_collisions(
@@ -355,6 +366,10 @@ def test_dense_library_book_rows_retry_and_rollback_deep_owner_collisions(
     assert placed == 5
     assert len(surviving) == 5
     assert all(obj.metadata.get("dense_library_book_row") for obj in surviving)
+    assert all(
+        obj.metadata.get("dense_library_owner_bound") == str(furniture.object_id)
+        for obj in surviving
+    )
     assert all(
         placement_calls[obj.object_id]["rotation_degrees"] == 180.0
         and placement_calls[obj.object_id]["position_x"] > 0.0
@@ -486,14 +501,17 @@ def test_dense_library_physics_allows_only_shallow_owner_support_contact(
             transform=RigidTransform(),
             geometry_path=tmp_path / "book_row.gltf",
             metadata={"dense_library_book_row": True},
+            bbox_min=np.array([-0.1, -0.05, 0.0]),
+            bbox_max=np.array([0.1, 0.05, 0.2]),
             placement_info=PlacementInfo(
                 parent_surface_id=bookcase.support_surfaces[index + 1].surface_id,
                 position_2d=np.array([0.0, 0.0]),
                 rotation_2d=0.0,
             ),
         )
-        for index in range(3)
+        for index in range(4)
     ]
+    rows[3].transform = RigidTransform(p=[0.55, 0.0, 1.2])
     scene = RoomScene(
         room_geometry=object(),
         scene_dir=tmp_path,
@@ -540,7 +558,8 @@ def test_dense_library_physics_allows_only_shallow_owner_support_contact(
     )
 
     assert rows[0].object_id not in invalid
-    assert invalid == {rows[1].object_id, rows[2].object_id}
+    assert rows[1].object_id not in invalid
+    assert invalid == {rows[2].object_id, rows[3].object_id}
 
 
 def test_patient_support_zone_rejects_equipment_and_mislabeled_tape(tmp_path: Path):

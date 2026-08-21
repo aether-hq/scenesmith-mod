@@ -11,7 +11,10 @@ import math
 import re
 
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
+
+import numpy as np
 
 from agents import Agent, FunctionTool, custom_span
 from agents.exceptions import ModelBehaviorError
@@ -952,6 +955,44 @@ class StatefulManipulandAgent(BaseStatefulAgent, BaseManipulandAgent):
             for surface in obj.support_surfaces
         }
 
+    @staticmethod
+    def _dense_book_row_is_contained(
+        row: SceneObject,
+        surface: SupportSurface,
+        *,
+        edge_clearance_m: float = 0.002,
+    ) -> bool:
+        """Require the row's actual footprint to remain inside its authored tier."""
+
+        if row.bbox_min is None or row.bbox_max is None:
+            return False
+        row_height = float(row.bbox_max[2] - row.bbox_min[2])
+        surface_clearance = float(
+            surface.bounding_box_max[2] - surface.bounding_box_min[2]
+        )
+        if row_height > surface_clearance + 1e-6:
+            return False
+
+        relative = surface.transform.inverse() @ row.transform
+        minimum = surface.bounding_box_min
+        maximum = surface.bounding_box_max
+        for x in (float(row.bbox_min[0]), float(row.bbox_max[0])):
+            for y in (float(row.bbox_min[1]), float(row.bbox_max[1])):
+                point = relative @ np.array([x, y, 0.0])
+                point_2d = point[:2]
+                if not (
+                    minimum[0] + edge_clearance_m
+                    <= point_2d[0]
+                    <= maximum[0] - edge_clearance_m
+                    and minimum[1] + edge_clearance_m
+                    <= point_2d[1]
+                    <= maximum[1] - edge_clearance_m
+                ):
+                    return False
+                if not surface.contains_point_2d(point_2d):
+                    return False
+        return True
+
     @classmethod
     def _physically_invalid_dense_book_row_ids(
         cls,
@@ -972,6 +1013,30 @@ class StatefulManipulandAgent(BaseStatefulAgent, BaseManipulandAgent):
         if not row_ids:
             return set()
 
+        owner_by_surface = cls._dense_book_row_owner_by_surface(scene)
+        surface_by_id = {
+            surface.surface_id: surface
+            for obj in scene.objects.values()
+            if obj.object_type == ObjectType.FURNITURE
+            for surface in obj.support_surfaces
+        }
+        invalid: set[UniqueID] = set()
+        for row_id in row_ids:
+            row = scene.get_object(row_id)
+            parent_surface_id = (
+                row.placement_info.parent_surface_id
+                if row is not None and row.placement_info is not None
+                else None
+            )
+            surface = surface_by_id.get(parent_surface_id)
+            if (
+                row is None
+                or parent_surface_id not in owner_by_surface
+                or surface is None
+                or not cls._dense_book_row_is_contained(row, surface)
+            ):
+                invalid.add(row_id)
+
         physics_cfg = cfg.physics_validation
         collisions = compute_scene_collisions(
             scene=scene,
@@ -980,9 +1045,6 @@ class StatefulManipulandAgent(BaseStatefulAgent, BaseManipulandAgent):
             current_furniture_id=None,
             manipuland_furniture_tolerance_m=0.0,
         )
-        owner_by_surface = cls._dense_book_row_owner_by_surface(scene)
-        owner_tolerance = float(physics_cfg.manipuland_furniture_tolerance_m)
-        invalid: set[UniqueID] = set()
         for collision in collisions:
             pair = {
                 UniqueID(collision.object_a_id),
@@ -997,12 +1059,8 @@ class StatefulManipulandAgent(BaseStatefulAgent, BaseManipulandAgent):
                     else None
                 )
                 other_ids = pair - {row_id}
-                is_tolerated_owner_contact = (
-                    owner_id is not None
-                    and owner_id in other_ids
-                    and collision.penetration_depth <= owner_tolerance
-                )
-                if not is_tolerated_owner_contact:
+                is_owner_bound_contact = owner_id is not None and owner_id in other_ids
+                if not is_owner_bound_contact:
                     invalid.add(row_id)
         return invalid
 
@@ -1017,22 +1075,26 @@ class StatefulManipulandAgent(BaseStatefulAgent, BaseManipulandAgent):
         row = self.scene.get_object(row_id)
         if furniture is None or row is None:
             return False
-        subset = RoomScene(
-            room_geometry=self.scene.room_geometry,
-            scene_dir=self.scene.scene_dir,
-            room_id=self.scene.room_id,
-            room_type=self.scene.room_type,
-            objects={furniture.object_id: furniture, row.object_id: row},
-            text_description=self.scene.text_description,
+        surface = next(
+            (
+                candidate
+                for candidate in furniture.support_surfaces
+                if row.placement_info is not None
+                and candidate.surface_id == row.placement_info.parent_surface_id
+            ),
+            None,
         )
+        if surface is None or not self._dense_book_row_is_contained(row, surface):
+            return False
         invalid = self._physically_invalid_dense_book_row_ids(
-            subset,
+            self.scene,
             self.cfg,
             row_ids={row_id},
         )
         if invalid:
             console_logger.warning(
-                "Rejected dense book-row pose for %s on %s due to deep collision",
+                "Rejected dense book-row pose for %s on %s due to containment or "
+                "non-owner collision",
                 row_id,
                 furniture_id,
             )
@@ -1079,61 +1141,81 @@ class StatefulManipulandAgent(BaseStatefulAgent, BaseManipulandAgent):
             and obj.placement_info is not None
             and bool((obj.metadata or {}).get("dense_library_book_row"))
         }
+        previous_noise_profile = getattr(
+            self.manipuland_tools, "active_noise_profile", None
+        )
+        if previous_noise_profile is not None:
+            self.manipuland_tools.active_noise_profile = SimpleNamespace(
+                position_xy_std_meters=0.0,
+                rotation_yaw_std_degrees=0.0,
+            )
         placed = 0
-        for surface in self._internal_bookcase_surfaces(furniture):
-            if surface.surface_id in existing_surface_ids:
-                continue
-            clearance = float(surface.bounding_box_max[2] - surface.bounding_box_min[2])
-            if row_height > clearance + 1e-6:
-                continue
-            minimum = surface.bounding_box_min
-            maximum = surface.bounding_box_max
-            center_x = float((minimum[0] + maximum[0]) / 2.0)
-            center_y = float((minimum[1] + maximum[1]) / 2.0)
-            span_x = float(maximum[0] - minimum[0])
-            positions = (
-                (center_x, center_y),
-                (center_x - 0.10 * span_x, center_y),
-                (center_x + 0.10 * span_x, center_y),
-            )
-            candidates = (
-                (position_x, position_y, rotation_degrees)
-                for rotation_degrees in (0.0, 180.0)
-                for position_x, position_y in positions
-            )
-            for position_x, position_y, rotation_degrees in candidates:
-                raw_result = self.manipuland_tools._place_manipuland_on_surface_impl(
-                    asset_id=str(row_asset.object_id),
-                    surface_id=str(surface.surface_id),
-                    position_x=position_x,
-                    position_z=position_y,
-                    rotation_degrees=rotation_degrees,
-                    _action_metadata={
-                        "furniture_id": str(self.current_furniture_id),
-                        "surface_id": str(surface.surface_id),
-                        "placement_method": "deterministic_dense_book_row",
-                    },
-                )
-                try:
-                    result = json.loads(raw_result)
-                except (json.JSONDecodeError, TypeError):
-                    result = {}
-                if not result.get("success"):
+        try:
+            for surface in self._internal_bookcase_surfaces(furniture):
+                if surface.surface_id in existing_surface_ids:
                     continue
-                object_id = result.get("object_id")
-                placed_object = (
-                    self.scene.get_object(UniqueID(object_id)) if object_id else None
+                clearance = float(
+                    surface.bounding_box_max[2] - surface.bounding_box_min[2]
                 )
-                if placed_object is not None:
-                    if not self._dense_book_row_pose_is_collision_free(
-                        furniture.object_id,
-                        placed_object.object_id,
-                    ):
-                        self.scene.remove_object(placed_object.object_id)
+                if row_height > clearance + 1e-6:
+                    continue
+                minimum = surface.bounding_box_min
+                maximum = surface.bounding_box_max
+                center_x = float((minimum[0] + maximum[0]) / 2.0)
+                center_y = float((minimum[1] + maximum[1]) / 2.0)
+                span_x = float(maximum[0] - minimum[0])
+                positions = tuple(
+                    (center_x + fraction * span_x, center_y)
+                    for fraction in (0.0, -0.1, 0.1, -0.2, 0.2, -0.3, 0.3)
+                )
+                candidates = (
+                    (position_x, position_y, rotation_degrees)
+                    for rotation_degrees in (0.0, 180.0)
+                    for position_x, position_y in positions
+                )
+                for position_x, position_y, rotation_degrees in candidates:
+                    raw_result = (
+                        self.manipuland_tools._place_manipuland_on_surface_impl(
+                            asset_id=str(row_asset.object_id),
+                            surface_id=str(surface.surface_id),
+                            position_x=position_x,
+                            position_z=position_y,
+                            rotation_degrees=rotation_degrees,
+                            _action_metadata={
+                                "furniture_id": str(self.current_furniture_id),
+                                "surface_id": str(surface.surface_id),
+                                "placement_method": "deterministic_dense_book_row",
+                            },
+                        )
+                    )
+                    try:
+                        result = json.loads(raw_result)
+                    except (json.JSONDecodeError, TypeError):
+                        result = {}
+                    if not result.get("success"):
                         continue
-                    placed_object.metadata["dense_library_book_row"] = True
-                placed += 1
-                break
+                    object_id = result.get("object_id")
+                    placed_object = (
+                        self.scene.get_object(UniqueID(object_id))
+                        if object_id
+                        else None
+                    )
+                    if placed_object is not None:
+                        if not self._dense_book_row_pose_is_collision_free(
+                            furniture.object_id,
+                            placed_object.object_id,
+                        ):
+                            self.scene.remove_object(placed_object.object_id)
+                            continue
+                        placed_object.metadata["dense_library_book_row"] = True
+                        placed_object.metadata["dense_library_owner_bound"] = str(
+                            furniture.object_id
+                        )
+                    placed += 1
+                    break
+        finally:
+            if previous_noise_profile is not None:
+                self.manipuland_tools.active_noise_profile = previous_noise_profile
         return placed
 
     @staticmethod
@@ -1295,6 +1377,8 @@ class StatefulManipulandAgent(BaseStatefulAgent, BaseManipulandAgent):
                 immutable=original.immutable,
                 scale_factor=original.scale_factor,
             )
+            if bool(clone.metadata.get("dense_library_book_row")):
+                clone.metadata["dense_library_owner_bound"] = str(target.object_id)
             self.scene.add_object(clone)
         return len(originals)
 
