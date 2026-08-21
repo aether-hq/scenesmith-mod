@@ -11,6 +11,7 @@ import subprocess
 import tempfile
 import threading
 import time
+import uuid
 
 from jsonschema import ValidationError as JsonSchemaValidationError
 from jsonschema import validate as validate_json_schema
@@ -40,8 +41,8 @@ console_logger = logging.getLogger(__name__)
 CLAUDE_BINARY_RECOVERY_SECONDS = 5.0
 
 
-def _extract_stream_result(stream_output: str) -> str:
-    """Return Claude's terminal result from newline-delimited stream events."""
+def _extract_terminal_result_event(stream_output: str) -> dict[str, Any]:
+    """Return Claude's terminal result event from newline-delimited output."""
     result_event: dict[str, Any] | None = None
     for line in stream_output.splitlines():
         if not line.strip():
@@ -61,6 +62,12 @@ def _extract_stream_result(stream_output: str) -> str:
             or "unknown Claude CLI error"
         )
         raise RuntimeError(f"Claude CLI stream failed: {diagnostic}")
+    return result_event
+
+
+def _extract_stream_result(stream_output: str) -> str:
+    """Return Claude's terminal text from newline-delimited stream events."""
+    result_event = _extract_terminal_result_event(stream_output)
     result = result_event.get("result")
     if not isinstance(result, str) or not result.strip():
         structured = result_event.get("structured_output")
@@ -68,6 +75,104 @@ def _extract_stream_result(stream_output: str) -> str:
             return json.dumps(structured, separators=(",", ":"))
         raise RuntimeError("Claude CLI returned an empty streamed result")
     return result.strip()
+
+
+def _non_negative_int(value: Any) -> int:
+    try:
+        return max(0, int(value or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _non_negative_float(value: Any) -> float:
+    try:
+        return max(0.0, float(value or 0))
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _extract_stream_usage(
+    stream_output: str,
+    *,
+    requested_model: str,
+) -> dict[str, Any]:
+    """Normalize Claude's terminal usage into a durable per-request record."""
+    result_event = _extract_terminal_result_event(stream_output)
+    raw_usage = result_event.get("usage")
+    model_usage = result_event.get("modelUsage") or result_event.get("model_usage")
+    usage = raw_usage if isinstance(raw_usage, dict) else {}
+    model_records = (
+        [record for record in model_usage.values() if isinstance(record, dict)]
+        if isinstance(model_usage, dict)
+        else []
+    )
+    input_tokens = _non_negative_int(usage.get("input_tokens")) or sum(
+        _non_negative_int(record.get("inputTokens", record.get("input_tokens")))
+        for record in model_records
+    )
+    cache_creation_tokens = _non_negative_int(
+        usage.get("cache_creation_input_tokens")
+    ) or sum(
+        _non_negative_int(
+            record.get(
+                "cacheCreationInputTokens",
+                record.get("cache_creation_input_tokens"),
+            )
+        )
+        for record in model_records
+    )
+    cache_read_tokens = _non_negative_int(usage.get("cache_read_input_tokens")) or sum(
+        _non_negative_int(
+            record.get("cacheReadInputTokens", record.get("cache_read_input_tokens"))
+        )
+        for record in model_records
+    )
+    output_tokens = _non_negative_int(usage.get("output_tokens")) or sum(
+        _non_negative_int(record.get("outputTokens", record.get("output_tokens")))
+        for record in model_records
+    )
+    total_tokens = (
+        input_tokens + cache_creation_tokens + cache_read_tokens + output_tokens
+    )
+    raw_cost = result_event.get("total_cost_usd")
+    if raw_cost is None:
+        raw_cost = sum(
+            _non_negative_float(record.get("costUSD", record.get("cost_usd")))
+            for record in model_records
+        )
+    cost = _non_negative_float(raw_cost)
+    reported = isinstance(raw_usage, dict) or bool(model_records)
+    return {
+        "schema_version": 1,
+        "provider": "claude-cli",
+        "model": requested_model,
+        "requests": 1,
+        "turns": max(1, _non_negative_int(result_event.get("num_turns"))),
+        "input_tokens": input_tokens,
+        "cache_creation_input_tokens": cache_creation_tokens,
+        "cache_read_input_tokens": cache_read_tokens,
+        "output_tokens": output_tokens,
+        "total_tokens": total_tokens,
+        "api_equivalent_cost_usd": cost,
+        "reported": reported,
+    }
+
+
+def _openai_usage(usage: dict[str, Any]) -> dict[str, Any]:
+    """Map Claude token accounting onto Chat Completions usage fields."""
+    prompt_tokens = (
+        usage["input_tokens"]
+        + usage["cache_creation_input_tokens"]
+        + usage["cache_read_input_tokens"]
+    )
+    return {
+        "prompt_tokens": prompt_tokens,
+        "completion_tokens": usage["output_tokens"],
+        "total_tokens": prompt_tokens + usage["output_tokens"],
+        "prompt_tokens_details": {
+            "cached_tokens": usage["cache_read_input_tokens"],
+        },
+    }
 
 
 def _extract_json_object(raw_output: str) -> str:
@@ -263,6 +368,11 @@ class _ClaudeExecutor:
                     f"Claude CLI exited {process.returncode}: {diagnostic.strip()}"
                 )
             raw_output = _extract_stream_result(process.stdout)
+            stream_usage = _extract_stream_usage(
+                process.stdout,
+                requested_model=model,
+            )
+            stream_usage["request_id"] = f"claude_{uuid.uuid4().hex}"
             if tools and response_schema:
                 structured = json.loads(raw_output)
                 if structured.get("kind") == "final":
@@ -293,12 +403,18 @@ class _ClaudeExecutor:
             len(tools),
             len(image_paths),
         )
-        return _chat_completion_response(
+        console_logger.info(
+            "SCENESMITH_LLM_USAGE %s",
+            json.dumps(stream_usage, sort_keys=True, separators=(",", ":")),
+        )
+        response = _chat_completion_response(
             raw_output=raw_output,
             tools=tools,
             model=model,
             tool_choice=tool_choice,
         )
+        response["usage"] = _openai_usage(stream_usage)
+        return response
 
 
 class ClaudeCliProxy(OpenAIChatProxy):
