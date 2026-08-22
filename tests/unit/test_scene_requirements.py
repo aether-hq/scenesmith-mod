@@ -7,16 +7,20 @@ from types import SimpleNamespace
 import pytest
 
 import scenesmith.floor_plan_agents.stateful_floor_plan_agent as floor_plan_module
+from scenesmith.agent_utils import scene_requirements as requirement_module
 
 from scenesmith.agent_utils.scene_blueprint import blueprint_from_prompt
 from scenesmith.agent_utils.scene_requirements import (
     CompositionPlan,
     RequirementInterpretationBatch,
     RequirementInterpretationProposal,
+    RequirementInterpretationWire,
+    RequirementInterpretationWireBatch,
     RequirementGraphValidationError,
     RequirementMergeError,
     RequirementQuantity,
     RequirementRelation,
+    RequirementRelationWire,
     RequirementScale,
     SceneCompositionOpinion,
     SceneRequirementGraph,
@@ -25,12 +29,14 @@ from scenesmith.agent_utils.scene_requirements import (
     analyze_requirement_candidates,
     assert_requirement_graph_consistent,
     audit_requirement_graph,
+    expand_requirement_interpretations,
     literal_candidates_from_prompt,
     load_requirement_graph,
     merge_requirement_interpretations,
     persist_requirement_graph,
     persist_shadow_audit,
     requirement_graph_from_prompt,
+    semantic_model_name,
 )
 from scenesmith.agent_utils.semantic_ledger import load_semantic_ledger
 from scenesmith.agent_utils.semantic_strategies import load_capability_manifest
@@ -43,6 +49,21 @@ DOCK_PROMPT = (
     "massive doors into the rest of the station and many smaller doors to e.g. "
     "crew quarters, etc."
 )
+
+
+def test_semantic_model_override_is_reserved_for_ownership_gates(monkeypatch):
+    monkeypatch.setenv("SCENESMITH_SEMANTIC_MODEL", "sonnet")
+    assert semantic_model_name("haiku") == "sonnet"
+
+    monkeypatch.delenv("SCENESMITH_SEMANTIC_MODEL")
+    assert semantic_model_name("haiku") == "haiku"
+
+
+def test_semantic_analyst_contract_is_explicitly_bounded():
+    instructions = " ".join(requirement_module.REQUIREMENT_ANALYST_INSTRUCTIONS.split())
+    assert "at most 18 words" in instructions
+    assert "at most two relations" in instructions
+    assert "Output only the requested schema" in instructions
 
 
 def _composition():
@@ -154,6 +175,47 @@ def _batch(candidates, replacements=None):
         composition=_composition(),
         requirements=tuple(proposals),
         analysis_summary="All literal candidates were interpreted.",
+    )
+
+
+def _wire_batch(candidates):
+    batch = _batch(candidates)
+    return RequirementInterpretationWireBatch(
+        composition=batch.composition,
+        requirements=tuple(
+            RequirementInterpretationWire(
+                candidate_id=proposal.candidate_id,
+                subject=proposal.subject,
+                kind=proposal.kind,
+                source_quantity_id=proposal.source_quantity_id,
+                interpreted_minimum=proposal.quantity.interpreted_minimum,
+                scale_label=(
+                    proposal.scale.qualitative_label if proposal.scale else ""
+                ),
+                scale_relative_to=(
+                    proposal.scale.relative_to if proposal.scale else None
+                ),
+                minimum_dimensions_m=(
+                    proposal.scale.minimum_dimensions_m if proposal.scale else None
+                ),
+                preferred_dimensions_m=(
+                    proposal.scale.preferred_dimensions_m if proposal.scale else None
+                ),
+                clearance_m=(proposal.scale.clearance_m if proposal.scale else None),
+                relations=tuple(
+                    RequirementRelationWire(
+                        predicate=relation.predicate,
+                        target=relation.target,
+                    )
+                    for relation in proposal.relations
+                ),
+                recommended_strategy=proposal.composition.recommended_strategy,
+                fallback_construction=proposal.composition.procedural_geometry,
+                arrangement=proposal.composition.arrangement,
+            )
+            for proposal in batch.requirements
+        ),
+        analysis_summary=batch.analysis_summary,
     )
 
 
@@ -326,6 +388,36 @@ def test_llm_semantics_supply_size_composition_topology_and_strategies():
     assert all(item.strength == "hard" for item in graph.requirements)
 
 
+def test_source_door_cannot_be_misclassified_as_vertical_connector():
+    candidates = literal_candidates_from_prompt(
+        "A hangar with massive doors into the station."
+    )
+    door = _candidate(candidates, "massive doors")
+    wire_batch = _wire_batch(candidates)
+    wire_batch = wire_batch.model_copy(
+        update={
+            "requirements": tuple(
+                (
+                    requirement.model_copy(update={"kind": "connector"})
+                    if requirement.candidate_id == door.candidate_id
+                    else requirement
+                )
+                for requirement in wire_batch.requirements
+            )
+        }
+    )
+
+    expanded = expand_requirement_interpretations(candidates, wire_batch)
+    door_requirement = next(
+        requirement
+        for requirement in expanded.requirements
+        if requirement.candidate_id == door.candidate_id
+    )
+
+    assert door_requirement.kind == "opening"
+    assert door_requirement.verification.stage == "topology"
+
+
 def test_merge_rejects_model_quantity_downgrade():
     prompt = "A test volume with 10 calibration cradles."
     candidates = literal_candidates_from_prompt(prompt)
@@ -438,12 +530,12 @@ def test_shadow_audit_marks_unclassified_fallback_ambiguous(tmp_path):
 def test_structured_analyst_is_the_semantic_authority():
     prompt = "A broad test volume with three unfamiliar assemblies."
     candidates = literal_candidates_from_prompt(prompt)
-    batch = _batch(candidates)
+    wire_batch = _wire_batch(candidates)
 
     class FakeResult:
         def final_output_as(self, output_type):
-            assert output_type is RequirementInterpretationBatch
-            return batch
+            assert output_type is RequirementInterpretationWireBatch
+            return wire_batch
 
     class FakeRunner:
         call = None
@@ -462,15 +554,214 @@ def test_structured_analyst_is_the_semantic_authority():
         )
     )
 
-    assert observed == batch
+    assert observed.composition == wire_batch.composition
+    assert {item.candidate_id for item in observed.requirements} == {
+        item.candidate_id for item in wire_batch.requirements
+    }
+    assert all(
+        set(item.composition.strategy_order) == {"catalog", "composed", "procedural"}
+        for item in observed.requirements
+    )
     assert isinstance(result, FakeResult)
     assert (
-        FakeRunner.call["starting_agent"].output_type is RequirementInterpretationBatch
+        FakeRunner.call["starting_agent"].output_type
+        is RequirementInterpretationWireBatch
     )
     assert "preferred_dimensions_m" in str(
-        RequirementInterpretationBatch.model_json_schema()
+        RequirementInterpretationWireBatch.model_json_schema()
     )
     assert "immutable_candidates" in FakeRunner.call["input"]
+
+
+@pytest.mark.parametrize(
+    ("prompt", "kind", "expected_minimum"),
+    [
+        ("A large library.", "scene_type", None),
+        ("A 30 meter library.", "scene_type", (30.0, 10.0, 30.0)),
+        ("A huge arched window.", "opening", None),
+        ("A 5 meter arched window.", "opening", (30.0, 10.0, 30.0)),
+    ],
+)
+def test_qualitative_scale_cannot_invent_a_hard_metric(prompt, kind, expected_minimum):
+    candidate = literal_candidates_from_prompt(prompt)[0]
+    wire = RequirementInterpretationWire(
+        candidate_id=candidate.candidate_id,
+        subject="library",
+        kind=kind,
+        source_quantity_id=(
+            candidate.explicit_quantities[0].quantity_id
+            if candidate.explicit_quantities
+            else None
+        ),
+        interpreted_minimum=1,
+        scale_label="large",
+        scale_relative_to=None,
+        minimum_dimensions_m=(30.0, 10.0, 30.0),
+        preferred_dimensions_m=(40.0, 12.0, 40.0),
+        clearance_m=None,
+        relations=(),
+        recommended_strategy="composed",
+        fallback_construction="Compose a bounded structural shell.",
+        arrangement="Use the configured envelope efficiently.",
+    )
+    batch = RequirementInterpretationWireBatch(
+        composition=_composition(),
+        requirements=(wire,),
+        analysis_summary="Fixture.",
+    )
+
+    expanded = expand_requirement_interpretations((candidate,), batch)
+
+    assert expanded.requirements[0].scale.minimum_dimensions_m == expected_minimum
+
+
+def test_multi_level_means_at_least_two_not_an_invented_three():
+    candidate = next(
+        item
+        for item in literal_candidates_from_prompt("A multi-level library.")
+        if "multi-level" in item.evidence.text
+    )
+    wire = RequirementInterpretationWire(
+        candidate_id=candidate.candidate_id,
+        subject="library levels",
+        kind="level",
+        source_quantity_id=None,
+        interpreted_minimum=3,
+        scale_label="multi-level",
+        scale_relative_to=None,
+        minimum_dimensions_m=None,
+        preferred_dimensions_m=None,
+        clearance_m=None,
+        relations=(),
+        recommended_strategy="composed",
+        fallback_construction="Stack connected floor plates.",
+        arrangement="Connect every level vertically.",
+    )
+    batch = RequirementInterpretationWireBatch(
+        composition=_composition(),
+        requirements=(wire,),
+        analysis_summary="Fixture.",
+    )
+
+    expanded = expand_requirement_interpretations((candidate,), batch)
+
+    assert expanded.requirements[0].quantity.interpreted_minimum == 2
+
+
+@pytest.mark.parametrize(
+    ("prompt", "model_minimum", "expected_minimum"),
+    [
+        ("A library with thousands of books.", 3000, 3),
+        ("A library with a bunch of tables.", 12, 3),
+        ("A library with statues.", 4, None),
+    ],
+)
+def test_qualitative_quantity_cannot_invent_a_hard_count(
+    prompt, model_minimum, expected_minimum
+):
+    candidate = literal_candidates_from_prompt(prompt)[-1]
+    explicit = (
+        candidate.explicit_quantities[0] if candidate.explicit_quantities else None
+    )
+    wire = RequirementInterpretationWire(
+        candidate_id=candidate.candidate_id,
+        subject="library contents",
+        kind="object_group",
+        source_quantity_id=explicit.quantity_id if explicit is not None else None,
+        interpreted_minimum=model_minimum,
+        scale_label="",
+        scale_relative_to=None,
+        minimum_dimensions_m=None,
+        preferred_dimensions_m=None,
+        clearance_m=None,
+        relations=(),
+        recommended_strategy="composed",
+        fallback_construction="Compose repeated bounded assets.",
+        arrangement="Distribute assets through the room.",
+    )
+    batch = RequirementInterpretationWireBatch(
+        composition=_composition(),
+        requirements=(wire,),
+        analysis_summary="Fixture.",
+    )
+
+    expanded = expand_requirement_interpretations((candidate,), batch)
+
+    assert expanded.requirements[0].quantity.interpreted_minimum == expected_minimum
+
+
+def test_model_invented_relationships_are_removed_but_literal_relationships_survive():
+    candidate = literal_candidates_from_prompt(
+        "A spiral staircase connects two floors."
+    )[0]
+    wire = RequirementInterpretationWire(
+        candidate_id=candidate.candidate_id,
+        subject="spiral staircase",
+        kind="connector",
+        source_quantity_id=candidate.explicit_quantities[0].quantity_id,
+        interpreted_minimum=None,
+        scale_label="",
+        scale_relative_to=None,
+        minimum_dimensions_m=None,
+        preferred_dimensions_m=None,
+        clearance_m=None,
+        relations=(
+            RequirementRelationWire(predicate="connects", target="floors"),
+            RequirementRelationWire(predicate="centered_in", target="atrium"),
+        ),
+        recommended_strategy="procedural",
+        fallback_construction="Build a measured spiral stair.",
+        arrangement="Connect the stated floors.",
+    )
+    batch = RequirementInterpretationWireBatch(
+        composition=_composition(),
+        requirements=(wire,),
+        analysis_summary="Fixture.",
+    )
+
+    expanded = expand_requirement_interpretations((candidate,), batch)
+
+    assert [
+        (item.predicate, item.target) for item in expanded.requirements[0].relations
+    ] == [("connects", "floors")]
+
+
+@pytest.mark.parametrize(
+    ("prompt", "expected"),
+    [
+        (
+            "A simple bedroom with a bed, two nightstands, and a wardrobe.",
+            (
+                ("A simple bedroom", (1,)),
+                ("with a bed", (1,)),
+                ("two nightstands", (2,)),
+                ("and a wardrobe", (1,)),
+            ),
+        ),
+        (
+            "A small office with one desk, one ergonomic chair, and storage.",
+            (
+                ("A small office", (1,)),
+                ("with one desk", (1,)),
+                ("one ergonomic chair", (1,)),
+                ("and storage", ()),
+            ),
+        ),
+    ],
+)
+def test_simple_control_prompts_create_only_literal_obligations(prompt, expected):
+    candidates = literal_candidates_from_prompt(prompt)
+
+    assert (
+        tuple(
+            (
+                candidate.evidence.text,
+                tuple(quantity.value for quantity in candidate.explicit_quantities),
+            )
+            for candidate in candidates
+        )
+        == expected
+    )
 
 
 def test_floor_plan_calls_semantic_llm_then_requirement_bound_spatial_compiler(
@@ -485,6 +776,7 @@ def test_floor_plan_calls_semantic_llm_then_requirement_bound_spatial_compiler(
         openai=SimpleNamespace(model="semantic-test-model"),
         max_floor_plan_dim_m=20.0,
         wall_height=SimpleNamespace(max=12.0),
+        windows=SimpleNamespace(width_range=(0.6, 4.0), height_range=(0.6, 4.0)),
         semantic_capabilities={
             "catalog_available": True,
             "generated_geometry_available": True,
@@ -496,6 +788,7 @@ def test_floor_plan_calls_semantic_llm_then_requirement_bound_spatial_compiler(
     agent._reset_workflow_budget = lambda: None
     agent._create_run_config = lambda: None
     agent._get_model_settings = lambda **_kwargs: None
+    monkeypatch.setenv("SCENESMITH_SEMANTIC_MODEL", "semantic-ownership-model")
 
     async def fake_analysis(prompt, candidates, **kwargs):
         events.append(("analyze", prompt, kwargs["model"]))
@@ -523,9 +816,11 @@ def test_floor_plan_calls_semantic_llm_then_requirement_bound_spatial_compiler(
         asyncio.run(agent.generate_house_layout("A novel chamber.", tmp_path / "floor"))
 
     assert [event[0] for event in events] == ["analyze", "spatial"]
+    assert events[0][2] == "semantic-ownership-model"
+    assert events[1][3] == "semantic-ownership-model"
     persisted = load_requirement_graph(tmp_path / "scene_requirement_graph.json")
     assert persisted.analysis_status == "complete"
-    assert persisted.analysis_model == "semantic-test-model"
+    assert persisted.analysis_model == "semantic-ownership-model"
     assert (tmp_path / "semantic_obligation_ledger.json").is_file()
     assert (tmp_path / "semantic_obligation_summary.json").is_file()
     manifest = load_capability_manifest(tmp_path / "semantic_capability_manifest.json")

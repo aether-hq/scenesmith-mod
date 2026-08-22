@@ -18,6 +18,12 @@ from scenesmith.agent_utils.llm_harness import LLMHarnessConfig
 
 console_logger = logging.getLogger(__name__)
 DEFAULT_AGENT_RUN_TIMEOUT_SECONDS = 120.0
+DEFAULT_ROLE_RUN_TIMEOUT_SECONDS = {
+    # A complete requirement-bound scene topology can be materially larger than
+    # an ordinary designer response. It remains one bounded turn, but healthy
+    # subscription streams need enough time to finish their strict schema.
+    "spatial_compiler": 600.0,
+}
 
 
 class AgentWorkflowTimeout(TimeoutError):
@@ -89,12 +95,15 @@ def agent_run_timeout_seconds(
     The role setting is an actual wall-clock budget, not a lower bound.
     """
     role_key = f"SCENESMITH_AGENT_{role.upper()}_TIMEOUT_SECONDS" if role else None
+    default_timeout = DEFAULT_ROLE_RUN_TIMEOUT_SECONDS.get(
+        str(role or "").casefold(), DEFAULT_AGENT_RUN_TIMEOUT_SECONDS
+    )
     raw = (
         os.environ.get(role_key)
         if role_key is not None and os.environ.get(role_key) is not None
         else os.environ.get(
             "SCENESMITH_AGENT_RUN_TIMEOUT_SECONDS",
-            str(DEFAULT_AGENT_RUN_TIMEOUT_SECONDS),
+            str(default_timeout),
         )
     )
     timeout = float(raw)

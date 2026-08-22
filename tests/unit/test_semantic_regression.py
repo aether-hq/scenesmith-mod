@@ -8,8 +8,10 @@ from scenesmith.agent_utils.semantic_regression import (
     BaselineObservation,
     ObjectCountExpectation,
     TopologyExpectation,
+    compare_candidate_build,
     compare_reference_build,
     load_regression_corpus,
+    observe_reference_build,
     validate_reference_run,
     verify_visual_references,
 )
@@ -27,7 +29,8 @@ def test_corpus_covers_approved_failure_generic_and_adversarial_cases():
     assert corpus.case("renaissance-library").reference.semantic_status == "approved"
     dock = corpus.case("spaceship-repair-dock")
     assert dock.reference.semantic_status == "known_failure"
-    assert "ten repair bays discarded" in dock.reference.known_semantic_gaps
+    assert dock.target_outcome == "explicit_failure"
+    assert dock.reference.known_semantic_gaps == ()
     assert corpus.case("simple-bedroom").reference is None
     assert corpus.case("contradictory-counts").target_outcome == "explicit_failure"
 
@@ -46,13 +49,11 @@ def test_reference_comparison_reports_precise_semantic_drift():
     observation = BaselineObservation(
         run_id=case.reference.run_id,
         job_status="completed",
+        error="generic room published",
         duration_seconds=10.0,
         topology=TopologyExpectation(levels=1, spaces=1, openings=1, connectors=0),
-        final_object_count=17,
-        object_counts={
-            expectation.pattern: (1 if "fighter" in expectation.pattern else 0)
-            for expectation in case.reference.object_counts
-        },
+        final_object_count=1,
+        object_counts={},
         exports=("scene.glb",),
         usage=None,
     )
@@ -60,13 +61,13 @@ def test_reference_comparison_reports_precise_semantic_drift():
     result = compare_reference_build(case, observation)
 
     assert not result.matches_reference
+    assert any("job_status expected failed" in issue for issue in result.issues)
+    assert any("error expected to match" in issue for issue in result.issues)
     assert any("topology expected" in issue for issue in result.issues)
-    assert any("final objects expected >= 18" in issue for issue in result.issues)
-    assert any("objects /fighter/ expected <= 0" in issue for issue in result.issues)
+    assert any("final objects expected <= 0" in issue for issue in result.issues)
     assert any(
-        "missing exports: scene_textured.glb" in issue for issue in result.issues
+        "explicit failure unexpectedly published" in issue for issue in result.issues
     )
-    assert any("usage record is required" in issue for issue in result.issues)
 
 
 def test_synthetic_retained_run_is_reproducibly_validated(tmp_path):
@@ -74,23 +75,19 @@ def test_synthetic_retained_run_is_reproducibly_validated(tmp_path):
     case = corpus.case("spaceship-repair-dock")
     run_dir = tmp_path / case.reference.run_id
     scene_dir = run_dir / "scene_000"
-    final_dir = scene_dir / "room_room" / "scene_states" / "final_scene"
-    final_dir.mkdir(parents=True)
-    (run_dir / "scene.glb").write_bytes(b"solid")
-    (run_dir / "scene_textured.glb").write_bytes(b"textured")
+    scene_dir.mkdir(parents=True)
     (run_dir / "job.json").write_text(
         json.dumps(
             {
                 "id": case.reference.run_id,
-                "status": "completed",
+                "status": "failed",
+                "error": (
+                    "SpatialCompilationError: 'opening into space': missing "
+                    "constructed open_connection opening >= 4m × 4m"
+                ),
                 "startedAt": "2026-08-21T00:00:00Z",
-                "finishedAt": "2026-08-21T00:10:00Z",
-                "usage": {
-                    "requests": 24,
-                    "turns": 72,
-                    "totalTokens": 401814,
-                    "apiEquivalentCostUsd": 0.8217156999999999,
-                },
+                "finishedAt": "2026-08-21T00:07:17.002Z",
+                "usage": None,
             }
         )
     )
@@ -99,20 +96,10 @@ def test_synthetic_retained_run_is_reproducibly_validated(tmp_path):
             {
                 "levels": [{}],
                 "spaces": [{}],
-                "openings": [],
+                "openings": [{} for _ in range(5)],
                 "connectors": [],
             }
         )
-    )
-    object_names = [
-        "equipment_rack",
-        "repair_workbench",
-        "burgundy_book_row",
-        "encyclopedia_book_row",
-        "candlestick_brass",
-    ] + [f"generic_{index}" for index in range(13)]
-    (final_dir / "scene_state.json").write_text(
-        json.dumps({"objects": {name: {"name": name} for name in object_names}})
     )
 
     result = validate_reference_run(
@@ -122,7 +109,9 @@ def test_synthetic_retained_run_is_reproducibly_validated(tmp_path):
     )
 
     assert result.matches_reference, result.issues
-    assert result.observation.duration_seconds == 600.0
+    assert result.observation.duration_seconds == 437.002
+    assert result.observation.exports == ()
+    assert result.observation.final_object_count == 0
 
 
 def test_visual_reference_hashes_match_retained_native_captures_when_available():
@@ -141,3 +130,164 @@ def test_visual_reference_hashes_match_retained_native_captures_when_available()
     assert available_cases, "expected at least one retained native capture"
     for case in available_cases:
         assert verify_visual_references(case) == ()
+
+
+def _approved_library_candidate(**updates):
+    case = load_regression_corpus(CORPUS_PATH).case("renaissance-library")
+    values = {
+        "run_id": "candidate-library",
+        "job_status": "completed",
+        "duration_seconds": 1000.0,
+        "topology": case.reference.topology,
+        "final_object_count": 93,
+        "object_counts": {
+            expectation.pattern: expectation.minimum
+            for expectation in case.reference.object_counts
+        },
+        "exports": case.reference.required_exports,
+        "usage": {
+            "requests": 40,
+            "turns": 100,
+            "totalTokens": 800_000,
+            "apiEquivalentCostUsd": 1.5,
+        },
+        "semantic_certificate_count": 1,
+        "semantic_publishable": True,
+        "physics_verified": True,
+        "ledger_closed": True,
+        "ledger_publishable": True,
+        "room_kit_ids": ("library-reading-hall-v1",),
+    }
+    values.update(updates)
+    return case, BaselineObservation(**values)
+
+
+def test_candidate_comparison_protects_artifacts_and_reports_bounded_operations():
+    case, observation = _approved_library_candidate()
+
+    result = compare_candidate_build(case, observation)
+
+    assert result.passed, result.issues
+    deltas = {item.metric: item for item in result.operational_deltas}
+    assert deltas["duration_seconds"].baseline == 1165.123
+    assert round(deltas["duration_seconds"].delta, 3) == -165.123
+    assert deltas["duration_seconds"].within_bounds
+    assert deltas["total_tokens"].baseline is None
+    assert deltas["total_tokens"].maximum == 1_000_000
+    assert deltas["total_tokens"].within_bounds
+    assert deltas["failure_rate"].observed == 0.0
+
+
+def test_resumed_candidate_accepts_explicit_full_pipeline_operational_evidence():
+    case, candidate = _approved_library_candidate(
+        run_id="resumed-library",
+        duration_seconds=90.0,
+        usage=None,
+    )
+    _, operational = _approved_library_candidate(run_id="full-library")
+
+    result = compare_candidate_build(
+        case,
+        candidate,
+        operational_observation=operational,
+    )
+
+    assert result.passed, result.issues
+    assert result.candidate_run_id == "resumed-library"
+    assert result.operational_run_id == "full-library"
+    assert result.observation.usage is None
+    assert {item.metric: item.observed for item in result.operational_deltas}[
+        "requests"
+    ] == 40
+
+
+def test_candidate_comparison_fails_closed_on_missing_evidence_and_usage():
+    case, observation = _approved_library_candidate(
+        duration_seconds=1600.0,
+        usage=None,
+        semantic_certificate_count=0,
+        semantic_publishable=None,
+        physics_verified=None,
+        ledger_closed=None,
+        ledger_publishable=None,
+        room_kit_ids=(),
+    )
+
+    result = compare_candidate_build(
+        case,
+        observation,
+        attempts=2,
+        failed_attempts=1,
+    )
+
+    assert not result.passed
+    assert "semantic publication certificate is required but missing" in result.issues
+    assert "semantic obligation ledger is not closed" in result.issues
+    assert "missing required room kits: library-reading-hall-v1" in result.issues
+    assert any("operational duration_seconds" in issue for issue in result.issues)
+    assert any("operational total_tokens" in issue for issue in result.issues)
+    assert any("operational failure_rate" in issue for issue in result.issues)
+
+
+def test_candidate_observation_reads_publication_ledger_and_room_kit(tmp_path):
+    case = load_regression_corpus(CORPUS_PATH).case("renaissance-library")
+    run_dir = tmp_path / "candidate-library"
+    room_dir = run_dir / "scene_000" / "room_room"
+    final_dir = room_dir / "scene_states" / "final_scene"
+    final_dir.mkdir(parents=True)
+    (run_dir / "scene.glb").write_bytes(b"solid")
+    (run_dir / "scene_textured.glb").write_bytes(b"textured")
+    (run_dir / "job.json").write_text(
+        json.dumps(
+            {
+                "id": run_dir.name,
+                "status": "completed",
+                "startedAt": "2026-08-21T00:00:00Z",
+                "finishedAt": "2026-08-21T00:16:40Z",
+                "usage": {
+                    "requests": 40,
+                    "turns": 100,
+                    "totalTokens": 800_000,
+                    "apiEquivalentCostUsd": 1.5,
+                },
+            }
+        )
+    )
+    (run_dir / "scene_000" / "scene_blueprint.json").write_text(
+        json.dumps(
+            {
+                "levels": [{} for _ in range(case.reference.topology.levels)],
+                "spaces": [{} for _ in range(case.reference.topology.spaces)],
+                "openings": [{} for _ in range(case.reference.topology.openings)],
+                "connectors": [{} for _ in range(case.reference.topology.connectors)],
+            }
+        )
+    )
+    names = (
+        [f"renaissance_bookcase_{index}" for index in range(15)]
+        + [f"classical_statue_{index}" for index in range(3)]
+        + [f"reading_table_{index}" for index in range(7)]
+        + [f"reading_chair_{index}" for index in range(13)]
+        + [f"burgundy_book_row_{index}" for index in range(36)]
+        + ["chandelier"]
+        + [f"generic_{index}" for index in range(18)]
+    )
+    (final_dir / "scene_state.json").write_text(
+        json.dumps({"objects": {name: {"name": name} for name in names}})
+    )
+    (room_dir / "semantic_publication_certificate.json").write_text(
+        json.dumps({"publishable": True, "physics_verified": True})
+    )
+    (room_dir / "semantic_obligation_summary.json").write_text(
+        json.dumps({"closed": True, "publishable": True})
+    )
+    (room_dir / "room_kit.json").write_text(
+        json.dumps({"kit_id": "library-reading-hall-v1"})
+    )
+
+    observation = observe_reference_build(run_dir, case)
+    result = compare_candidate_build(case, observation)
+
+    assert observation.semantic_certificate_count == 1
+    assert observation.room_kit_ids == ("library-reading-hall-v1",)
+    assert result.passed, result.issues

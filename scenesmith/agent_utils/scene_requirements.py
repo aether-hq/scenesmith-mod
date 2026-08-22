@@ -34,6 +34,14 @@ if TYPE_CHECKING:
 
 CURRENT_REQUIREMENT_SCHEMA_VERSION = 2
 
+
+def semantic_model_name(configured_model: str | None) -> str:
+    """Resolve the stronger model reserved for semantic ownership gates."""
+
+    override = os.environ.get("SCENESMITH_SEMANTIC_MODEL", "").strip()
+    return override or str(configured_model or "").strip()
+
+
 InterpretedRequirementKind = Literal[
     "scene_type",
     "level",
@@ -246,6 +254,39 @@ class RequirementInterpretationBatch(RequirementModel):
     schema_version: Literal[1] = 1
     composition: SceneCompositionOpinion
     requirements: tuple[RequirementInterpretationProposal, ...]
+    analysis_summary: str
+
+
+class RequirementRelationWire(RequirementModel):
+    """Compact source relationship emitted by the semantic model."""
+
+    predicate: str
+    target: str
+
+
+class RequirementInterpretationWire(RequirementModel):
+    """Compact semantic opinion expanded into the durable requirement model."""
+
+    candidate_id: str
+    subject: str
+    kind: InterpretedRequirementKind
+    source_quantity_id: str | None
+    interpreted_minimum: int | None
+    scale_label: str
+    scale_relative_to: str | None
+    minimum_dimensions_m: tuple[float, float, float] | None
+    preferred_dimensions_m: tuple[float, float, float] | None
+    clearance_m: float | None
+    relations: tuple[RequirementRelationWire, ...]
+    recommended_strategy: FulfillmentStrategy
+    fallback_construction: str
+    arrangement: str
+
+
+class RequirementInterpretationWireBatch(RequirementModel):
+    schema_version: Literal[1] = 1
+    composition: SceneCompositionOpinion
+    requirements: tuple[RequirementInterpretationWire, ...]
     analysis_summary: str
 
 
@@ -473,6 +514,64 @@ _DISCOURSE_ONLY = re.compile(
     flags=re.IGNORECASE,
 )
 
+_RELATION_STOP_WORDS = frozenset(
+    {"a", "an", "and", "at", "by", "for", "from", "in", "of", "on", "the", "to", "with"}
+)
+
+
+def _relation_word(token: str) -> str:
+    """Return a small grammar-only stem for source relationship validation."""
+
+    word = token.casefold()
+    if word in {
+        "floor",
+        "floors",
+        "level",
+        "levels",
+        "storey",
+        "storeys",
+        "story",
+        "stories",
+    }:
+        return "vertical-level"
+    if word.endswith("ies") and len(word) > 4:
+        return f"{word[:-3]}y"
+    if word.endswith("ed") and len(word) > 4:
+        word = word[:-2]
+        if word.endswith(word[-1:] * 2):
+            word = word[:-1]
+        return word
+    if word.endswith("ing") and len(word) > 5:
+        return word[:-3]
+    if word.endswith("es") and len(word) > 4:
+        if word.endswith(("ches", "shes", "sses", "xes", "zes")):
+            return word[:-2]
+        return word[:-1]
+    if word.endswith("s") and len(word) > 3:
+        return word[:-1]
+    return word
+
+
+def _relation_words(text: str) -> frozenset[str]:
+    return frozenset(
+        _relation_word(token)
+        for token in re.findall(r"[A-Za-z0-9]+", text)
+        if token.casefold() not in _RELATION_STOP_WORDS
+    )
+
+
+def _source_supports_relation(
+    relation: RequirementRelationWire, source_text: str
+) -> bool:
+    """Reject model-invented relationships that have no literal source support."""
+
+    source_words = _relation_words(source_text)
+    predicate_words = _relation_words(relation.predicate)
+    target_words = _relation_words(relation.target)
+    return bool(predicate_words and predicate_words & source_words) and bool(
+        target_words and target_words <= source_words
+    )
+
 
 def _stable_id(prefix: str, prompt: str, start: int, end: int, suffix: str = "") -> str:
     digest = hashlib.sha1(
@@ -590,20 +689,30 @@ You are the semantic obligation analyst for a general 3D world builder. Analyze
 arbitrary domains; never assume the scene is a house or that unfamiliar nouns are
 decorations. The input contains the full prompt and immutable source candidates.
 
-Return an exhaustive structured interpretation:
+Return an exhaustive but compact structured interpretation. Output only the
+requested schema. Every free-text field must be a short phrase or one sentence of
+at most 18 words. Use at most two relations, three adjacency entries, three reusable
+parts, three qualifiers, and two measurable criteria per requirement. Do not restate
+the prompt or add commentary outside schema fields.
+
+Interpret the candidates as follows:
 1. Emit one or more requirements for EVERY candidate_id. Split candidates that
    contain multiple obligations. Never omit, soften, or replace an explicit request.
 2. Reference every explicit quantity by its exact quantity_id. Copy its mode/value/
    label exactly. You may add an interpreted_minimum for qualitative quantities.
 3. Judge semantics rather than matching keywords: scene type, object/zone/opening/
    connector role, topology, relationships, and whether an item is a hero element.
-4. Give your expert opinion of physical size. Supply plausible metric envelopes and
-   clearances when size, capacity, or composition affects fulfillment.
-5. Give your expert composition opinion: focal hierarchy, density, circulation,
+   Doors, windows, portals, and apertures are openings. Reserve connector for
+   stairs, ramps, ladders, and elevators that join different vertical levels.
+   Emit a relationship only when both its predicate and target are explicitly stated
+   in the source prompt. Do not add plausible domain relationships or inferred uses.
+4. Give concise physical-size envelopes and clearances only when they affect
+   fulfillment.
+5. Give concise composition guidance: focal hierarchy, density, circulation,
    spatial organization, and how parts form the requested whole.
-6. Every requirement must rank all three fulfillment strategies: suitable catalog
-   asset, composition from reusable parts, and procedural geometry. Recommend one
-   and explain the concrete fallback construction.
+6. Recommend one fulfillment strategy: suitable catalog asset, composition from
+   reusable parts, or procedural geometry. Name the concrete fallback construction
+   briefly; deterministic code ranks the two remaining strategies.
 7. Define measurable verification criteria. If the concept is unfamiliar, preserve
    it and describe what evidence would prove it; never silently reinterpret it as a
    generic room or generic prop.
@@ -635,7 +744,7 @@ async def analyze_requirement_candidates(
         name="Scene Semantic Obligation Analyst",
         model=model,
         instructions=REQUIREMENT_ANALYST_INSTRUCTIONS,
-        output_type=RequirementInterpretationBatch,
+        output_type=RequirementInterpretationWireBatch,
         model_settings=model_settings or ModelSettings(),
     )
     result = await runner.run(
@@ -645,7 +754,221 @@ async def analyze_requirement_candidates(
         run_config=run_config,
         timeout_seconds=agent_run_timeout_seconds("requirements", max_turns=1),
     )
-    return result.final_output_as(RequirementInterpretationBatch), result
+    wire_batch = result.final_output_as(RequirementInterpretationWireBatch)
+    return expand_requirement_interpretations(candidates, wire_batch), result
+
+
+def _strategy_order(
+    recommended: FulfillmentStrategy,
+) -> tuple[FulfillmentStrategy, ...]:
+    return (recommended,) + tuple(
+        strategy
+        for strategy in ("catalog", "composed", "procedural")
+        if strategy != recommended
+    )
+
+
+def _wire_quantity(
+    candidate: LiteralObligationCandidate,
+    wire: RequirementInterpretationWire,
+) -> RequirementQuantity:
+    # Model-authored counts may clarify an explicit numeric quantity, but they
+    # cannot turn vague prose or grammatical plurality into a new hard count.
+    # A few source-bound linguistic forms have deterministic lower bounds;
+    # density-specific providers remain responsible for stronger calibrated
+    # contracts such as library book rows and room-kit populations.
+    interpreted_minimum = None
+    qualitative_minimums = {
+        "multiple": 2,
+        "several": 3,
+        "many": 3,
+        "hundreds": 3,
+        "thousands": 3,
+        "a bunch of": 3,
+    }
+    if wire.kind == "level" and re.search(
+        r"\bmulti[- ]?level\b", candidate.evidence.text, flags=re.IGNORECASE
+    ):
+        interpreted_minimum = 2
+    if wire.source_quantity_id:
+        explicit = next(
+            (
+                quantity
+                for quantity in candidate.explicit_quantities
+                if quantity.quantity_id == wire.source_quantity_id
+            ),
+            None,
+        )
+        if explicit is not None:
+            if explicit.mode == "qualitative":
+                interpreted_minimum = qualitative_minimums.get(explicit.label)
+            return explicit.as_requirement_quantity().model_copy(
+                update={"interpreted_minimum": interpreted_minimum}
+            )
+    return RequirementQuantity(
+        mode="qualitative",
+        label="present",
+        interpreted_minimum=interpreted_minimum,
+    )
+
+
+_SOURCE_OPENING_RE = re.compile(
+    r"\b(?:door|window|opening|portal|aperture)s?\b",
+    flags=re.IGNORECASE,
+)
+
+
+def _source_bound_kind(
+    candidate: LiteralObligationCandidate,
+    interpreted_kind: InterpretedRequirementKind,
+) -> InterpretedRequirementKind:
+    """Normalize an objective ontology mismatch without changing semantics."""
+
+    if interpreted_kind == "connector" and _SOURCE_OPENING_RE.search(
+        candidate.evidence.text
+    ):
+        return "opening"
+    return interpreted_kind
+
+
+_EXPLICIT_METRIC_DIMENSION_RE = re.compile(
+    r"\b\d+(?:\.\d+)?\s*(?:m|met(?:er|re)s?|ft|feet|foot)\b",
+    flags=re.IGNORECASE,
+)
+
+
+def _wire_scale(
+    candidate: LiteralObligationCandidate,
+    wire: RequirementInterpretationWire,
+) -> RequirementScale | None:
+    if not any(
+        (
+            wire.scale_label,
+            wire.scale_relative_to,
+            wire.minimum_dimensions_m,
+            wire.preferred_dimensions_m,
+            wire.clearance_m is not None,
+        )
+    ):
+        return None
+    minimum_dimensions_m = wire.minimum_dimensions_m
+    if not _EXPLICIT_METRIC_DIMENSION_RE.search(candidate.evidence.text):
+        # Qualitative scale is a composition target, not authority to invent a
+        # hard metric beyond the configured construction envelope. Explicit
+        # dimensions in the source remain immutable minima.
+        minimum_dimensions_m = None
+    return RequirementScale(
+        qualitative_label=wire.scale_label or "measured",
+        relative_to=wire.scale_relative_to,
+        minimum_dimensions_m=minimum_dimensions_m,
+        preferred_dimensions_m=wire.preferred_dimensions_m,
+        clearance_m=wire.clearance_m,
+        rationale="Semantic scale envelope derived from the source-bound clause.",
+    )
+
+
+def _wire_verification(
+    wire: RequirementInterpretationWire,
+    quantity: RequirementQuantity,
+    scale: RequirementScale | None,
+) -> VerificationPolicy:
+    if quantity.mode == "exact":
+        quantity_criterion = (
+            f"Artifact evidence proves exactly {quantity.value} instances"
+        )
+    elif quantity.mode == "minimum":
+        quantity_criterion = (
+            f"Artifact evidence proves at least {quantity.value} instances"
+        )
+    elif quantity.interpreted_minimum is not None:
+        quantity_criterion = (
+            "Artifact evidence proves at least "
+            f"{quantity.interpreted_minimum} instances"
+        )
+    else:
+        quantity_criterion = "Artifact evidence proves the requested subject is present"
+    criteria = [quantity_criterion]
+    if scale is not None:
+        criteria.append("Artifact dimensions satisfy the recorded scale envelope")
+    if wire.relations:
+        criteria.append(
+            "Recorded source relationships are satisfied by artifact evidence"
+        )
+    stage: VerificationStage = (
+        "topology"
+        if wire.kind
+        in {"level", "repeated_zone", "opening", "connector", "spatial_constraint"}
+        else "semantic"
+    )
+    return VerificationPolicy(
+        stage=stage,
+        method="deterministic_requirement_artifact_evidence",
+        measurable_criteria=tuple(criteria),
+    )
+
+
+def expand_requirement_interpretations(
+    candidates: tuple[LiteralObligationCandidate, ...],
+    wire_batch: RequirementInterpretationWireBatch,
+) -> RequirementInterpretationBatch:
+    """Expand the bounded model wire format into the durable rich contract."""
+
+    candidates_by_id = {candidate.candidate_id: candidate for candidate in candidates}
+    source_text = " ".join(candidate.evidence.text for candidate in candidates)
+    proposals: list[RequirementInterpretationProposal] = []
+    for wire in wire_batch.requirements:
+        candidate = candidates_by_id.get(wire.candidate_id)
+        if candidate is None:
+            raise RequirementMergeError(
+                f"model returned unknown candidate_id {wire.candidate_id}"
+            )
+        wire = wire.model_copy(
+            update={"kind": _source_bound_kind(candidate, wire.kind)}
+        )
+        quantity = _wire_quantity(candidate, wire)
+        scale = _wire_scale(candidate, wire)
+        rationale = "The semantic model classified this immutable source clause."
+        proposals.append(
+            RequirementInterpretationProposal(
+                candidate_id=wire.candidate_id,
+                subject=wire.subject,
+                kind=wire.kind,
+                source_quantity_id=wire.source_quantity_id,
+                quantity=quantity,
+                scale=scale,
+                relations=tuple(
+                    RequirementRelation(
+                        predicate=relation.predicate,
+                        target=relation.target,
+                        rationale="Source-bound semantic relationship.",
+                    )
+                    for relation in wire.relations
+                    if _source_supports_relation(relation, source_text)
+                ),
+                topology=TopologyOpinion(
+                    role=f"{wire.kind}: {wire.subject}",
+                    enclosure="scene composition",
+                    adjacency=tuple(relation.target for relation in wire.relations),
+                    circulation="Preserve stated connections, adjacency, and clearance.",
+                    rationale=rationale,
+                ),
+                composition=CompositionPlan(
+                    recommended_strategy=wire.recommended_strategy,
+                    strategy_order=_strategy_order(wire.recommended_strategy),
+                    procedural_geometry=wire.fallback_construction,
+                    arrangement=wire.arrangement,
+                    rationale=rationale,
+                ),
+                verification=_wire_verification(wire, quantity, scale),
+                interpretation_rationale=rationale,
+            )
+        )
+    return RequirementInterpretationBatch(
+        schema_version=wire_batch.schema_version,
+        composition=wire_batch.composition,
+        requirements=tuple(proposals),
+        analysis_summary=wire_batch.analysis_summary,
+    )
 
 
 def _quantity_equal(proposal: RequirementQuantity, explicit: ExplicitQuantity) -> bool:

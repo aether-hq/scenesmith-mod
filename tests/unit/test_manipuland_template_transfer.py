@@ -745,6 +745,12 @@ def test_dense_library_recovery_prioritizes_empty_grouped_wall_run(
         if bookcase.metadata.get("dense_library_grouped_run") is not None:
             assert len(agent._dense_book_rows_on_furniture(scene, bookcase)) >= 3
 
+    assert agent._normalize_dense_library_book_row_surplus() == 36
+    assert StatefulManipulandAgent._validate_dense_library_book_rows(scene) == 36
+    for bookcase in bookcases:
+        if bookcase.metadata.get("dense_library_grouped_run") is not None:
+            assert len(agent._dense_book_rows_on_furniture(scene, bookcase)) >= 3
+
 
 def test_dense_library_recovery_clusters_millimeter_story_drift(
     tmp_path: Path,

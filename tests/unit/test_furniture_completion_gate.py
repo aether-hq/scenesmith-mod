@@ -88,7 +88,10 @@ def _scene_with_role_counts(**role_counts: int):
 def test_matched_library_kit_rejects_zero_furniture():
     with pytest.raises(
         ModelBehaviorError,
-        match=r"library-reading-hall-v1.*0 furniture objects.*minimum is 7",
+        match=(
+            r"library-reading-hall-v1.*bookshelf placed 0, required 2.*"
+            r"reading_table placed 0, required 1.*reading_chair placed 0, required 4"
+        ),
     ):
         _validate_room_kit_completion(_scene_with_furniture(0), _library_kit())
 
@@ -684,10 +687,10 @@ def test_large_multilevel_library_recovery_places_chairs_around_upper_tables():
         agent._place_room_kit_minimums_deterministically(
             _dense_multilevel_library_kit()
         )
-        == 6
+        == 9
     )
-    assert [call["z"] for call in placements] == [4.0] * 3 + [8.0] * 3
-    for call in placements:
+    assert [call["z"] for call in placements] == [0.0] + [4.0] * 4 + [8.0] * 4
+    for call in placements[1:]:
         distance = math.dist((call["x"], call["y"]), (-2.8, 2.5))
         assert 0.75 <= distance <= 2.25
 
@@ -762,11 +765,23 @@ def test_library_recovery_extends_the_existing_table_ensemble():
         agent._place_room_kit_minimums_deterministically(
             _dense_multilevel_library_kit()
         )
-        == 2
+        == 5
     )
-    assert [call["z"] for call in placements] == [0.0, 0.0]
+    assert [call["z"] for call in placements] == [0.0] * 3 + [4.0, 8.0]
     for call in placements:
-        distance = math.dist((call["x"], call["y"]), (5.25, -1.5))
+        level_tables = [
+            obj
+            for obj in furniture
+            if obj.name == "reading_table"
+            and float(obj.transform.translation()[2]) == call["z"]
+        ]
+        distance = min(
+            math.dist(
+                (call["x"], call["y"]),
+                tuple(table.transform.translation()[:2]),
+            )
+            for table in level_tables
+        )
         assert 0.75 <= distance <= 2.25
 
 
@@ -821,9 +836,9 @@ def test_library_recovery_rolls_back_incomplete_new_chair_cluster():
         agent._place_room_kit_minimums_deterministically(
             _dense_multilevel_library_kit()
         )
-        == 0
+        == 1
     )
-    assert removed == ["recovered_2", "recovered_1"]
+    assert removed == ["recovered_2"]
 
 
 def test_large_multilevel_library_gate_rejects_ground_only_bookshelves():
@@ -1036,6 +1051,217 @@ def test_large_multilevel_library_prunes_surplus_and_marks_all_retained_cases(
             )
             == 3
         )
+
+
+def test_large_multilevel_library_prunes_table_and_chair_surplus(monkeypatch):
+    shelves = [
+        _full_height_bookshelf(level * 5 + index, float(level * 4))
+        for level in range(3)
+        for index in range(5)
+    ]
+    tables = [
+        _role_furniture("reading_table", level * 3 + index, float(level * 4))
+        for level in range(3)
+        for index in range(3)
+    ]
+    chairs = [
+        _role_furniture("reading_chair", level * 6 + index, float(level * 4))
+        for level in range(3)
+        for index in range(6)
+    ]
+    objects = shelves + tables + chairs
+    scene = SimpleNamespace(
+        text_description=_EXACT_MULTILEVEL_LIBRARY_PROMPT,
+        objects={obj.object_id: obj for obj in objects},
+        room_geometry=SimpleNamespace(length=13.8, width=13.8, openings=[]),
+    )
+    monkeypatch.setattr(
+        "scenesmith.furniture_agents.stateful_furniture_agent."
+        "compute_window_clearance_violations",
+        lambda _scene: [],
+    )
+    monkeypatch.setattr(
+        "scenesmith.furniture_agents.stateful_furniture_agent."
+        "compute_door_clearance_violations",
+        lambda _scene: [],
+    )
+    room_kit = _dense_multilevel_library_kit()
+    room_kit.slots[-1].minimum_count = 13
+
+    removed = _normalize_dense_library_bookcases(
+        scene,
+        room_kit,
+        (0.0, 4.0, 8.0),
+        remove_object=lambda object_id: scene.objects.pop(object_id),
+    )
+
+    assert removed == 9
+    assert sum("reading_table" in key for key in scene.objects) == 5
+    assert sum("reading_chair" in key for key in scene.objects) == 13
+    assert {
+        elevation: sum(
+            obj.name == "reading_table"
+            and float(obj.transform.translation()[2]) == elevation
+            for obj in scene.objects.values()
+        )
+        for elevation in (0.0, 4.0, 8.0)
+    } == {0.0: 2, 4.0: 2, 8.0: 1}
+    assert {
+        elevation: sum(
+            obj.name == "reading_chair"
+            and float(obj.transform.translation()[2]) == elevation
+            for obj in scene.objects.values()
+        )
+        for elevation in (0.0, 4.0, 8.0)
+    } == {0.0: 5, 4.0: 4, 8.0: 4}
+
+
+def test_two_level_library_preserves_aggregate_bookshelf_target():
+    shelves = [
+        *(
+            _full_height_bookshelf(
+                index,
+                0.0,
+                x=-3.675 + (index % 8) * 1.05,
+                y=5.5 - (index // 8) * 1.0,
+                yaw=180.0,
+            )
+            for index in range(12)
+        ),
+        *(
+            _full_height_bookshelf(
+                20 + index,
+                6.0,
+                x=-3.675 + index * 1.05,
+                y=5.5,
+                yaw=180.0,
+            )
+            for index in range(8)
+        ),
+    ]
+    scene = SimpleNamespace(
+        text_description=_EXACT_MULTILEVEL_LIBRARY_PROMPT,
+        objects={shelf.object_id: shelf for shelf in shelves},
+        room_geometry=SimpleNamespace(length=13.8, width=13.8, openings=[]),
+    )
+    removed = []
+
+    assert (
+        _normalize_dense_library_bookcases(
+            scene,
+            _dense_multilevel_bookshelf_kit(),
+            (0.0, 6.0),
+            remove_object=lambda object_id: (
+                removed.append(object_id),
+                scene.objects.pop(object_id),
+            ),
+        )
+        == 5
+    )
+    retained_counts = {
+        elevation: sum(
+            float(shelf.transform.translation()[2]) == elevation
+            for shelf in scene.objects.values()
+        )
+        for elevation in (0.0, 6.0)
+    }
+    assert retained_counts == {0.0: 8, 6.0: 7}
+    assert len(removed) == 5
+    assert (
+        _validate_room_kit_completion(
+            scene,
+            _dense_multilevel_bookshelf_kit(),
+            support_elevations=(0.0, 6.0),
+            enforce_exact_level_counts=True,
+        )
+        == 15
+    )
+
+
+def test_two_level_library_recovery_fills_exact_targets_before_pruning():
+    isolated_ground_poses = (
+        (-5.8, -4.5, 90.0),
+        (-5.8, -1.5, 90.0),
+        (-5.8, 1.5, 90.0),
+        (-5.8, 4.5, 90.0),
+        (5.8, -4.5, -90.0),
+        (5.8, -1.5, -90.0),
+        (5.8, 1.5, -90.0),
+        (5.8, 4.5, -90.0),
+        (-4.5, -5.8, 0.0),
+        (-1.5, -5.8, 0.0),
+        (1.5, -5.8, 0.0),
+        (4.5, -5.8, 0.0),
+        (-3.0, 5.8, 180.0),
+        (0.0, 5.8, 180.0),
+        (3.0, 5.8, 180.0),
+    )
+    shelves = [
+        _full_height_bookshelf(index, 0.0, x=x, y=y, yaw=yaw)
+        for index, (x, y, yaw) in enumerate(isolated_ground_poses)
+    ]
+    scene = SimpleNamespace(
+        text_description=_EXACT_MULTILEVEL_LIBRARY_PROMPT,
+        objects={shelf.object_id: shelf for shelf in shelves},
+        room_geometry=SimpleNamespace(length=13.8, width=13.8, openings=[]),
+    )
+    placements = []
+
+    class FakeTools:
+        def set_noise_profile(self, _mode):
+            pass
+
+        def _major_support_elevations(self):
+            return (0.0, 6.0)
+
+        def _add_furniture_to_scene_impl(self, **kwargs):
+            placements.append(kwargs)
+            object_id = f"recovered_two_level_case_{len(placements)}"
+            recovered = _full_height_bookshelf(
+                100 + len(placements),
+                kwargs["z"],
+                x=kwargs["x"],
+                y=kwargs["y"],
+                yaw=kwargs["yaw"],
+            )
+            recovered.object_id = object_id
+            scene.objects[object_id] = recovered
+            return json.dumps({"success": True, "object_id": object_id})
+
+        def _remove_furniture_impl(self, object_id):
+            scene.objects.pop(object_id, None)
+            return json.dumps({"success": True})
+
+    agent = object.__new__(StatefulFurnitureAgent)
+    agent.scene = scene
+    agent.asset_manager = SimpleNamespace(list_available_assets=lambda: [shelves[0]])
+    agent.furniture_tools = FakeTools()
+
+    prepruned, recovered = agent._preprune_and_recover_room_kit(
+        _dense_multilevel_bookshelf_kit()
+    )
+
+    assert prepruned == 7
+    assert recovered == 10
+    assert [call["z"] for call in placements] == [0.0] * 3 + [6.0] * 7
+    assert (
+        _normalize_dense_library_bookcases(
+            scene,
+            _dense_multilevel_bookshelf_kit(),
+            (0.0, 6.0),
+            remove_object=agent.furniture_tools._remove_furniture_impl,
+        )
+        == 3
+    )
+    assert (
+        _validate_room_kit_completion(
+            scene,
+            _dense_multilevel_bookshelf_kit(),
+            support_elevations=(0.0, 6.0),
+            enforce_exact_level_counts=True,
+        )
+        == 15
+    )
 
 
 def test_library_recovery_preprunes_overcrowded_story_before_wall_run(monkeypatch):
@@ -1449,11 +1675,12 @@ def test_large_multilevel_library_recovery_fills_patron_ensemble_on_each_story()
         agent._place_room_kit_minimums_deterministically(
             _dense_multilevel_library_kit()
         )
-        == 2
+        == 3
     )
-    assert [call["z"] for call in placements] == [4.0, 8.0]
+    assert [call["z"] for call in placements] == [4.0, 4.0, 8.0]
     assert all(call["asset_id"] == table_asset.object_id for call in placements)
-    assert all((call["x"], call["y"]) == (1.25, -1.5) for call in placements)
+    assert all(call["y"] == -1.5 for call in placements)
+    assert [call["x"] for call in placements] == [1.25, 2.25, 1.25]
 
 
 def test_level_recovery_retries_when_support_snaps_table_to_another_story():
@@ -1504,12 +1731,13 @@ def test_level_recovery_retries_when_support_snaps_table_to_another_story():
         agent._place_room_kit_minimums_deterministically(
             _dense_multilevel_library_kit()
         )
-        == 2
+        == 3
     )
-    assert [call["z"] for call in attempts] == [4.0, 4.0, 8.0]
+    assert [call["z"] for call in attempts] == [4.0, 4.0, 4.0, 8.0]
     assert removed == ["recovered_table_1"]
     assert scene.objects["recovered_table_2"].transform.translation()[2] == 4.0
-    assert scene.objects["recovered_table_3"].transform.translation()[2] == 8.0
+    assert scene.objects["recovered_table_3"].transform.translation()[2] == 4.0
+    assert scene.objects["recovered_table_4"].transform.translation()[2] == 8.0
 
 
 def test_library_recovery_prefers_stable_armchair_over_role_exact_rocker():

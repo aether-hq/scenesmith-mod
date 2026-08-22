@@ -6,6 +6,7 @@ import pytest
 
 from scenesmith.agent_utils.claude_cli_proxy import (
     _ClaudeExecutor,
+    _claude_compatible_schema,
     _extract_json_object,
     _extract_stream_result,
     _extract_stream_usage,
@@ -54,6 +55,15 @@ def test_extract_stream_result_uses_terminal_success_event():
     )
 
     assert _extract_stream_result(stream) == '{"ok":true}'
+
+
+def test_extract_stream_result_prefers_schema_enforced_structured_output():
+    stream = _stream_result(
+        "A prose rendering that must not replace the schema result.",
+        structured_output={"ok": True, "score": 9},
+    )
+
+    assert json.loads(_extract_stream_result(stream)) == {"ok": True, "score": 9}
 
 
 def test_extract_stream_usage_normalizes_tokens_cache_turns_and_cost():
@@ -236,6 +246,61 @@ def test_response_json_schema_extracts_agents_sdk_final_output_schema():
         )
         == schema
     )
+
+
+def test_claude_schema_projects_fixed_tuple_without_weakening_local_validation():
+    schema = {
+        "type": "array",
+        "minItems": 3,
+        "maxItems": 3,
+        "prefixItems": [
+            {"type": "number"},
+            {"type": "number"},
+            {"type": "number"},
+        ],
+    }
+
+    assert _claude_compatible_schema(schema) == {
+        "type": "array",
+        "minItems": 3,
+        "maxItems": 3,
+        "items": {"type": "number"},
+    }
+
+
+def test_claude_executor_passes_final_output_schema_to_cli(monkeypatch):
+    monkeypatch.setenv("SCENESMITH_CLAUDE_BINARY", "true")
+    schema = {
+        "type": "object",
+        "properties": {"score": {"type": "integer"}},
+        "required": ["score"],
+        "additionalProperties": False,
+    }
+
+    def fake_run(_lock, command, **_kwargs):
+        schema_index = command.index("--json-schema") + 1
+        assert json.loads(command[schema_index]) == _claude_compatible_schema(schema)
+        return subprocess.CompletedProcess(
+            command,
+            0,
+            _stream_result("ignored", structured_output={"score": 9}),
+            "",
+        )
+
+    monkeypatch.setattr(
+        "scenesmith.agent_utils.claude_cli_proxy._run_subscription_command", fake_run
+    )
+    result = _ClaudeExecutor().complete(
+        {
+            "messages": [{"role": "user", "content": "Score the scene."}],
+            "response_format": {
+                "type": "json_schema",
+                "json_schema": {"name": "final_output", "schema": schema},
+            },
+        }
+    )
+
+    assert json.loads(result["choices"][0]["message"]["content"]) == {"score": 9}
 
 
 def test_claude_executor_surfaces_unrepairable_output_for_common_failover(monkeypatch):

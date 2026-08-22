@@ -131,6 +131,8 @@ def test_wall_resume_copies_canonical_checkpoint_without_legacy_room_geometry(
     checkpoint = source / "room_room" / "scene_states" / "scene_after_furniture"
     checkpoint.mkdir(parents=True)
     (checkpoint / "scene_state.json").write_text("{}")
+    room_kit = source / "room_room" / "room_kit.json"
+    room_kit.write_text('{"kit_id":"library-reading-hall-v1"}')
 
     _copy_checkpoint_for_stage(source, target, "wall_mounted")
 
@@ -154,6 +156,9 @@ def test_wall_resume_copies_canonical_checkpoint_without_legacy_room_geometry(
         / "scene_after_furniture"
         / "scene_state.json"
     ).is_file()
+    assert (target / "room_room" / "room_kit.json").read_bytes() == (
+        room_kit.read_bytes()
+    )
     assert not (target / "room_geometry").exists()
     design_context = _load_manipuland_design_context(
         SimpleNamespace(

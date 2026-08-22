@@ -3,7 +3,17 @@
 import asyncio
 import json
 
+from types import SimpleNamespace
+
 from scenesmith.agent_utils.house import HouseLayout, WindowShape
+from scenesmith.agent_utils.scene_blueprint import (
+    LevelBlueprint,
+    OpeningBlueprint,
+    SceneBlueprint,
+    SpaceBlueprint,
+    blueprint_from_prompt,
+    floor_plan_submission_from_blueprint,
+)
 from scenesmith.agent_utils.structural_compiler import (
     compile_connector,
     compile_platform,
@@ -11,15 +21,69 @@ from scenesmith.agent_utils.structural_compiler import (
 from scenesmith.agent_utils.structural_geometry import ConnectorSpec, PlatformSpec
 from scenesmith.floor_plan_agents.tools.floor_plan_submission import (
     normalize_floor_plan_submission,
+    opening_placements_from_blueprint,
+    structural_submission_from_blueprint,
     synthesize_structural_layout,
 )
 from scenesmith.floor_plan_agents.tools.floor_plan_tools import FloorPlanTools
+from scenesmith.floor_plan_agents.stateful_floor_plan_agent import (
+    StatefulFloorPlanAgent,
+)
 
 
 PROMPT = (
     "A large, multi-level library filled with bookshelves, spiral staircases, "
     "and large research tables."
 )
+
+
+def _large_dock_blueprint() -> SceneBlueprint:
+    level = LevelBlueprint(
+        level_id="dock-level",
+        name="Dock level",
+        clear_height_m=30.0,
+    )
+    space = SpaceBlueprint(
+        space_id="space-dock-hall",
+        name="Space dock hall",
+        room_type="space_dock",
+        level_id=level.level_id,
+        dimensions_m=(150.0, 100.0),
+    )
+    openings = (
+        OpeningBlueprint(
+            opening_id="opening-space",
+            kind="open_connection",
+            host_space_id=space.space_id,
+            width_m=40.0,
+            height_m=24.0,
+        ),
+        OpeningBlueprint(
+            opening_id="opening-station",
+            kind="door",
+            host_space_id=space.space_id,
+            width_m=20.0,
+            height_m=18.0,
+        ),
+        *tuple(
+            OpeningBlueprint(
+                opening_id=f"opening-crew-{index}",
+                kind="door",
+                host_space_id=space.space_id,
+                width_m=2.0,
+                height_m=3.0,
+            )
+            for index in range(3)
+        ),
+    )
+    return SceneBlueprint(
+        blueprint_id="scene-large-dock",
+        source_prompt="A huge space-fighter dock with ten repair bays.",
+        levels=(level,),
+        spaces=(space,),
+        openings=openings,
+        locked_ids=tuple(opening.opening_id for opening in openings),
+    )
 
 
 def normalize(payload):
@@ -32,6 +96,72 @@ def normalize(payload):
         wall_height_min=2.0,
         wall_height_max=12.0,
     )
+
+
+def test_large_blueprint_openings_are_placed_without_metric_clamping():
+    blueprint = _large_dock_blueprint()
+
+    placements = opening_placements_from_blueprint(blueprint)
+
+    assert len(placements) == 5
+    by_id = {placement.opening_id: placement for placement in placements}
+    assert by_id["opening-space"].width_m == 40.0
+    assert by_id["opening-space"].height_m == 24.0
+    assert by_id["opening-station"].width_m == 20.0
+    assert all(placement.position_along_m > 0.0 for placement in placements)
+
+
+def test_locked_blueprint_replaces_small_planner_layout_and_opening_defaults():
+    blueprint = _large_dock_blueprint()
+    layout = HouseLayout(house_prompt=blueprint.source_prompt)
+    initial = FloorPlanTools(layout=layout, mode="room")._submit_floor_plan_impl(
+        room_specs=[{"type": "hangar_bay", "width": 8.0, "depth": 6.0}],
+        wall_height_meters=4.0,
+    )
+    assert initial.success, initial.message
+    assert layout.room_specs[0].length == 8.0
+    assert layout.doors[0].width == 0.9
+
+    agent = StatefulFloorPlanAgent.__new__(StatefulFloorPlanAgent)
+    agent.mode = "room"
+    agent.blueprint = blueprint
+    agent.layout = layout
+    agent.cfg = SimpleNamespace(
+        max_floor_plan_dim_m=20.0,
+        min_floor_plan_dim_m=1.5,
+        wall_height=SimpleNamespace(min=2.0, max=12.0),
+    )
+
+    agent._apply_locked_blueprint_topology()
+
+    room = layout.room_specs[0]
+    assert (room.length, room.width) == (150.0, 100.0)
+    assert layout.wall_height == 30.0
+    constructed = {
+        opening.opening_id: opening
+        for placed_room in layout.placed_rooms
+        for wall in placed_room.walls
+        for opening in wall.openings
+    }
+    assert set(constructed) == {
+        "opening-space",
+        "opening-station",
+        "opening-crew-0",
+        "opening-crew-1",
+        "opening-crew-2",
+    }
+    assert constructed["opening-space"].width == 40.0
+    assert constructed["opening-space"].height == 24.0
+    assert constructed["opening-space"].opening_type.value == "open"
+    assert constructed["opening-station"].width == 20.0
+    assert len(layout.doors) == 4
+    assert {door.id for door in layout.doors} == {
+        "opening-station",
+        "opening-crew-0",
+        "opening-crew-1",
+        "opening-crew-2",
+    }
+    assert layout.connectivity_valid
 
 
 def test_open_air_cover_flag_survives_provider_neutral_normalization():
@@ -279,6 +409,99 @@ def test_multilevel_synthesis_fits_story_heights_and_emits_walkable_slabs():
     assert "Reduced each storey" in structural["_diagnostics"][0]
 
 
+def test_accepted_blueprint_drives_constructed_levels_and_connector_contract():
+    blueprint = blueprint_from_prompt(
+        "A two-level library with a usable spiral staircase"
+    )
+    blueprint = blueprint.model_copy(
+        update={
+            "levels": (
+                blueprint.levels[0],
+                blueprint.levels[1].model_copy(
+                    update={"elevation_m": 5.5, "clear_height_m": 5.0}
+                ),
+            )
+        }
+    )
+    connector = blueprint.connectors[0].model_copy(update={"width_m": 3.2})
+    blueprint = blueprint.model_copy(update={"connectors": (connector,)})
+    payload = floor_plan_submission_from_blueprint(blueprint)
+
+    structural = structural_submission_from_blueprint(
+        blueprint,
+        payload["room_specs"],
+        max_total_height=12.0,
+    )
+
+    assert structural is not None
+    assert [level["id"] for level in structural["levels"]] == [
+        level.level_id for level in blueprint.levels
+    ]
+    assert len(structural["connectors"]) == 1
+    authored_connector = structural["connectors"][0]
+    assert authored_connector["id"] == connector.connector_id
+    assert authored_connector["type"] == "stairs_spiral"
+    assert authored_connector["width"] == 3.2
+    assert authored_connector["parameters"]["turns"] == 1.0
+    assert authored_connector["start"]["level_id"] == connector.start.level_id
+    assert authored_connector["end"]["level_id"] == connector.end.level_id
+
+    payload["structural"] = structural
+    submission = normalize(payload)
+    layout = HouseLayout(house_prompt=blueprint.source_prompt)
+    result = FloorPlanTools(layout=layout, mode="room")._submit_floor_plan_impl(
+        **submission.tool_kwargs()
+    )
+
+    assert result.success, result.message
+    assert [level.level_id for level in layout.levels] == [
+        level.level_id for level in blueprint.levels
+    ]
+    assert layout.connectors[0].connector_id == connector.connector_id
+    assert layout.connectors[0].width == 3.2
+
+
+def test_multistop_semantic_staircase_compiles_to_adjacent_structural_spans():
+    blueprint = blueprint_from_prompt(
+        "A three-story library with one usable spiral staircase"
+    )
+    first, second = blueprint.connectors
+    connector = first.model_copy(
+        update={
+            "end": second.end,
+            "width_m": 3.0,
+            "parameters": {
+                "intermediate_landings": [first.end.model_dump(mode="json")]
+            },
+        }
+    )
+    blueprint = SceneBlueprint.model_validate(
+        blueprint.model_copy(update={"connectors": (connector,)}).model_dump()
+    )
+    payload = floor_plan_submission_from_blueprint(blueprint)
+
+    structural = structural_submission_from_blueprint(
+        blueprint,
+        payload["room_specs"],
+        max_total_height=12.0,
+    )
+
+    assert structural is not None
+    assert [item["id"] for item in structural["connectors"]] == [
+        connector.connector_id,
+        f"{connector.connector_id}-segment-2",
+    ]
+    assert [
+        (item["start"]["level_id"], item["end"]["level_id"])
+        for item in structural["connectors"]
+    ] == [
+        (blueprint.levels[0].level_id, blueprint.levels[1].level_id),
+        (blueprint.levels[1].level_id, blueprint.levels[2].level_id),
+    ]
+    assert all(item["width"] == 3.0 for item in structural["connectors"])
+    assert all(item["parameters"]["turns"] == 1.0 for item in structural["connectors"])
+
+
 def test_large_multilevel_library_synthesizes_gallery_atrium():
     structural = synthesize_structural_layout(
         PROMPT,
@@ -305,12 +528,16 @@ def test_large_multilevel_library_synthesizes_gallery_atrium():
             )
             * (max(point[1] for point in hole) - min(point[1] for point in hole)),
         )
-        assert max(point[0] for point in gallery_hole) - min(
-            point[0] for point in gallery_hole
-        ) >= 5.0
-        assert max(point[1] for point in gallery_hole) - min(
-            point[1] for point in gallery_hole
-        ) >= 5.0
+        assert (
+            max(point[0] for point in gallery_hole)
+            - min(point[0] for point in gallery_hole)
+            >= 5.0
+        )
+        assert (
+            max(point[1] for point in gallery_hole)
+            - min(point[1] for point in gallery_hole)
+            >= 5.0
+        )
         compiled = compile_platform(PlatformSpec.from_dict(slab))
         assert compiled.visual_mesh.vertices
         assert compiled.visual_mesh.bounds[1][2] > slab["elevation"] + 1.0

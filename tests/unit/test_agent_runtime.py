@@ -75,6 +75,15 @@ def test_role_timeout_overrides_global(monkeypatch):
     assert agent_run_timeout_seconds("designer") == 180
 
 
+def test_spatial_compiler_has_a_bounded_large_schema_deadline(monkeypatch):
+    monkeypatch.delenv("SCENESMITH_AGENT_RUN_TIMEOUT_SECONDS", raising=False)
+    monkeypatch.delenv(
+        "SCENESMITH_AGENT_SPATIAL_COMPILER_TIMEOUT_SECONDS", raising=False
+    )
+
+    assert agent_run_timeout_seconds("spatial_compiler") == 600
+
+
 def test_workflow_timeout_does_not_expand_into_route_retry_product(monkeypatch):
     monkeypatch.setenv("SCENESMITH_AGENT_RUN_TIMEOUT_SECONDS", "5")
     monkeypatch.setenv("SCENESMITH_LLM_MODEL", "sonnet")

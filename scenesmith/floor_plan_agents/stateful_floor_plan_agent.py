@@ -41,6 +41,7 @@ from scenesmith.agent_utils.design_system import (
     persist_design_contract,
 )
 from scenesmith.agent_utils.house import (
+    Door,
     HouseLayout,
     Opening,
     OpeningType,
@@ -49,6 +50,8 @@ from scenesmith.agent_utils.house import (
     RoomSpec,
     Wall,
     WallDirection,
+    Window,
+    WindowShape,
     compute_wall_normals,
     legacy_openings_to_boundary_portals,
 )
@@ -76,12 +79,14 @@ from scenesmith.agent_utils.scene_requirements import (
     merge_requirement_interpretations,
     persist_requirement_graph,
     requirement_graph_from_prompt,
+    semantic_model_name,
 )
 from scenesmith.agent_utils.scene_candidates import (
     CandidateTournament,
     create_candidate_tournament,
     persist_candidate_tournament,
 )
+from scenesmith.agent_utils.structural_geometry import PortalSpec, PortalType
 from scenesmith.agent_utils.scoring import (
     FloorPlanCritiqueWithScores,
     format_score_deltas_for_planner,
@@ -109,15 +114,21 @@ from scenesmith.agent_utils.semantic_strategies import (
 from scenesmith.agent_utils.workflow_tools import WorkflowTools
 from scenesmith.floor_plan_agents.base_floor_plan_agent import BaseFloorPlanAgent
 from scenesmith.floor_plan_agents.tools.floor_plan_submission import (
-    normalize_floor_plan_submission,
+    opening_placements_from_blueprint,
+    structural_submission_from_blueprint,
     synthesize_structural_layout,
 )
+from scenesmith.floor_plan_agents.tools.ascii_generator import generate_ascii_floor_plan
 from scenesmith.floor_plan_agents.tools.floor_plan_tools import FloorPlanTools
 from scenesmith.floor_plan_agents.tools.geometry_cache import (
     GeometryCache,
     floor_cache_key,
     wall_cache_key,
     window_cache_key,
+)
+from scenesmith.floor_plan_agents.tools.room_placement import (
+    create_placed_room,
+    update_wall_connectivity,
 )
 from scenesmith.floor_plan_agents.tools.vision_tools import FloorPlanVisionTools
 from scenesmith.floor_plan_agents.tools.wall_geometry import (
@@ -204,6 +215,40 @@ class StatefulFloorPlanAgent(BaseStatefulAgent, BaseFloorPlanAgent):
         # Create persistent agent sessions.
         self.designer_session, self.critic_session = self._create_sessions()
 
+    def _construction_room_dim_max(self) -> float:
+        """Return a validation envelope that can never shrink accepted intent."""
+
+        configured = float(self.cfg.max_floor_plan_dim_m)
+        if self.blueprint is None:
+            return configured
+        return max(
+            configured,
+            *(max(space.dimensions_m) for space in self.blueprint.spaces),
+        )
+
+    def _construction_wall_height_max(self) -> float:
+        """Return a shell envelope that contains the accepted semantic levels."""
+
+        configured = float(self.cfg.wall_height.max)
+        if self.blueprint is None:
+            return configured
+        lowest = min(level.elevation_m for level in self.blueprint.levels)
+        semantic_height = (
+            max(
+                level.elevation_m + level.clear_height_m
+                for level in self.blueprint.levels
+            )
+            - lowest
+        )
+        opening_height = max(
+            (
+                opening.sill_height_m + opening.height_m
+                for opening in self.blueprint.openings
+            ),
+            default=0.0,
+        )
+        return max(configured, semantic_height, opening_height)
+
     def _get_vision_tools(self) -> FloorPlanVisionTools:
         """Get or create the shared vision tools instance."""
         if self._vision_tools is None:
@@ -247,9 +292,9 @@ class StatefulFloorPlanAgent(BaseStatefulAgent, BaseFloorPlanAgent):
             placement_exterior_wall_clearance_m=self.cfg.room_placement.exterior_wall_clearance_m,
             door_window_config=self._create_door_window_config(),
             wall_height_min=self.cfg.wall_height.min,
-            wall_height_max=self.cfg.wall_height.max,
+            wall_height_max=self._construction_wall_height_max(),
             room_dim_min=self.cfg.min_floor_plan_dim_m,
-            room_dim_max=self.cfg.max_floor_plan_dim_m,
+            room_dim_max=self._construction_room_dim_max(),
             checkpoint_callback=self._write_resumable_layout_checkpoint,
         )
 
@@ -291,9 +336,9 @@ class StatefulFloorPlanAgent(BaseStatefulAgent, BaseFloorPlanAgent):
             placement_exterior_wall_clearance_m=self.cfg.room_placement.exterior_wall_clearance_m,
             door_window_config=self._create_door_window_config(),
             wall_height_min=self.cfg.wall_height.min,
-            wall_height_max=self.cfg.wall_height.max,
+            wall_height_max=self._construction_wall_height_max(),
             room_dim_min=self.cfg.min_floor_plan_dim_m,
-            room_dim_max=self.cfg.max_floor_plan_dim_m,
+            room_dim_max=self._construction_room_dim_max(),
         )
 
         return list(vision_tools.tools.values()) + [floor_plan_tools.tools["validate"]]
@@ -540,6 +585,228 @@ class StatefulFloorPlanAgent(BaseStatefulAgent, BaseFloorPlanAgent):
                 "Could not save resumable floor-plan checkpoint: %s", exc
             )
             return False
+
+    def _apply_locked_blueprint_topology(self) -> None:
+        """Make accepted semantic dimensions and apertures authoritative."""
+
+        if self.blueprint is None or not self.layout.room_specs:
+            return
+
+        blueprint = self.blueprint
+        actual_by_id = {spec.room_id: spec for spec in self.layout.room_specs}
+        space_to_room: dict[str, str] = {}
+        unclaimed_room_ids = set(actual_by_id)
+        for space in blueprint.spaces:
+            if space.space_id in actual_by_id:
+                room_id = space.space_id
+            elif self.mode == "room" and len(actual_by_id) == 1:
+                room_id = next(iter(actual_by_id))
+            else:
+                room_id = next(
+                    (
+                        candidate_id
+                        for candidate_id in sorted(unclaimed_room_ids)
+                        if actual_by_id[candidate_id].room_type == space.room_type
+                    ),
+                    "",
+                )
+                if not room_id:
+                    continue
+            space_to_room[space.space_id] = room_id
+            unclaimed_room_ids.discard(room_id)
+
+        # A repeated room-mode space represents the same coherent volume on
+        # another level. Its ground footprint remains the first authored space.
+        primary_space_by_room: dict[str, Any] = {}
+        for space in blueprint.spaces:
+            room_id = space_to_room.get(space.space_id)
+            if room_id is not None and room_id not in primary_space_by_room:
+                primary_space_by_room[room_id] = space
+        previous_positions = {
+            room.room_id: room.position for room in self.layout.placed_rooms
+        }
+        for room_id, space in primary_space_by_room.items():
+            spec = actual_by_id[room_id]
+            spec.length = float(space.dimensions_m[0])
+            spec.width = float(space.dimensions_m[1])
+            spec.has_overhead_cover = bool(space.covered)
+
+        self.layout.placed_rooms = [
+            create_placed_room(
+                spec,
+                previous_positions.get(spec.room_id, tuple(spec.position)),
+            )
+            for spec in self.layout.room_specs
+        ]
+        update_wall_connectivity(self.layout.placed_rooms)
+        ascii_plan = generate_ascii_floor_plan(self.layout.placed_rooms)
+        self.layout.boundary_labels = ascii_plan.boundary_labels
+        self.layout.placement_valid = True
+
+        lowest_elevation = min(level.elevation_m for level in blueprint.levels)
+        semantic_height = (
+            max(level.elevation_m + level.clear_height_m for level in blueprint.levels)
+            - lowest_elevation
+        )
+        if any(
+            opening.sill_height_m + opening.height_m > semantic_height + 1e-9
+            for opening in blueprint.openings
+        ):
+            raise SpatialCompilationError(
+                "accepted blueprint contains an opening taller than its host shell"
+            )
+        self.layout.wall_height = semantic_height
+
+        placements = opening_placements_from_blueprint(blueprint)
+        authored_kinds = {placement.kind for placement in placements}
+        has_exterior_walkable_opening = any(
+            placement.kind in {"door", "open_connection"}
+            and placement.connects_to_space_id is None
+            for placement in placements
+        )
+        if "window" in authored_kinds:
+            self.layout.windows.clear()
+        if has_exterior_walkable_opening:
+            self.layout.doors.clear()
+        removable_types = set()
+        if "window" in authored_kinds:
+            removable_types.add(OpeningType.WINDOW)
+        if has_exterior_walkable_opening:
+            removable_types.update({OpeningType.DOOR, OpeningType.OPEN})
+        if removable_types:
+            for room in self.layout.placed_rooms:
+                for wall in room.walls:
+                    wall.openings[:] = [
+                        opening
+                        for opening in wall.openings
+                        if opening.opening_type not in removable_types
+                    ]
+
+        opening_ids = {placement.opening_id for placement in placements}
+        self.layout.portals[:] = [
+            portal
+            for portal in self.layout.portals
+            if portal.portal_id not in opening_ids
+            and portal.portal_id not in {f"topology-{item}" for item in opening_ids}
+        ]
+        edge_directions = (
+            WallDirection.SOUTH,
+            WallDirection.EAST,
+            WallDirection.NORTH,
+            WallDirection.WEST,
+        )
+        for placement in placements:
+            room_id = space_to_room.get(placement.host_space_id)
+            if room_id is None:
+                raise SpatialCompilationError(
+                    f"blueprint opening {placement.opening_id!r} has no constructed host"
+                )
+            placed_room = next(
+                room for room in self.layout.placed_rooms if room.room_id == room_id
+            )
+            direction = edge_directions[placement.boundary_edge_index]
+            wall = next(
+                candidate
+                for candidate in placed_room.walls
+                if candidate.direction == direction
+            )
+            reverse = placement.boundary_edge_index in {2, 3}
+            position_exact = (
+                wall.length - placement.position_along_m - placement.width_m / 2.0
+                if reverse
+                else placement.position_along_m - placement.width_m / 2.0
+            )
+            opening_type = {
+                "door": OpeningType.DOOR,
+                "window": OpeningType.WINDOW,
+                "open_connection": OpeningType.OPEN,
+            }[placement.kind]
+            wall.openings.append(
+                Opening(
+                    opening_id=placement.opening_id,
+                    opening_type=opening_type,
+                    position_along_wall=position_exact,
+                    width=placement.width_m,
+                    height=placement.height_m,
+                    sill_height=placement.sill_height_m,
+                    shape=WindowShape(placement.shape),
+                )
+            )
+            boundary_label = next(
+                (
+                    label
+                    for label, (label_room, other_room, label_direction) in (
+                        self.layout.boundary_labels.items()
+                    )
+                    if label_room == room_id
+                    and (
+                        label_direction == direction.value
+                        if placement.connects_to_space_id is None
+                        else other_room
+                        == space_to_room.get(placement.connects_to_space_id)
+                    )
+                ),
+                wall.wall_id,
+            )
+            target_room_id = (
+                space_to_room.get(placement.connects_to_space_id)
+                if placement.connects_to_space_id is not None
+                else None
+            )
+            if placement.kind == "door":
+                self.layout.doors.append(
+                    Door(
+                        id=placement.opening_id,
+                        boundary_label=boundary_label,
+                        position_segment="center",
+                        position_exact=position_exact,
+                        door_type="interior" if target_room_id else "exterior",
+                        room_a=room_id,
+                        room_b=target_room_id,
+                        width=placement.width_m,
+                        height=placement.height_m,
+                    )
+                )
+            elif placement.kind == "window":
+                self.layout.windows.append(
+                    Window(
+                        id=placement.opening_id,
+                        boundary_label=boundary_label,
+                        position_along_wall=position_exact,
+                        room_id=room_id,
+                        wall_direction=direction,
+                        width=placement.width_m,
+                        height=placement.height_m,
+                        sill_height=placement.sill_height_m,
+                        shape=WindowShape(placement.shape),
+                    )
+                )
+            else:
+                self.layout.portals.append(
+                    PortalSpec(
+                        portal_id=f"topology-{placement.opening_id}",
+                        portal_type=PortalType.OPEN,
+                        source_space_id=room_id,
+                        target_space_id=target_room_id,
+                        width=placement.width_m,
+                        height=placement.height_m,
+                    )
+                )
+
+        self.layout.invalidate_all_room_geometries()
+        validation = FloorPlanTools(
+            layout=self.layout,
+            mode=self.mode,
+            wall_height_min=self.cfg.wall_height.min,
+            wall_height_max=self._construction_wall_height_max(),
+            room_dim_min=self.cfg.min_floor_plan_dim_m,
+            room_dim_max=self._construction_room_dim_max(),
+        )._validate_impl()
+        if validation.layout != "ok" or validation.connectivity != "ok":
+            raise SpatialCompilationError(
+                "accepted blueprint could not be constructed: "
+                f"layout={validation.layout}; connectivity={validation.connectivity}"
+            )
 
     @log_scene_action
     def _perform_checkpoint_reset(self, checkpoint_state_dict: dict) -> None:
@@ -799,13 +1066,14 @@ class StatefulFloorPlanAgent(BaseStatefulAgent, BaseFloorPlanAgent):
 
         literal_candidates = literal_candidates_from_prompt(styled_prompt)
         configured_model = getattr(getattr(self.cfg, "openai", None), "model", None)
+        semantic_model = semantic_model_name(configured_model)
         try:
-            if not configured_model:
+            if not semantic_model:
                 raise RuntimeError("semantic obligation model is not configured")
             interpretations, analysis_result = await analyze_requirement_candidates(
                 styled_prompt,
                 literal_candidates,
-                model=str(configured_model),
+                model=semantic_model,
                 run_config=self._create_run_config(),
                 model_settings=self._get_model_settings(settings_key="designer"),
             )
@@ -817,18 +1085,18 @@ class StatefulFloorPlanAgent(BaseStatefulAgent, BaseFloorPlanAgent):
                 styled_prompt,
                 literal_candidates,
                 interpretations,
-                analysis_model=str(configured_model),
+                analysis_model=semantic_model,
             )
         except Exception as exc:
-            # Step 2 is intentionally shadow-only. Preserve every source clause as
-            # unclassified if the semantic route fails; enforcement will treat an
-            # unclassified hard obligation as non-publishable when that gate lands.
+            # Preserve every source clause as unclassified if interpretation fails.
+            # Unclassified hard obligations are unresolved-blocking, so capability
+            # preflight and publication both fail closed with source evidence.
             console_logger.exception(
                 "Semantic obligation analysis failed; preserving literal candidates"
             )
             self.requirement_graph = requirement_graph_from_prompt(
                 styled_prompt,
-                analysis_model=(str(configured_model) if configured_model else None),
+                analysis_model=semantic_model or None,
                 analysis_error=f"{type(exc).__name__}: {exc}",
             )
         persist_requirement_graph(
@@ -876,7 +1144,7 @@ class StatefulFloorPlanAgent(BaseStatefulAgent, BaseFloorPlanAgent):
             self.logger.output_dir / "semantic_obligation_summary.json",
         )
         console_logger.info(
-            "Semantic requirement shadow graph %s captured %d literal candidates "
+            "Semantic requirement graph %s captured %d literal candidates "
             "and %d obligations (analysis=%s, hash=%s)",
             self.requirement_graph.graph_id,
             len(self.requirement_graph.candidates),
@@ -889,10 +1157,12 @@ class StatefulFloorPlanAgent(BaseStatefulAgent, BaseFloorPlanAgent):
             spatial_compilation, spatial_result = await compile_requirement_blueprint(
                 self.requirement_graph,
                 capability_manifest,
-                model=str(configured_model),
+                model=semantic_model,
                 mode=self.mode,
-                maximum_dimension_m=float(self.cfg.max_floor_plan_dim_m),
-                maximum_height_m=float(self.cfg.wall_height.max),
+                maximum_dimension_m=None,
+                maximum_height_m=None,
+                maximum_opening_width_m=None,
+                maximum_opening_height_m=None,
                 run_config=self._create_run_config(),
                 model_settings=self._get_model_settings(settings_key="designer"),
             )
@@ -913,10 +1183,10 @@ class StatefulFloorPlanAgent(BaseStatefulAgent, BaseFloorPlanAgent):
                 styled_prompt,
                 mode=self.mode,
                 default_dimensions_m=(
-                    min(7.0, float(self.cfg.max_floor_plan_dim_m)),
-                    min(7.0, float(self.cfg.max_floor_plan_dim_m)),
+                    7.0,
+                    7.0,
                 ),
-                maximum_dimension_m=float(self.cfg.max_floor_plan_dim_m),
+                maximum_dimension_m=None,
             )
         if style_bible is not None:
             self.blueprint = self.blueprint.model_copy(
@@ -977,25 +1247,18 @@ class StatefulFloorPlanAgent(BaseStatefulAgent, BaseFloorPlanAgent):
 
         if self.cfg.max_critique_rounds <= 0:
             blueprint_submission = floor_plan_submission_from_blueprint(self.blueprint)
-            deterministic_intent = normalize_floor_plan_submission(
-                blueprint_submission,
-                prompt=styled_prompt,
-                mode=self.mode,
-                room_dim_min=self.cfg.min_floor_plan_dim_m,
-                room_dim_max=self.cfg.max_floor_plan_dim_m,
-                wall_height_min=self.cfg.wall_height.min,
-                wall_height_max=self.cfg.wall_height.max,
+            blueprint_submission["structural"] = structural_submission_from_blueprint(
+                self.blueprint,
+                blueprint_submission["room_specs"],
+                max_total_height=self._construction_wall_height_max(),
             )
             if (
-                deterministic_intent.structural is not None
+                capability_manifest is not None
                 and len(designer_tools) == 1
                 and getattr(designer_tools[0], "name", "") == "submit_floor_plan"
             ):
-                # Explicit storeys, mezzanines, platforms, and stairs already
-                # have a checked local authoring path. Avoid spending a model
-                # turn asking it to restate that structural schema.
                 console_logger.info(
-                    "Using deterministic multi-level floor-plan authoring"
+                    "Using authoritative requirement-bound floor-plan authoring"
                 )
                 result = await designer_tools[0].on_invoke_tool(
                     None, json.dumps(blueprint_submission)
@@ -1019,6 +1282,8 @@ class StatefulFloorPlanAgent(BaseStatefulAgent, BaseFloorPlanAgent):
                 agent_name="PLANNER (FLOOR PLAN)",
                 state_hash=self.layout.content_hash,
             )
+        if capability_manifest is not None:
+            self._apply_locked_blueprint_topology()
         if not self._write_resumable_layout_checkpoint():
             raise RuntimeError(
                 "Floor-plan stage did not produce a structurally valid checkpoint; "
@@ -1230,8 +1495,8 @@ class StatefulFloorPlanAgent(BaseStatefulAgent, BaseFloorPlanAgent):
         structural = synthesize_structural_layout(
             feedback,
             room_specs,
-            min(existing_storey_height, self.cfg.wall_height.max),
-            max_total_height=self.cfg.wall_height.max,
+            min(existing_storey_height, self._construction_wall_height_max()),
+            max_total_height=self._construction_wall_height_max(),
             level_count_hint=len(self.layout.levels),
         )
 
@@ -1246,9 +1511,9 @@ class StatefulFloorPlanAgent(BaseStatefulAgent, BaseFloorPlanAgent):
                 mode=self.mode,
                 materials_config=self._create_materials_config(),
                 wall_height_min=self.cfg.wall_height.min,
-                wall_height_max=self.cfg.wall_height.max,
+                wall_height_max=self._construction_wall_height_max(),
                 room_dim_min=self.cfg.min_floor_plan_dim_m,
-                room_dim_max=self.cfg.max_floor_plan_dim_m,
+                room_dim_max=self._construction_room_dim_max(),
             )
             result = tools._set_structural_layout_impl(structural)
             if not result.success:

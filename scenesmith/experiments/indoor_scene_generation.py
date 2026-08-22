@@ -51,6 +51,7 @@ from scenesmith.agent_utils.objaverse_retrieval_server import ObjaverseRetrieval
 from scenesmith.agent_utils.physical_feasibility import (
     apply_physical_feasibility_postprocessing,
 )
+from scenesmith.agent_utils.physics_validation import compute_scene_collisions
 from scenesmith.agent_utils.requirement_blueprint_compiler import (
     load_spatial_compilation,
 )
@@ -60,6 +61,7 @@ from scenesmith.agent_utils.scene_requirements import (
     audit_requirement_graph,
     load_requirement_graph,
     persist_shadow_audit,
+    semantic_model_name,
 )
 from scenesmith.agent_utils.semantic_ledger import (
     load_or_initialize_semantic_ledger,
@@ -73,6 +75,9 @@ from scenesmith.agent_utils.semantic_publication import (
     certify_semantic_publication,
     persist_publication_artifact,
     semantic_artifact_inventory,
+)
+from scenesmith.agent_utils.semantic_group_materializer import (
+    load_and_materialize_locked_semantic_groups,
 )
 from scenesmith.agent_utils.semantic_strategies import (
     load_capability_manifest,
@@ -137,12 +142,38 @@ def _require_projection_success(stage: str, success: bool) -> None:
         )
 
 
+def _require_semantic_publication_inputs(artifacts: dict[str, Path]) -> None:
+    """Prevent legacy/shadow diagnostics from becoming a publication bypass."""
+
+    missing = tuple(
+        name for name, artifact_path in artifacts.items() if not artifact_path.is_file()
+    )
+    if missing:
+        raise RuntimeError(
+            "Semantic publication blocked: missing mandatory enforcement artifacts "
+            + ", ".join(missing)
+            + ". Any shadow audit emitted for this checkpoint is diagnostic only."
+        )
+
+
 def _validate_final_dense_library_book_rows(
     scene: RoomScene,
     manipuland_agent: StatefulManipulandAgent,
 ) -> int:
     """Revalidate owner-bound book rows after every final pose mutation."""
 
+    manipuland_agent.scene = scene
+    normalize_surplus = getattr(
+        manipuland_agent,
+        "_normalize_dense_library_book_row_surplus",
+        None,
+    )
+    removed = normalize_surplus() if callable(normalize_surplus) else 0
+    if removed:
+        console_logger.info(
+            "Pruned %d surplus dense book rows after final pose mutation",
+            removed,
+        )
     invalid_row_ids = StatefulManipulandAgent._physically_invalid_dense_book_row_ids(
         scene,
         manipuland_agent.cfg,
@@ -557,7 +588,7 @@ def _copy_checkpoint_for_stage(
     - Scene-level: floor_plans/, house_layout.json, scene_blueprint.json,
       scene_requirement_graph.json, semantic_obligation_ledger.json, and legacy
       room_geometry/
-    - Room-level: checkpoint directory + referenced assets
+    - Room-level: checkpoint directory + referenced assets + semantic room kit
 
     NOT copied (ensuring fresh start for resumed stage):
     - *.db (session files - agent starts fresh conversation)
@@ -657,6 +688,13 @@ def _copy_checkpoint_for_stage(
 
         target_room = target_scene_dir / room_dir.name
         target_room.mkdir(parents=True, exist_ok=True)
+
+        # The selected kit is durable semantic provenance, not agent-session
+        # state.  Late-stage resumes still need it for completion validation
+        # and for regression/publication evidence.
+        room_kit = room_dir / "room_kit.json"
+        if room_kit.exists():
+            shutil.copy(room_kit, target_room / "room_kit.json")
 
         # Copy entire checkpoint directory for self-containment.
         # Includes scene_state.json, scene.dmd.yaml, and scene.blend.
@@ -784,6 +822,8 @@ def _generate_room(
     # ["furniture", "wall_mounted", "ceiling_mounted", "manipuland"]
     room_stages = PIPELINE_STAGES[1:]
     start_idx = room_stages.index(start_stage) if start_stage in room_stages else 0
+    if start_idx == 0:
+        load_and_materialize_locked_semantic_groups(scene, room_dir.parent)
 
     # Load projection config (needed for furniture and final post-processing).
     projection_cfg = cfg_dict["experiment"]["projection"]
@@ -910,6 +950,7 @@ def _generate_room(
         with open(furniture_state_path) as f:
             furniture_state = json.load(f)
         scene.restore_from_state_dict(furniture_state)
+        load_and_materialize_locked_semantic_groups(scene, room_dir.parent)
         console_logger.info(
             f"Loaded {len(scene.objects)} objects from furniture checkpoint"
         )
@@ -983,6 +1024,7 @@ def _generate_room(
         with open(wall_objects_state_path) as f:
             wall_objects_state = json.load(f)
         scene.restore_from_state_dict(wall_objects_state)
+        load_and_materialize_locked_semantic_groups(scene, room_dir.parent)
         console_logger.info(
             f"Loaded {len(scene.objects)} objects from wall_objects checkpoint"
         )
@@ -1047,6 +1089,7 @@ def _generate_room(
         with open(ceiling_objects_state_path) as f:
             ceiling_objects_state = json.load(f)
         scene.restore_from_state_dict(ceiling_objects_state)
+        load_and_materialize_locked_semantic_groups(scene, room_dir.parent)
         console_logger.info(
             f"Loaded {len(scene.objects)} objects from ceiling_objects checkpoint"
         )
@@ -1068,7 +1111,14 @@ def _generate_room(
             logger=logger,
             render_allocation=render_allocation,
         )
-        asyncio.run(manipuland_agent.add_manipulands(scene=scene))
+        try:
+            asyncio.run(manipuland_agent.add_manipulands(scene=scene))
+        finally:
+            # The final semantic verifier runs after manipuland placement and
+            # does not need the geometry helper processes. Closing them here
+            # also prevents a later publication exception from orphaning
+            # servers that keep the parent job pipe open.
+            manipuland_agent.cleanup()
         end_time = time.time()
         console_logger.info(
             f"Manipulands added to room {room_id} in "
@@ -1177,15 +1227,15 @@ def _generate_room(
             scene,
             house_layout=house_layout,
         )
-        configured_model = str(
-            cfg_dict["floor_plan_agent"].get("openai", {}).get("model") or ""
+        configured_model = semantic_model_name(
+            str(cfg_dict["floor_plan_agent"].get("openai", {}).get("model") or "")
         )
         if not configured_model:
             raise RuntimeError(
                 "Semantic publication verifier model is not configured; "
                 "the scene cannot publish."
             )
-        verification, verification_result = asyncio.run(
+        verification, verification_results = asyncio.run(
             analyze_final_semantics(
                 requirement_graph,
                 spatial_compilation,
@@ -1197,10 +1247,86 @@ def _generate_room(
                 ),
             )
         )
-        log_agent_usage(
-            result=verification_result,
-            agent_name="SEMANTIC PUBLICATION VERIFIER",
+        for batch_index, verification_result in enumerate(
+            verification_results, start=1
+        ):
+            log_agent_usage(
+                result=verification_result,
+                agent_name=f"SEMANTIC PUBLICATION VERIFIER {batch_index}",
+            )
+        repair_requirement_ids = frozenset(
+            claim.requirement_id
+            for claim in verification.claims
+            if claim.status in {"missing", "ambiguous"}
         )
+        repaired_object_ids = load_and_materialize_locked_semantic_groups(
+            scene,
+            room_dir.parent,
+            requirement_ids=repair_requirement_ids,
+        )
+        if repaired_object_ids:
+            console_logger.warning(
+                "Semantic verifier requested repair for %d obligations; "
+                "materialized %d locked blueprint objects and rechecking physics",
+                len(repair_requirement_ids),
+                len(repaired_object_ids),
+            )
+            repair_collisions = compute_scene_collisions(scene)
+            if repair_collisions:
+                descriptions = "; ".join(
+                    collision.to_description() for collision in repair_collisions[:10]
+                )
+                raise SemanticPublicationError(
+                    "Automatic semantic repair produced physical conflicts: "
+                    + descriptions,
+                    failures=(descriptions,),
+                )
+            final_physics_verified = True
+            final_physics_evidence_refs = tuple(final_physics_evidence_refs) + (
+                "physics:automatic-semantic-repair-zero-collisions",
+            )
+            artifacts = semantic_artifact_inventory(
+                scene_blueprint,
+                scene,
+                house_layout=house_layout,
+            )
+            verification, repair_verification_results = asyncio.run(
+                analyze_final_semantics(
+                    requirement_graph,
+                    spatial_compilation,
+                    artifacts,
+                    model=configured_model,
+                    run_config=manipuland_agent._create_run_config(),
+                    model_settings=manipuland_agent._get_model_settings(
+                        settings_key="designer"
+                    ),
+                )
+            )
+            for batch_index, verification_result in enumerate(
+                repair_verification_results, start=1
+            ):
+                log_agent_usage(
+                    result=verification_result,
+                    agent_name=(f"SEMANTIC REPAIR VERIFIER {batch_index}"),
+                )
+            (room_dir / "semantic_repair.json").write_text(
+                json.dumps(
+                    {
+                        "repair_requirement_ids": sorted(repair_requirement_ids),
+                        "repaired_object_ids": [
+                            str(object_id) for object_id in repaired_object_ids
+                        ],
+                        "repair_passes": 1,
+                    },
+                    indent=2,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            console_logger.info(
+                "Automatic semantic repair completed; publication verification "
+                "was rerun against the repaired final artifacts"
+            )
         verification_path = room_dir / "semantic_verification.json"
         persist_publication_artifact(verification, verification_path)
         semantic_ledger = load_or_initialize_semantic_ledger(
@@ -1249,6 +1375,13 @@ def _generate_room(
                 diagnostic = (
                     "; ".join(matching_failures) if matching_failures else str(exc)
                 )
+                current_entry = next(
+                    item
+                    for item in semantic_ledger.entries
+                    if item.requirement_id == requirement.requirement_id
+                )
+                if current_entry.current_status in {"fulfilled", "failed"}:
+                    continue
                 plan = next(
                     item
                     for item in capability_manifest.plans
@@ -1304,6 +1437,17 @@ def _generate_room(
                 for item in capability_manifest.plans
                 if item.requirement_id == requirement.requirement_id
             )
+            current_entry = next(
+                item
+                for item in semantic_ledger.entries
+                if item.requirement_id == requirement.requirement_id
+            )
+            # A resumed stage inherits durable ledger provenance from its source
+            # checkpoint. Terminal entries are immutable and already closed; the
+            # new run publishes a fresh certificate without replaying transitions
+            # whose evidence paths are necessarily run-specific.
+            if current_entry.current_status in {"fulfilled", "failed"}:
+                continue
             certified_requirement = certified_by_id.get(requirement.requirement_id)
             if certified_requirement is None:
                 claim = claims_by_id.get(requirement.requirement_id)
@@ -1341,11 +1485,6 @@ def _generate_room(
                     outcome="succeeded",
                     evidence_refs=evidence_refs or (str(verification_path),),
                 )
-            current_entry = next(
-                item
-                for item in semantic_ledger.entries
-                if item.requirement_id == requirement.requirement_id
-            )
             if current_entry.current_status == "strategy_assigned":
                 semantic_ledger = transition_requirement(
                     semantic_ledger,
@@ -1358,15 +1497,16 @@ def _generate_room(
                     stage="construction",
                     evidence_refs=evidence_refs or (str(verification_path),),
                 )
-            semantic_ledger = transition_requirement(
-                semantic_ledger,
-                requirement.requirement_id,
-                "verified",
-                event_key=f"semantic-final:verified:{requirement.requirement_id}",
-                actor="semantic_publication_gate",
-                stage="semantic",
-                evidence_refs=(str(verification_path),),
-            )
+            if current_entry.current_status != "verified":
+                semantic_ledger = transition_requirement(
+                    semantic_ledger,
+                    requirement.requirement_id,
+                    "verified",
+                    event_key=f"semantic-final:verified:{requirement.requirement_id}",
+                    actor="semantic_publication_gate",
+                    stage="semantic",
+                    evidence_refs=(str(verification_path),),
+                )
             semantic_ledger = transition_requirement(
                 semantic_ledger,
                 requirement.requirement_id,
@@ -1460,6 +1600,19 @@ def _generate_room(
                 "is not active yet: %s",
                 exc,
             )
+
+    _require_semantic_publication_inputs(
+        {
+            "scene_requirement_graph.json": requirement_graph_path,
+            "scene_blueprint.json": scene_blueprint_path,
+            "semantic_spatial_compilation.json": spatial_compilation_path,
+            "semantic_capability_manifest.json": capability_manifest_path,
+            "semantic_strategy_journal.json": strategy_journal_path,
+            "semantic_publication_certificate.json": (
+                room_dir / "semantic_publication_certificate.json"
+            ),
+        }
+    )
 
     # Log and export final scene.
     logger.log_scene(scene=scene, name="final_scene")

@@ -749,6 +749,29 @@ def _get_colliding_object_ids(
 
     colliding_ids: set[UniqueID] = set()
     for collision in collisions:
+        allowed_owner_contact = False
+        for row_id, other_id in (
+            (collision.object_a_id, collision.object_b_id),
+            (collision.object_b_id, collision.object_a_id),
+        ):
+            try:
+                row = scene.get_object(UniqueID(row_id))
+            except (TypeError, ValueError):
+                row = None
+            if (
+                row is not None
+                and str(
+                    (getattr(row, "metadata", None) or {}).get(
+                        "dense_library_owner_bound",
+                        "",
+                    )
+                )
+                == other_id
+            ):
+                allowed_owner_contact = True
+                break
+        if allowed_owner_contact:
+            continue
         # Only add scene object IDs, skip room geometry.
         if not is_room_geometry_id(collision.object_a_id):
             colliding_ids.add(UniqueID(collision.object_a_id))
@@ -807,6 +830,41 @@ def apply_non_penetration_projection(
         f"Starting non-penetration projection (weld_furniture={weld_furniture}, "
         f"xy_only={xy_only}, fix_rotation={fix_rotation}, objects={total_objects})"
     )
+
+    if weld_furniture:
+        movable_objects = [
+            obj
+            for obj in scene.objects.values()
+            if obj.object_type != ObjectType.FURNITURE
+            and obj.object_type
+            not in {
+                ObjectType.WALL,
+                ObjectType.FLOOR,
+                ObjectType.THIN_COVERING,
+                ObjectType.WALL_MOUNTED,
+                ObjectType.CEILING_MOUNTED,
+            }
+            and (obj.metadata or {}).get("asset_source") != "thin_covering"
+            and not (obj.metadata or {}).get("dense_library_owner_bound")
+        ]
+        if not movable_objects:
+            colliding_ids = _get_colliding_object_ids(
+                scene,
+                penetration_threshold=collision_penetration_threshold_m,
+            )
+            if not colliding_ids:
+                elapsed = time.time() - start_time
+                console_logger.info(
+                    "No movable bodies or unresolved collisions; projection is "
+                    "a successful no-op (%.2fs)",
+                    elapsed,
+                )
+                return scene, True
+            console_logger.warning(
+                "No movable bodies can resolve %d colliding scene object(s)",
+                len(colliding_ids),
+            )
+            return scene, False
 
     # For large scenes, use collision pre-check to reduce DOFs.
     # Small scenes (per-furniture projection) use existing fast path.

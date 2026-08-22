@@ -1,5 +1,7 @@
 """Tests for generic semantic fulfillment capability preflight."""
 
+import asyncio
+
 from datetime import UTC, datetime
 from types import SimpleNamespace
 
@@ -21,21 +23,36 @@ from scenesmith.agent_utils.scene_requirements import (
 )
 from scenesmith.agent_utils.requirement_blueprint_compiler import (
     RequirementBlueprintBinding,
+    RequirementBlueprintBindingWire,
+    RoleCountWire,
     SpatialCompilationError,
     SpatialRequirementCompilation,
+    SpatialRequirementCompilationWire,
+    SPATIAL_COMPILER_INSTRUCTIONS,
+    _project_endpoint,
+    _validate_expected_mode_spaces,
     blueprint_with_obligation_brief,
+    expand_spatial_compilation,
     load_spatial_compilation,
     persist_spatial_compilation,
+    spatial_compilation_output_schema,
     validate_constructed_topology,
     validate_spatial_compilation,
 )
+from scenesmith.agent_utils.requirement_blueprint_compiler import (
+    BlueprintDesignTokensWire,
+    FurnitureGroupBlueprintWire,
+)
 from scenesmith.agent_utils.scene_blueprint import (
     BlueprintConstraint,
+    ConnectorBlueprint,
+    ConnectorEndpoint,
     FurnitureGroupBlueprint,
     LevelBlueprint,
     OpeningBlueprint,
     SceneBlueprint,
     SpaceBlueprint,
+    blueprint_from_prompt,
 )
 from scenesmith.agent_utils.house import OpeningType
 from scenesmith.agent_utils.semantic_ledger import initialize_semantic_ledger
@@ -45,7 +62,9 @@ from scenesmith.agent_utils.semantic_publication import (
     SemanticArtifact,
     SemanticPublicationError,
     SemanticVerificationBatch,
+    analyze_final_semantics,
     certify_semantic_publication,
+    semantic_verification_input,
 )
 from scenesmith.agent_utils.semantic_strategies import (
     CapabilityPreflightError,
@@ -62,6 +81,126 @@ from scenesmith.agent_utils.semantic_strategies import (
     record_strategy_attempt,
     StrategyAttemptError,
 )
+
+
+def test_spatial_compiler_schema_allows_typed_blueprint_maps():
+    output_schema = spatial_compilation_output_schema()
+
+    assert output_schema.output_type is SpatialRequirementCompilationWire
+    assert output_schema.is_strict_json_schema()
+
+
+def test_spatial_compiler_contract_is_bounded_and_allows_one_space_per_level():
+    instructions = " ".join(SPATIAL_COMPILER_INSTRUCTIONS.split())
+    blueprint = blueprint_from_prompt(
+        "A multi-level library with one spiral staircase."
+    )
+
+    assert "at most 18 words" in instructions
+    assert len(blueprint.levels) == len(blueprint.spaces) == 2
+    _validate_expected_mode_spaces(blueprint, "room")
+
+
+def test_spatial_connector_projection_clamps_xy_and_uses_level_elevation_for_z():
+    endpoint = ConnectorEndpoint(
+        space_id="library",
+        level_id="mezzanine",
+        position_m=(30.0, -30.0, 999.0),
+    )
+
+    projected = _project_endpoint(
+        endpoint,
+        level_elevations={"mezzanine": 4.0},
+        maximum_dimension_m=20.0,
+    )
+
+    assert projected.position_m == (10.0, -10.0, 4.0)
+
+
+def test_compact_spatial_wire_expands_constraints_counts_and_locks():
+    graph = _graph()
+    requirement = graph.requirements[0]
+    wire = SpatialRequirementCompilationWire(
+        blueprint_id="assembly-hall",
+        levels=(LevelBlueprint(level_id="ground", name="Ground"),),
+        spaces=(
+            SpaceBlueprint(
+                space_id="main-hall",
+                name="Main hall",
+                room_type="assembly_hall",
+                level_id="ground",
+                dimensions_m=(30, 30),
+            ),
+        ),
+        openings=(
+            OpeningBlueprint(
+                opening_id="oversized-window",
+                kind="window",
+                host_space_id="main-hall",
+                width_m=8.0,
+                height_m=9.0,
+            ),
+        ),
+        connectors=(),
+        furniture_groups=(
+            FurnitureGroupBlueprintWire(
+                group_id="assemblies",
+                name="Velorian assemblies",
+                space_id="main-hall",
+                roles=(RoleCountWire(role="assembly", count=10),),
+                focal_target=None,
+                density="balanced",
+            ),
+        ),
+        design_tokens=BlueprintDesignTokensWire(
+            style_keywords=(),
+            palette=(),
+            material_roles=(),
+            lighting_mood="neutral",
+            focal_hierarchy=("assemblies",),
+        ),
+        bindings=(
+            RequirementBlueprintBindingWire(
+                requirement_id=requirement.requirement_id,
+                owner_stage="placement",
+                artifact_ids=("assemblies",),
+                role_key="assembly",
+            ),
+        ),
+        compilation_summary="Bound the exact assembly requirement.",
+    )
+
+    unbounded = expand_spatial_compilation(graph, wire, mode="room")
+    assert unbounded.blueprint.spaces[0].dimensions_m == (30, 30)
+    assert unbounded.blueprint.openings[0].width_m == 8
+    assert unbounded.blueprint.openings[0].height_m == 9
+    validate_spatial_compilation(unbounded, graph, expected_mode="room")
+
+    compilation = expand_spatial_compilation(
+        graph,
+        wire,
+        mode="room",
+        maximum_dimension_m=20,
+        maximum_height_m=12,
+        maximum_opening_width_m=4,
+        maximum_opening_height_m=4,
+    )
+
+    assert compilation.bindings[0].planned_instances == 10
+    assert compilation.blueprint.spaces[0].dimensions_m == (20, 20)
+    assert compilation.blueprint.openings[0].width_m == 4
+    assert compilation.blueprint.openings[0].height_m == 4
+    assert compilation.blueprint.constraints[0].parameters["planned_instances"] == 10
+    assert set(compilation.bindings[0].artifact_ids) <= set(
+        compilation.blueprint.locked_ids
+    )
+    validate_spatial_compilation(
+        compilation,
+        graph,
+        maximum_dimension_m=20,
+        maximum_height_m=12,
+        expected_mode="room",
+    )
 
 
 FIXED_TIME = datetime(2026, 8, 22, 12, 0, tzinfo=UTC)
@@ -560,6 +699,134 @@ def test_topology_gate_rejects_ordinary_opening_for_llm_authored_massive_scale()
     ).passed
 
 
+def test_topology_gate_maps_room_mode_blueprint_spaces_to_constructed_room():
+    graph = _graph(
+        kind="connector",
+        prompt="Exactly 1 spiral staircase connects the three library levels.",
+    )
+    requirement = graph.requirements[0]
+    levels = (
+        LevelBlueprint(level_id="ground", name="Ground", elevation_m=0.0),
+        LevelBlueprint(level_id="mezzanine", name="Mezzanine", elevation_m=4.0),
+        LevelBlueprint(level_id="upper", name="Upper", elevation_m=8.0),
+    )
+    spaces = (
+        SpaceBlueprint(
+            space_id="semantic-ground",
+            name="Ground library",
+            room_type="library",
+            level_id="ground",
+            dimensions_m=(16.0, 14.0),
+        ),
+        SpaceBlueprint(
+            space_id="semantic-mezzanine",
+            name="Mezzanine library",
+            room_type="library",
+            level_id="mezzanine",
+            dimensions_m=(16.0, 14.0),
+        ),
+        SpaceBlueprint(
+            space_id="semantic-upper",
+            name="Upper library",
+            room_type="library",
+            level_id="upper",
+            dimensions_m=(16.0, 14.0),
+        ),
+    )
+    connector = ConnectorBlueprint(
+        connector_id="semantic-spiral",
+        kind="stairs_spiral",
+        start=ConnectorEndpoint(
+            space_id=spaces[0].space_id,
+            level_id=levels[0].level_id,
+            position_m=(3.0, 3.0, 0.0),
+        ),
+        end=ConnectorEndpoint(
+            space_id=spaces[2].space_id,
+            level_id=levels[2].level_id,
+            position_m=(3.0, 3.0, 8.0),
+        ),
+        width_m=3.2,
+        parameters={
+            "intermediate_landings": [
+                {
+                    "space_id": spaces[1].space_id,
+                    "level_id": levels[1].level_id,
+                    "position_m": [3.0, 3.0, 4.0],
+                }
+            ]
+        },
+    )
+    constraint = BlueprintConstraint(
+        constraint_id="constraint-spiral",
+        kind="semantic_connector",
+        target_ids=(connector.connector_id,),
+        parameters={
+            "requirement_id": requirement.requirement_id,
+            "planned_instances": 1,
+            "verification_criteria": ["One usable spiral connector"],
+        },
+        strength="hard",
+        source="user",
+    )
+    blueprint = SceneBlueprint(
+        blueprint_id="semantic-library",
+        source_prompt=graph.source_prompt,
+        mode="room",
+        levels=levels,
+        spaces=spaces,
+        connectors=(connector,),
+        constraints=(constraint,),
+        locked_ids=(connector.connector_id, constraint.constraint_id),
+    )
+    compilation = SpatialRequirementCompilation(
+        graph_id=graph.graph_id,
+        graph_hash=graph.content_hash,
+        blueprint=blueprint,
+        bindings=(
+            RequirementBlueprintBinding(
+                requirement_id=requirement.requirement_id,
+                owner_stage="topology",
+                artifact_ids=(connector.connector_id,),
+                role_key=None,
+                planned_instances=1,
+                rationale="The spiral staircase binds the two semantic levels.",
+            ),
+        ),
+        compilation_summary="A three-level room-mode library.",
+    )
+    actual_connectors = (
+        SimpleNamespace(
+            connector_id=connector.connector_id,
+            connector_type="stairs_spiral",
+            width=3.2,
+            start=SimpleNamespace(space_id="library", level_id="ground"),
+            end=SimpleNamespace(space_id="library", level_id="mezzanine"),
+        ),
+        SimpleNamespace(
+            connector_id=f"{connector.connector_id}-segment-2",
+            connector_type="stairs_spiral",
+            width=3.2,
+            start=SimpleNamespace(space_id="library", level_id="mezzanine"),
+            end=SimpleNamespace(space_id="library", level_id="upper"),
+        ),
+    )
+    layout = SimpleNamespace(
+        levels=[SimpleNamespace(level_id=level.level_id) for level in levels],
+        room_specs=[SimpleNamespace(room_id="library", room_type="library")],
+        connectors=list(actual_connectors),
+        room_geometries={"library": SimpleNamespace(openings=[])},
+    )
+
+    manifest = validate_constructed_topology(compilation, graph, layout)
+
+    assert manifest.passed
+    assert manifest.evidence[0].actual_artifact_ids == tuple(
+        item.connector_id for item in actual_connectors
+    )
+    assert manifest.evidence[0].observed_count == 1
+
+
 def _verification(graph, artifact_ids, *, observed_count=None, status="satisfied"):
     return SemanticVerificationBatch(
         graph_id=graph.graph_id,
@@ -576,6 +843,107 @@ def _verification(graph, artifact_ids, *, observed_count=None, status="satisfied
             ),
         ),
         audit_summary="Source-bound final evidence audit.",
+    )
+
+
+def test_semantic_verifier_input_is_compact_and_preserves_binding_evidence():
+    graph = _graph()
+    compilation = _spatial_compilation(graph)
+    artifacts = (
+        SemanticArtifact(
+            artifact_id="unrelated-statue",
+            artifact_class="scene_object",
+            name="Classical statue",
+            description="A figure holding a miniature velorian assembly.",
+        ),
+    ) + tuple(
+        SemanticArtifact(
+            artifact_id=f"velorian-{index}",
+            artifact_class="scene_object",
+            name="Velorian assembly",
+            description="purpose-built semantic object " * 20,
+            metadata={
+                "catalog_semantics": "Velorian ontology " * 30,
+                "irrelevant_debug_blob": "x" * 2000,
+            },
+        )
+        for index in range(100)
+    )
+
+    payload = semantic_verification_input(graph, compilation, artifacts)
+
+    assert graph.graph_id in payload
+    assert graph.requirements[0].requirement_id in payload
+    assert "velorian-99" in payload
+    assert "irrelevant_debug_blob" not in payload
+    assert "candidate_sources" not in payload
+    assert len(payload) < 100_000
+
+
+def test_final_semantics_binds_unambiguous_surviving_objects_without_model_turn():
+    graph = _graph()
+    compilation = _spatial_compilation(graph)
+    artifacts = tuple(
+        SemanticArtifact(
+            artifact_id=f"velorian-{index}",
+            artifact_class="scene_object",
+            name=f"Velorian assembly {index}",
+            dimensions_m=(2.0, 1.0, 1.5),
+        )
+        for index in range(10)
+    )
+
+    class RunnerThatMustNotRun:
+        @staticmethod
+        async def run(*_args, **_kwargs):
+            raise AssertionError("unambiguous evidence should not spend a model turn")
+
+    verification, results = asyncio.run(
+        analyze_final_semantics(
+            graph,
+            compilation,
+            artifacts,
+            model="fixture-model",
+            runner=RunnerThatMustNotRun,
+        )
+    )
+
+    assert results == ()
+    assert verification.claims[0].status == "satisfied"
+    assert verification.claims[0].observed_count == 10
+    assert "unrelated-statue" not in verification.claims[0].artifact_ids
+
+
+def test_final_semantics_aggregates_model_batch_audit_summaries():
+    graph = _graph()
+    compilation = _spatial_compilation(graph)
+    batch = _verification(graph, (), observed_count=0, status="missing")
+
+    class Result:
+        @staticmethod
+        def final_output_as(_output_type):
+            return batch
+
+    class Runner:
+        @staticmethod
+        async def run(*_args, **_kwargs):
+            return Result()
+
+    verification, results = asyncio.run(
+        analyze_final_semantics(
+            graph,
+            compilation,
+            (),
+            model="fixture-model",
+            runner=Runner,
+        )
+    )
+
+    assert len(results) == 1
+    assert verification.claims == batch.claims
+    assert verification.audit_summary == (
+        "Deterministically bound 0 source requirements.; "
+        "Source-bound final evidence audit."
     )
 
 

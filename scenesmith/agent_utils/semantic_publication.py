@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import tempfile
 
 from pathlib import Path
@@ -131,6 +132,10 @@ semantic and measurable criteria. Forbidden obligations are satisfied only when 
 matching artifact exists. Return missing or ambiguous rather than guessing. For each
 authored relationship, return a relation result with concrete evidence IDs and a
 clear measurement or spatial observation.
+
+Keep evidence bounded. For exact requirements, bind exactly the expected number of
+artifacts. For minimum or qualitative requirements, bind only the smallest distinct
+set that proves the requested minimum; do not enumerate surplus matching artifacts.
 """
 
 
@@ -145,6 +150,171 @@ _EXPECTED_FINAL_ARTIFACT_CLASSES = {
     "spatial_constraint": frozenset({"scene", "space", "scene_object"}),
     "style": frozenset({"scene", "space", "scene_object"}),
 }
+
+_SEMANTIC_STOP_WORDS = frozenset(
+    {
+        "a",
+        "an",
+        "and",
+        "decor",
+        "for",
+        "group",
+        "of",
+        "scale",
+        "style",
+        "the",
+    }
+)
+
+
+def _semantic_word(token: str) -> str:
+    word = token.casefold()
+    if word in {
+        "floor",
+        "floors",
+        "level",
+        "levels",
+        "storey",
+        "storeys",
+        "story",
+        "stories",
+    }:
+        return "vertical-level"
+    if word.endswith("ies") and len(word) > 4:
+        return f"{word[:-3]}y"
+    if word.endswith("es") and len(word) > 4:
+        if word.endswith(("ches", "shes", "sses", "xes", "zes")):
+            return word[:-2]
+        return word[:-1]
+    if word.endswith("s") and len(word) > 3:
+        return word[:-1]
+    return word
+
+
+def _semantic_words(text: str) -> frozenset[str]:
+    return frozenset(
+        _semantic_word(token)
+        for token in re.findall(r"[A-Za-z0-9]+", text)
+        if token.casefold() not in _SEMANTIC_STOP_WORDS
+    )
+
+
+def _artifact_semantic_words(artifact: SemanticArtifact) -> frozenset[str]:
+    metadata_text = " ".join(
+        str(value)
+        for key, value in artifact.metadata.items()
+        if key
+        in {
+            "catalog_semantics",
+            "dense_library_populated_case",
+            "generated_from",
+            "ontology_path",
+            "opening_type",
+            "role",
+        }
+    )
+    return _semantic_words(
+        f"{artifact.artifact_id} {artifact.name} {artifact.description} {metadata_text}"
+    )
+
+
+def _deterministic_claim(
+    requirement: SceneRequirement,
+    compilation: SpatialRequirementCompilation,
+    artifacts: tuple[SemanticArtifact, ...],
+) -> RequirementVerificationClaim | None:
+    """Bind conservative final evidence without spending a model turn.
+
+    Topology requirements reach this gate only after constructed-topology
+    validation. Object requirements are bound only through surviving semantic
+    names/descriptions/metadata; ambiguous qualified or relational objects remain
+    model-verifier work.
+    """
+
+    expected_classes = _EXPECTED_FINAL_ARTIFACT_CLASSES.get(
+        requirement.kind, frozenset()
+    )
+    candidates = [
+        artifact
+        for artifact in artifacts
+        if not expected_classes or artifact.artifact_class in expected_classes
+    ]
+    binding = next(
+        (
+            item
+            for item in compilation.bindings
+            if item.requirement_id == requirement.requirement_id
+        ),
+        None,
+    )
+    topology_owned = binding is not None and binding.owner_stage == "topology"
+    if requirement.relations and not topology_owned:
+        return None
+    if requirement.qualifiers:
+        return None
+
+    subject_words = _semantic_words(requirement.subject)
+    binding_words = _semantic_words(binding.role_key or "") if binding else frozenset()
+    bound_ids = frozenset(binding.artifact_ids) if binding else frozenset()
+
+    def match_score(artifact: SemanticArtifact) -> int:
+        if artifact.artifact_id in bound_ids:
+            return 100
+        direct_words = _semantic_words(f"{artifact.artifact_id} {artifact.name}")
+        artifact_words = _artifact_semantic_words(artifact)
+        if requirement.kind == "level":
+            return 100 if artifact.artifact_class == "level" else 0
+        if requirement.kind in {"scene_type", "opening", "connector"}:
+            if subject_words and subject_words <= direct_words:
+                return 80
+            return 40 if subject_words & artifact_words else 0
+        if binding_words and binding_words <= artifact_words:
+            return 60
+        if subject_words and subject_words <= direct_words:
+            return 80
+        return 20 if subject_words and subject_words <= artifact_words else 0
+
+    matched = sorted(
+        (artifact for artifact in candidates if match_score(artifact) > 0),
+        key=match_score,
+        reverse=True,
+    )
+    expected = _expected_count(requirement)
+    if requirement.polarity == "forbidden":
+        selected = matched
+        status: Literal["satisfied", "missing", "ambiguous"] = (
+            "satisfied" if not selected else "missing"
+        )
+    elif len(matched) < expected:
+        return None
+    else:
+        selected = matched[:expected]
+        status = "satisfied"
+
+    artifact_ids = tuple(artifact.artifact_id for artifact in selected)
+    relation_results = tuple(
+        RelationVerification(
+            predicate=relation.predicate,
+            target=relation.target,
+            satisfied=True,
+            evidence_artifact_ids=artifact_ids,
+            measurement=(
+                "Constructed-topology validation preserved this source relationship."
+            ),
+        )
+        for relation in requirement.relations
+    )
+    return RequirementVerificationClaim(
+        requirement_id=requirement.requirement_id,
+        status=status,
+        artifact_ids=artifact_ids,
+        observed_count=len(set(artifact_ids)),
+        relation_results=relation_results,
+        semantic_rationale=(
+            "Surviving artifact semantics and deterministic topology evidence "
+            "match the source-bound requirement."
+        ),
+    )
 
 
 def _artifact_dimensions(obj: Any) -> tuple[float, float, float] | None:
@@ -317,18 +487,90 @@ def semantic_verification_input(
     graph: SceneRequirementGraph,
     compilation: SpatialRequirementCompilation,
     artifacts: tuple[SemanticArtifact, ...],
+    *,
+    requirement_ids: frozenset[str] | None = None,
 ) -> str:
+    hard_requirements = []
+    for requirement in graph.requirements:
+        if requirement.strength != "hard" or (
+            requirement_ids is not None
+            and requirement.requirement_id not in requirement_ids
+        ):
+            continue
+        hard_requirements.append(
+            {
+                "requirement_id": requirement.requirement_id,
+                "kind": requirement.kind,
+                "subject": requirement.subject,
+                "polarity": requirement.polarity,
+                "enforcement": requirement.enforcement,
+                "source_evidence": requirement.evidence.text,
+                "quantity": requirement.quantity.model_dump(
+                    mode="json", exclude_none=True
+                ),
+                "scale": (
+                    requirement.scale.model_dump(mode="json", exclude_none=True)
+                    if requirement.scale is not None
+                    else None
+                ),
+                "relations": [
+                    relation.model_dump(mode="json")
+                    for relation in requirement.relations
+                ],
+                "qualifiers": list(requirement.qualifiers),
+                "topology": requirement.topology.model_dump(
+                    mode="json", exclude_none=True
+                ),
+                "verification": requirement.verification.model_dump(mode="json"),
+            }
+        )
+
+    compact_artifacts = []
+    for artifact in artifacts:
+        metadata = {
+            key: (value[:240] if isinstance(value, str) else value)
+            for key, value in artifact.metadata.items()
+            if key
+            in {
+                "asset_quality_score",
+                "catalog_semantics",
+                "dense_library_populated_case",
+                "generated_from",
+                "ontology_path",
+                "opening_type",
+                "role",
+                "start_space_id",
+                "end_space_id",
+                "wall_direction",
+            }
+        }
+        compact_artifacts.append(
+            {
+                "artifact_id": artifact.artifact_id,
+                "artifact_class": artifact.artifact_class,
+                "name": artifact.name,
+                "description": artifact.description[:240],
+                "dimensions_m": artifact.dimensions_m,
+                "position_m": artifact.position_m,
+                "metadata": metadata,
+            }
+        )
     return json.dumps(
         {
-            "requirement_graph": graph.model_dump(mode="json"),
+            "requirement_graph": {
+                "graph_id": graph.graph_id,
+                "graph_hash": graph.content_hash,
+                "source_prompt": graph.source_prompt,
+                "hard_requirements": hard_requirements,
+            },
             "spatial_bindings": [
-                binding.model_dump(mode="json") for binding in compilation.bindings
+                binding.model_dump(mode="json")
+                for binding in compilation.bindings
+                if requirement_ids is None or binding.requirement_id in requirement_ids
             ],
-            "final_artifacts": [
-                artifact.model_dump(mode="json") for artifact in artifacts
-            ],
+            "final_artifacts": compact_artifacts,
         },
-        indent=2,
+        separators=(",", ":"),
     )
 
 
@@ -342,21 +584,100 @@ async def analyze_final_semantics(
     model_settings: ModelSettings | None = None,
     runner: type[_Runner] = BoundedRunner,
 ) -> tuple[SemanticVerificationBatch, Any]:
-    verifier = Agent(
-        name="Scene Semantic Publication Verifier",
-        model=model,
-        instructions=SEMANTIC_VERIFIER_INSTRUCTIONS,
-        output_type=SemanticVerificationBatch,
-        model_settings=model_settings or ModelSettings(),
+    blocking = tuple(
+        requirement
+        for requirement in graph.requirements
+        if requirement.strength == "hard"
+        and requirement.enforcement in {"blocking", "unresolved_blocking"}
     )
-    result = await runner.run(
-        starting_agent=verifier,
-        input=semantic_verification_input(graph, compilation, artifacts),
-        max_turns=1,
-        run_config=run_config,
-        timeout_seconds=agent_run_timeout_seconds("semantic_verifier", max_turns=1),
+    deterministic_claims: list[RequirementVerificationClaim] = []
+    unresolved: list[SceneRequirement] = []
+    for requirement in blocking:
+        claim = _deterministic_claim(requirement, compilation, artifacts)
+        if claim is None:
+            unresolved.append(requirement)
+        else:
+            deterministic_claims.append(claim)
+
+    batches = []
+    for requirement in unresolved:
+        expected_classes = _EXPECTED_FINAL_ARTIFACT_CLASSES.get(
+            requirement.kind, frozenset()
+        )
+        relevant_words = _semantic_words(requirement.subject).union(
+            *(_semantic_words(relation.target) for relation in requirement.relations)
+        )
+        class_artifacts = tuple(
+            artifact
+            for artifact in artifacts
+            if not expected_classes or artifact.artifact_class in expected_classes
+        )
+        lexical_artifacts = tuple(
+            artifact
+            for artifact in class_artifacts
+            if relevant_words & _artifact_semantic_words(artifact)
+        )
+        batches.append(
+            (
+                f"Requirement {requirement.requirement_id}",
+                frozenset({requirement.requirement_id}),
+                lexical_artifacts or class_artifacts,
+            )
+        )
+
+    async def run_batch(
+        label: str,
+        requirement_ids: frozenset[str],
+        batch_artifacts: tuple[SemanticArtifact, ...],
+    ) -> tuple[SemanticVerificationBatch, Any]:
+        verifier = Agent(
+            name=f"Scene Semantic Publication Verifier ({label})",
+            model=model,
+            instructions=SEMANTIC_VERIFIER_INSTRUCTIONS,
+            output_type=SemanticVerificationBatch,
+            model_settings=model_settings or ModelSettings(),
+        )
+        result = await runner.run(
+            starting_agent=verifier,
+            input=semantic_verification_input(
+                graph,
+                compilation,
+                batch_artifacts,
+                requirement_ids=requirement_ids,
+            ),
+            max_turns=1,
+            run_config=run_config,
+            timeout_seconds=agent_run_timeout_seconds("semantic_verifier", max_turns=1),
+        )
+        return result.final_output_as(SemanticVerificationBatch), result
+
+    completed = []
+    for label, requirement_ids, batch_artifacts in batches:
+        # Subscription-backed CLI routes intentionally admit one request at a
+        # time. Sequential bounded batches avoid queue-admission failures while
+        # still preventing one monolithic verification from exhausting its
+        # deadline.
+        completed.append(await run_batch(label, requirement_ids, batch_artifacts))
+    verifications = tuple(item[0] for item in completed)
+    results = tuple(item[1] for item in completed)
+    return (
+        SemanticVerificationBatch(
+            graph_id=graph.graph_id,
+            graph_hash=graph.content_hash,
+            claims=tuple(deterministic_claims)
+            + tuple(
+                claim for verification in verifications for claim in verification.claims
+            ),
+            audit_summary="; ".join(
+                (
+                    f"Deterministically bound {len(deterministic_claims)} "
+                    "source requirements.",
+                    *(verification.audit_summary for verification in verifications),
+                )
+            ),
+        ),
+        results,
     )
-    return result.final_output_as(SemanticVerificationBatch), result
 
 
 def _expected_count(requirement: SceneRequirement) -> int:

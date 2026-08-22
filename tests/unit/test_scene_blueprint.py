@@ -8,7 +8,11 @@ from pydantic import ValidationError
 
 from scenesmith.agent_utils.scene_blueprint import (
     BlueprintDesignTokens,
+    ConnectorBlueprint,
+    ConnectorEndpoint,
+    LevelBlueprint,
     SceneBlueprint,
+    SpaceBlueprint,
     blueprint_from_prompt,
     diff_blueprints,
     floor_plan_submission_from_blueprint,
@@ -137,6 +141,57 @@ def test_blueprint_rejects_stairs_to_nowhere():
 
     with pytest.raises(ValidationError, match="unreachable"):
         SceneBlueprint.model_validate(payload)
+
+
+def test_one_staircase_can_serve_an_intermediate_level():
+    levels = (
+        LevelBlueprint(level_id="ground", name="Ground", elevation_m=0),
+        LevelBlueprint(level_id="mezzanine", name="Mezzanine", elevation_m=4),
+        LevelBlueprint(level_id="upper", name="Upper", elevation_m=8),
+    )
+    spaces = tuple(
+        SpaceBlueprint(
+            space_id=f"space-{level.level_id}",
+            name=level.name,
+            room_type="library",
+            level_id=level.level_id,
+            dimensions_m=(12, 12),
+        )
+        for level in levels
+    )
+    blueprint = SceneBlueprint(
+        blueprint_id="three-level-library",
+        source_prompt="One spiral staircase connects all three library floors.",
+        levels=levels,
+        spaces=spaces,
+        connectors=(
+            ConnectorBlueprint(
+                connector_id="spiral-stair",
+                kind="stairs_spiral",
+                start=ConnectorEndpoint(
+                    space_id="space-ground",
+                    level_id="ground",
+                    position_m=(6, 0, 6),
+                ),
+                end=ConnectorEndpoint(
+                    space_id="space-upper",
+                    level_id="upper",
+                    position_m=(6, 8, 6),
+                ),
+                parameters={
+                    "intermediate_landings": [
+                        {
+                            "space_id": "space-mezzanine",
+                            "level_id": "mezzanine",
+                            "position_m": [6, 4, 6],
+                        }
+                    ]
+                },
+            ),
+        ),
+    )
+
+    assert len(blueprint.connectors) == 1
 
 
 def test_blueprint_diff_invalidates_only_downstream_stages():

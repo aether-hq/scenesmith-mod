@@ -68,11 +68,11 @@ def _extract_terminal_result_event(stream_output: str) -> dict[str, Any]:
 def _extract_stream_result(stream_output: str) -> str:
     """Return Claude's terminal text from newline-delimited stream events."""
     result_event = _extract_terminal_result_event(stream_output)
+    structured = result_event.get("structured_output")
+    if structured is not None:
+        return json.dumps(structured, separators=(",", ":"))
     result = result_event.get("result")
     if not isinstance(result, str) or not result.strip():
-        structured = result_event.get("structured_output")
-        if structured is not None:
-            return json.dumps(structured, separators=(",", ":"))
         raise RuntimeError("Claude CLI returned an empty streamed result")
     return result.strip()
 
@@ -190,6 +190,43 @@ def _response_json_schema(body: dict[str, Any]) -> dict[str, Any] | None:
     if response_format.get("type") == "json_object":
         return {"type": "object"}
     return None
+
+
+def _claude_compatible_schema(schema: dict[str, Any]) -> dict[str, Any]:
+    """Project JSON Schema 2020 tuple syntax onto Claude's strict dialect.
+
+    Claude's CLI rejects ``prefixItems`` even though Pydantic uses it for fixed
+    tuples. The CLI only needs a conservative generation constraint; the
+    original schema is still applied locally before a response is accepted.
+    """
+
+    projected: dict[str, Any] = {}
+    for key, value in schema.items():
+        if key == "prefixItems":
+            continue
+        if isinstance(value, dict):
+            projected[key] = _claude_compatible_schema(value)
+        elif isinstance(value, list):
+            projected[key] = [
+                _claude_compatible_schema(item) if isinstance(item, dict) else item
+                for item in value
+            ]
+        else:
+            projected[key] = value
+
+    prefix_items = schema.get("prefixItems")
+    if isinstance(prefix_items, list) and prefix_items:
+        options = [
+            _claude_compatible_schema(item)
+            for item in prefix_items
+            if isinstance(item, dict)
+        ]
+        if options:
+            item_schema = options[0]
+            if any(option != item_schema for option in options[1:]):
+                item_schema = {"anyOf": options}
+            projected["items"] = item_schema
+    return projected
 
 
 def _normalize_structured_content(content: Any, schema: dict[str, Any]) -> str:
@@ -313,12 +350,19 @@ class _ClaudeExecutor:
                 command.extend(
                     ["--json-schema", json.dumps(_tool_output_schema(tools))]
                 )
-            elif body.get("response_format", {}).get("type") == "json_object":
-                prompt += (
-                    "\n\nReturn only the requested valid JSON object, with no "
-                    "markdown. Preserve the requested JSON value types exactly: "
-                    "booleans and numbers must not be quoted."
+            elif response_schema:
+                command.extend(
+                    [
+                        "--json-schema",
+                        json.dumps(_claude_compatible_schema(response_schema)),
+                    ]
                 )
+                if body.get("response_format", {}).get("type") == "json_object":
+                    prompt += (
+                        "\n\nReturn only the requested valid JSON object, with no "
+                        "markdown. Preserve the requested JSON value types exactly: "
+                        "booleans and numbers must not be quoted."
+                    )
 
             child_env = os.environ.copy()
             # Claude Code otherwise prefers an inherited Anthropic API key over

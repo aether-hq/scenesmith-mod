@@ -13,7 +13,10 @@ import math
 import re
 
 from dataclasses import dataclass
-from typing import Any, Literal, Mapping, Sequence
+from typing import TYPE_CHECKING, Any, Literal, Mapping, Sequence
+
+if TYPE_CHECKING:
+    from scenesmith.agent_utils.scene_blueprint import SceneBlueprint
 
 
 _MULTILEVEL_PATTERN = re.compile(
@@ -57,6 +60,119 @@ class NormalizedFloorPlanSubmission:
             "exterior_material_description": self.exterior_material_description,
             "exterior_door_room_id": self.exterior_door_room_id,
         }
+
+
+@dataclass(frozen=True)
+class BlueprintOpeningPlacement:
+    """One blueprint aperture assigned to a concrete rectangular wall edge."""
+
+    opening_id: str
+    kind: Literal["door", "window", "open_connection"]
+    host_space_id: str
+    connects_to_space_id: str | None
+    boundary_edge_index: int
+    position_along_m: float
+    width_m: float
+    height_m: float
+    sill_height_m: float
+    shape: Literal["rectangular", "arched"]
+
+
+def opening_placements_from_blueprint(
+    blueprint: "SceneBlueprint",
+) -> tuple[BlueprintOpeningPlacement, ...]:
+    """Assign immutable blueprint openings to non-overlapping wall intervals.
+
+    Metric scene scale is intentionally not capped here. An opening is rejected
+    only when the accepted space itself is too small to contain it.
+    """
+
+    spaces = {space.space_id: space for space in blueprint.spaces}
+    intervals_by_edge: dict[tuple[str, int], list[tuple[float, float]]] = {}
+    placements: list[BlueprintOpeningPlacement] = []
+    separation_m = 0.5
+
+    def preferred_edges(kind: str) -> tuple[int, ...]:
+        if kind == "open_connection":
+            return (0, 2, 1, 3)
+        if kind == "door":
+            return (2, 1, 3, 0)
+        return (1, 3, 2, 0)
+
+    def available_center(
+        *, space_id: str, edge_index: int, edge_length: float, width: float
+    ) -> float | None:
+        occupied = sorted(intervals_by_edge.get((space_id, edge_index), ()))
+        gaps: list[tuple[float, float]] = []
+        cursor = 0.0
+        for start, end in occupied:
+            gap_end = max(cursor, start - separation_m)
+            if gap_end > cursor:
+                gaps.append((cursor, gap_end))
+            cursor = max(cursor, end + separation_m)
+        if cursor < edge_length:
+            gaps.append((cursor, edge_length))
+        feasible = [gap for gap in gaps if gap[1] - gap[0] + 1e-9 >= width]
+        if not feasible:
+            return None
+        wall_center = edge_length / 2.0
+        gap_start, gap_end = min(
+            feasible,
+            key=lambda gap: abs((gap[0] + gap[1]) / 2.0 - wall_center),
+        )
+        return max(gap_start + width / 2.0, min(wall_center, gap_end - width / 2.0))
+
+    ordered = sorted(
+        blueprint.openings,
+        key=lambda opening: (
+            opening.kind != "open_connection",
+            -(opening.width_m * opening.height_m),
+            opening.opening_id,
+        ),
+    )
+    for opening in ordered:
+        space = spaces[opening.host_space_id]
+        edge_lengths = (
+            float(space.dimensions_m[0]),
+            float(space.dimensions_m[1]),
+            float(space.dimensions_m[0]),
+            float(space.dimensions_m[1]),
+        )
+        selected: tuple[int, float] | None = None
+        for edge_index in preferred_edges(opening.kind):
+            center = available_center(
+                space_id=space.space_id,
+                edge_index=edge_index,
+                edge_length=edge_lengths[edge_index],
+                width=float(opening.width_m),
+            )
+            if center is not None:
+                selected = (edge_index, center)
+                break
+        if selected is None:
+            raise ValueError(
+                f"space {space.space_id!r} cannot fit blueprint opening "
+                f"{opening.opening_id!r} ({opening.width_m:g}m wide) on any wall"
+            )
+        edge_index, center = selected
+        intervals_by_edge.setdefault((space.space_id, edge_index), []).append(
+            (center - opening.width_m / 2.0, center + opening.width_m / 2.0)
+        )
+        placements.append(
+            BlueprintOpeningPlacement(
+                opening_id=opening.opening_id,
+                kind=opening.kind,
+                host_space_id=opening.host_space_id,
+                connects_to_space_id=opening.connects_to_space_id,
+                boundary_edge_index=edge_index,
+                position_along_m=center,
+                width_m=opening.width_m,
+                height_m=opening.height_m,
+                sill_height_m=opening.sill_height_m,
+                shape=opening.shape,
+            )
+        )
+    return tuple(placements)
 
 
 def _snake_key(value: Any) -> str:
@@ -332,6 +448,8 @@ def synthesize_structural_layout(
     *,
     max_total_height: float = 12.0,
     level_count_hint: int | None = None,
+    exact_level_count: int | None = None,
+    stair_width_hint: float | None = None,
 ) -> dict[str, Any] | None:
     """Build conservative walkable levels, slabs, and stairs from prompt intent.
 
@@ -341,7 +459,7 @@ def synthesize_structural_layout(
     fallback would repeat the provider's invalid height and silently flatten.
     """
 
-    if not _MULTILEVEL_PATTERN.search(prompt):
+    if not _MULTILEVEL_PATTERN.search(prompt) and exact_level_count is None:
         return None
     lowered = prompt.lower()
     level_count = (
@@ -357,7 +475,9 @@ def synthesize_structural_layout(
             else 2
         )
     )
-    if level_count_hint is not None:
+    if exact_level_count is not None:
+        level_count = int(exact_level_count)
+    elif level_count_hint is not None:
         level_count = max(level_count, int(level_count_hint))
     level_count = max(2, min(4, level_count))
     requested_level_count = level_count
@@ -428,7 +548,7 @@ def synthesize_structural_layout(
             )
         )
     )
-    stair_width = 1.1
+    stair_width = max(0.8, float(stair_width_hint or 1.1))
     riser_count = max(12, round(height / 0.18))
     tread_depth = 0.28
     clearance_padding = 0.2
@@ -707,20 +827,24 @@ def synthesize_structural_layout(
     platform_holes = [hole]
     guarded_hole_indices: list[int] = []
     folded_prompt = prompt.casefold()
-    gallery_library = "library" in folded_prompt and any(
-        token in folded_prompt
-        for token in (
-            "multi-level",
-            "multilevel",
-            "mezzanine",
-            "two-story",
-            "two storey",
-            "three-story",
-            "three storey",
+    gallery_library = (
+        "library" in folded_prompt
+        and any(
+            token in folded_prompt
+            for token in (
+                "multi-level",
+                "multilevel",
+                "mezzanine",
+                "two-story",
+                "two storey",
+                "three-story",
+                "three storey",
+            )
         )
-    ) and any(
-        token in folded_prompt
-        for token in ("large", "grand", "vast", "thousands of books")
+        and any(
+            token in folded_prompt
+            for token in ("large", "grand", "vast", "thousands of books")
+        )
     )
     if gallery_library:
         minimum_extent = min(width, depth)
@@ -766,6 +890,180 @@ def synthesize_structural_layout(
         "platforms": platforms,
         "_diagnostics": diagnostics,
     }
+
+
+def structural_submission_from_blueprint(
+    blueprint: "SceneBlueprint",
+    room_specs: list[dict[str, Any]],
+    *,
+    max_total_height: float,
+) -> dict[str, Any] | None:
+    """Project an accepted semantic blueprint into deterministic construction."""
+
+    if len(blueprint.levels) <= 1 and not blueprint.connectors:
+        return None
+    if not room_specs:
+        raise ValueError("blueprint structural projection requires a primary room")
+    ordered_levels = sorted(blueprint.levels, key=lambda level: level.elevation_m)
+    primary_room_id = str(room_specs[0]["type"])
+    widest_connector = max(
+        (connector.width_m for connector in blueprint.connectors),
+        default=1.1,
+    )
+    structural = synthesize_structural_layout(
+        blueprint.source_prompt,
+        room_specs,
+        max(level.clear_height_m for level in ordered_levels),
+        max_total_height=max_total_height,
+        exact_level_count=len(ordered_levels),
+        stair_width_hint=widest_connector,
+    )
+    if structural is None:
+        return None
+
+    authored_levels = list(structural.get("levels", []))
+    if len(authored_levels) != len(ordered_levels):
+        raise ValueError(
+            "blueprint levels cannot fit the configured structural height envelope: "
+            f"requested {len(ordered_levels)}, constructible {len(authored_levels)}"
+        )
+    elevation_by_old_id = {
+        str(level.get("id")): float(level.get("elevation", 0.0))
+        for level in authored_levels
+        if isinstance(level, Mapping)
+    }
+    level_by_index = {index: level for index, level in enumerate(ordered_levels)}
+    old_level_ids = [str(level.get("id")) for level in authored_levels]
+    old_to_new = {
+        old_id: level_by_index[index].level_id
+        for index, old_id in enumerate(old_level_ids)
+        if index in level_by_index
+    }
+    structural["levels"] = [
+        {
+            "id": level.level_id,
+            "elevation": level.elevation_m,
+            "nominal_height": level.clear_height_m,
+        }
+        for level in ordered_levels
+    ]
+    structural["rooms"] = [
+        {"id": primary_room_id, "level_id": ordered_levels[0].level_id}
+    ]
+
+    def new_elevation(old_elevation: float) -> float:
+        if not elevation_by_old_id:
+            return old_elevation
+        closest_old_id = min(
+            elevation_by_old_id,
+            key=lambda level_id: abs(elevation_by_old_id[level_id] - old_elevation),
+        )
+        new_level_id = old_to_new.get(closest_old_id)
+        return next(
+            (
+                level.elevation_m
+                for level in ordered_levels
+                if level.level_id == new_level_id
+            ),
+            old_elevation,
+        )
+
+    for platform in structural.get("platforms", []):
+        if isinstance(platform, dict):
+            platform["space_id"] = primary_room_id
+            platform["elevation"] = new_elevation(float(platform.get("elevation", 0.0)))
+
+    templates = [
+        item for item in structural.get("connectors", []) if isinstance(item, dict)
+    ]
+    level_by_id = {level.level_id: level for level in ordered_levels}
+    level_index = {level.level_id: index for index, level in enumerate(ordered_levels)}
+    connectors: list[dict[str, Any]] = []
+    for connector in blueprint.connectors:
+        landing_level_ids = [
+            str(landing.get("level_id", ""))
+            for landing in connector.parameters.get("intermediate_landings", [])
+            if isinstance(landing, Mapping)
+        ]
+        served_level_ids = list(
+            dict.fromkeys(
+                [
+                    connector.start.level_id,
+                    *landing_level_ids,
+                    connector.end.level_id,
+                ]
+            )
+        )
+        served_level_ids.sort(key=level_index.__getitem__)
+        level_pairs = list(zip(served_level_ids, served_level_ids[1:]))
+        for segment_index, (start_level_id, end_level_id) in enumerate(
+            level_pairs, start=1
+        ):
+            template_index = min(level_index[start_level_id], len(templates) - 1)
+            template = dict(templates[template_index]) if templates else {}
+            parameters = dict(template.get("parameters", {}))
+            start_level = level_by_id[start_level_id]
+            end_level = level_by_id[end_level_id]
+            if connector.kind == "stairs_spiral":
+                center = parameters.get(
+                    "center",
+                    [
+                        float(room_specs[0]["width"]) * 0.25,
+                        float(room_specs[0]["depth"]) * 0.25,
+                    ],
+                )
+                riser_count = max(
+                    12,
+                    round(abs(end_level.elevation_m - start_level.elevation_m) / 0.18),
+                )
+                radius = max(
+                    float(parameters.get("radius", 0.0)),
+                    connector.width_m / 2.0 + 0.25,
+                    riser_count * 0.221 / (2.0 * math.pi),
+                )
+                parameters.update(
+                    {
+                        "center": center,
+                        "radius": radius,
+                        # One full turn keeps each compiled span aligned with its
+                        # declared endpoint and intermediate landing.
+                        "turns": 1.0,
+                        "direction": parameters.get("direction", "cw"),
+                        "riser_count": riser_count,
+                    }
+                )
+                start_xy = [float(center[0]) + radius, float(center[1])]
+                end_xy = list(start_xy)
+            else:
+                template_start = template.get("start", {}).get("position", [2.0, 2.0])
+                template_end = template.get("end", {}).get("position", [4.0, 2.0])
+                start_xy = list(template_start[:2])
+                end_xy = list(template_end[:2])
+            connectors.append(
+                {
+                    "id": (
+                        connector.connector_id
+                        if len(level_pairs) == 1 or segment_index == 1
+                        else f"{connector.connector_id}-segment-{segment_index}"
+                    ),
+                    "type": connector.kind,
+                    "start": {
+                        "space_id": primary_room_id,
+                        "level_id": start_level.level_id,
+                        "position": [*start_xy, start_level.elevation_m],
+                    },
+                    "end": {
+                        "space_id": primary_room_id,
+                        "level_id": end_level.level_id,
+                        "position": [*end_xy, end_level.elevation_m],
+                    },
+                    "width": connector.width_m,
+                    "clearance_height": min(start_level.clear_height_m, 2.4),
+                    "parameters": parameters,
+                }
+            )
+    structural["connectors"] = connectors
+    return structural
 
 
 def normalize_floor_plan_submission(

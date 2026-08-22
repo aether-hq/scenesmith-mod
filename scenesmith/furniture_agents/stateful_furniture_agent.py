@@ -339,6 +339,37 @@ def _required_room_kit_role_count(room_kit: Any, slot: Any) -> int:
     return int(slot.minimum_count)
 
 
+def _required_room_kit_exact_level_counts(
+    scene: RoomScene,
+    room_kit: RoomKitSelection,
+    slot: Any,
+    support_elevations: tuple[float, ...],
+) -> dict[float, int]:
+    """Distribute an aggregate role target without weakening per-story minima."""
+
+    if not support_elevations:
+        return {}
+    level_requirements = _required_room_kit_level_coverage(
+        str(getattr(scene, "text_description", "")),
+        room_kit,
+        support_elevations,
+    )
+    minimum_per_level = level_requirements.get(slot.role)
+    if minimum_per_level is None:
+        return {}
+
+    aggregate_target = _required_room_kit_role_count(room_kit, slot)
+    covered_target = minimum_per_level * len(support_elevations)
+    surplus, remainder = divmod(
+        max(0, aggregate_target - covered_target),
+        len(support_elevations),
+    )
+    return {
+        elevation: minimum_per_level + surplus + (index < remainder)
+        for index, elevation in enumerate(support_elevations)
+    }
+
+
 def _normalize_dense_library_bookcases(
     scene: RoomScene,
     room_kit: RoomKitSelection,
@@ -346,19 +377,24 @@ def _normalize_dense_library_bookcases(
     *,
     remove_object: Callable[[str], Any],
 ) -> int:
-    """Prune explicit rich-library shelving to its authored per-story count."""
+    """Prune explicit rich-library shelving to its canonical story counts."""
 
     level_requirements = _required_room_kit_level_coverage(
         str(getattr(scene, "text_description", "")),
         room_kit,
         support_elevations,
     )
-    target_per_level = level_requirements.get("bookshelf")
     bookshelf_slot = next(
         (slot for slot in room_kit.slots if slot.role == "bookshelf"), None
     )
-    if target_per_level is None or bookshelf_slot is None:
+    if "bookshelf" not in level_requirements or bookshelf_slot is None:
         return 0
+    targets_by_level = _required_room_kit_exact_level_counts(
+        scene,
+        room_kit,
+        bookshelf_slot,
+        support_elevations,
+    )
 
     try:
         window_blockers = {
@@ -394,6 +430,7 @@ def _normalize_dense_library_bookcases(
 
     removed = 0
     for elevation, candidates in by_level.items():
+        target_per_level = targets_by_level[elevation]
         if len(candidates) <= target_per_level:
             retained = list(candidates)
         else:
@@ -461,6 +498,92 @@ def _normalize_dense_library_bookcases(
                 obj.metadata = metadata
             metadata["dense_library_populated_case"] = elevation
 
+    # The room-kit brief defines exact expanded counts. Keep the model free to
+    # compose a good first pass, then deterministically remove role surplus so
+    # successful dense scenes retain their bounded object/export contract.
+    for slot in room_kit.slots:
+        if slot.role == "bookshelf" or slot.placement_class == "surface":
+            continue
+        candidates = [
+            obj
+            for obj in scene.objects.values()
+            if getattr(obj, "object_type", None) == ObjectType.FURNITURE
+            and _object_matches_room_kit_slot(obj, slot)
+        ]
+        aggregate_target = _required_room_kit_role_count(room_kit, slot)
+        targets_by_level = _required_room_kit_exact_level_counts(
+            scene,
+            room_kit,
+            slot,
+            support_elevations,
+        )
+
+        def partner_distance(obj: Any) -> float:
+            if slot.role != "reading_chair":
+                return 0.0
+            table_slot = next(
+                (
+                    candidate_slot
+                    for candidate_slot in room_kit.slots
+                    if candidate_slot.role == "reading_table"
+                ),
+                None,
+            )
+            if table_slot is None:
+                return math.inf
+            tables = [
+                candidate
+                for candidate in scene.objects.values()
+                if getattr(candidate, "object_type", None) == ObjectType.FURNITURE
+                and _object_matches_room_kit_slot(candidate, table_slot)
+            ]
+            try:
+                position = obj.transform.translation()
+                return min(
+                    math.hypot(
+                        float(position[0]) - float(table.transform.translation()[0]),
+                        float(position[1]) - float(table.transform.translation()[1]),
+                    )
+                    for table in tables
+                )
+            except (AttributeError, IndexError, TypeError, ValueError):
+                return math.inf
+
+        def role_priority(obj: Any) -> tuple[bool, bool, float, str]:
+            object_id = str(obj.object_id)
+            return (
+                object_id in window_blockers,
+                object_id in path_blockers,
+                partner_distance(obj),
+                object_id,
+            )
+
+        retained_ids: set[str] = set()
+        if targets_by_level:
+            for elevation in support_elevations:
+                level_candidates = sorted(
+                    (
+                        obj
+                        for obj in candidates
+                        if _nearest_level(obj, support_elevations) == elevation
+                    ),
+                    key=role_priority,
+                )
+                retained_ids.update(
+                    str(obj.object_id)
+                    for obj in level_candidates[: targets_by_level[elevation]]
+                )
+        else:
+            retained_ids.update(
+                str(obj.object_id)
+                for obj in sorted(candidates, key=role_priority)[:aggregate_target]
+            )
+        for obj in candidates:
+            if str(obj.object_id) in retained_ids:
+                continue
+            remove_object(str(obj.object_id))
+            removed += 1
+
     return removed
 
 
@@ -517,13 +640,6 @@ def _validate_room_kit_completion(
         for slot in room_kit.slots
         if slot.required
     )
-    if furniture_count < required_minimum:
-        raise ModelBehaviorError(
-            f"Semantic room kit {room_kit.kit_id} placed {furniture_count} "
-            f"furniture objects; required minimum is {required_minimum}. "
-            "The furniture stage cannot publish this checkpoint."
-        )
-
     furniture = [
         obj for obj in scene.objects.values() if obj.object_type == ObjectType.FURNITURE
     ]
@@ -550,6 +666,12 @@ def _validate_room_kit_completion(
         raise ModelBehaviorError(
             f"Semantic room kit {room_kit.kit_id} has required role deficits: "
             f"{details}. The furniture stage cannot publish this checkpoint."
+        )
+    if furniture_count < required_minimum:
+        raise ModelBehaviorError(
+            f"Semantic room kit {room_kit.kit_id} placed {furniture_count} "
+            f"furniture objects; required minimum is {required_minimum}. "
+            "The furniture stage cannot publish this checkpoint."
         )
 
     level_requirements = _required_room_kit_level_coverage(
@@ -591,17 +713,22 @@ def _validate_room_kit_completion(
                 bookshelf_slot,
                 support_elevations,
             )
-            target = level_requirements["bookshelf"]
+            targets = _required_room_kit_exact_level_counts(
+                scene,
+                room_kit,
+                bookshelf_slot,
+                support_elevations,
+            )
             mismatches = [
-                (elevation, counts[elevation])
+                (elevation, counts[elevation], targets[elevation])
                 for elevation in support_elevations
-                if counts[elevation] != target
+                if counts[elevation] != targets[elevation]
             ]
             if mismatches:
                 details = "; ".join(
                     f"bookshelf at {elevation:.3f}m placed {placed}, required "
                     f"exactly {target}"
-                    for elevation, placed in mismatches
+                    for elevation, placed, target in mismatches
                 )
                 raise ModelBehaviorError(
                     f"Semantic room kit {room_kit.kit_id} has noncanonical "
@@ -1192,6 +1319,12 @@ class StatefulFurnitureAgent(BaseStatefulAgent, BaseFurnitureAgent):
             wall_run_targets: list[float] = []
             required_per_level = level_requirements.get(slot.role)
             if required_per_level is not None:
+                targets_by_level = _required_room_kit_exact_level_counts(
+                    self.scene,
+                    room_kit,
+                    slot,
+                    support_elevations,
+                ) or {elevation: required_per_level for elevation in support_elevations}
                 if (
                     slot.role == "reading_chair"
                     and table_slot is not None
@@ -1212,7 +1345,10 @@ class StatefulFurnitureAgent(BaseStatefulAgent, BaseFurnitureAgent):
                 for elevation in support_elevations:
                     level_targets.extend(
                         [elevation]
-                        * max(0, required_per_level - role_level_counts[elevation])
+                        * max(
+                            0,
+                            targets_by_level[elevation] - role_level_counts[elevation],
+                        )
                     )
                 if slot.role == "bookshelf":
                     wall_run_counts = _bookcase_wall_run_level_counts(
@@ -1323,7 +1459,8 @@ class StatefulFurnitureAgent(BaseStatefulAgent, BaseFurnitureAgent):
                             [elevation]
                             * max(
                                 0,
-                                required_per_level - role_level_counts[elevation],
+                                targets_by_level[elevation]
+                                - role_level_counts[elevation],
                             )
                         )
                 missing = max(aggregate_missing, len(level_targets))
@@ -1385,28 +1522,30 @@ class StatefulFurnitureAgent(BaseStatefulAgent, BaseFurnitureAgent):
                                 if _object_matches_room_kit_slot(obj, table_slot)
                                 and _nearest_level(obj, support_elevations) == elevation
                             ),
-                            key=lambda obj: str(getattr(obj, "object_id", "")),
+                            key=lambda table: (
+                                -sum(
+                                    _stable_chair_faces_table(chair, table)
+                                    for chair in (
+                                        obj
+                                        for obj in self.scene.objects.values()
+                                        if _object_matches_room_kit_slot(obj, slot)
+                                        and _nearest_level(obj, support_elevations)
+                                        == elevation
+                                    )
+                                ),
+                                str(getattr(table, "object_id", "")),
+                            ),
                         )
                         if tables:
-                            chairs = [
-                                obj
-                                for obj in self.scene.objects.values()
-                                if _object_matches_room_kit_slot(obj, slot)
-                                and _nearest_level(obj, support_elevations) == elevation
-                            ]
-                            anchor_table = min(
-                                tables,
-                                key=lambda table: (
-                                    -sum(
-                                        _stable_chair_faces_table(chair, table)
-                                        for chair in chairs
-                                    ),
-                                    str(getattr(table, "object_id", "")),
-                                ),
-                            )
-                            candidate_positions = _chair_cluster_poses(
-                                anchor_table, asset
-                            )
+                            candidate_positions = []
+                            seen_poses: set[tuple[float, float, float]] = set()
+                            for table in tables:
+                                for pose in _chair_cluster_poses(table, asset):
+                                    pose_key = tuple(round(value, 4) for value in pose)
+                                    if pose_key in seen_poses:
+                                        continue
+                                    seen_poses.add(pose_key)
+                                    candidate_positions.append(pose)
                     for x, y, yaw in candidate_positions:
                         position_key = (
                             round(x, 4),
@@ -1578,7 +1717,8 @@ class StatefulFurnitureAgent(BaseStatefulAgent, BaseFurnitureAgent):
             prepruned, recovered = self._preprune_and_recover_room_kit(room_kit)
             if prepruned:
                 console_logger.info(
-                    "Pre-pruned %d surplus bookcases before deterministic recovery",
+                    "Pre-pruned %d surplus room-kit furniture objects before "
+                    "deterministic recovery",
                     prepruned,
                 )
             if recovered:
@@ -1623,7 +1763,8 @@ class StatefulFurnitureAgent(BaseStatefulAgent, BaseFurnitureAgent):
             )
             if pruned:
                 console_logger.info(
-                    "Pruned %d surplus bookcases from explicit dense library",
+                    "Pruned %d surplus room-kit furniture objects from explicit "
+                    "dense library",
                     pruned,
                 )
             _validate_furniture_collision_free(

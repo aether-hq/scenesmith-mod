@@ -1724,6 +1724,95 @@ class StatefulManipulandAgent(BaseStatefulAgent, BaseManipulandAgent):
 
         return recovered
 
+    def _normalize_dense_library_book_row_surplus(self) -> int:
+        """Prune dense rows to the canonical count while preserving wall runs."""
+
+        normalized = str(getattr(self.scene, "text_description", "")).casefold()
+        explicit_dense_library = (
+            "library" in normalized
+            and "large" in normalized
+            and "thousand" in normalized
+            and bool(re.search(r"\bmulti[ -]?level\b", normalized))
+        )
+        if not explicit_dense_library:
+            return 0
+
+        bookcases = [
+            obj
+            for obj in self.scene.objects.values()
+            if obj.object_type == ObjectType.FURNITURE
+            and any(
+                term in f"{obj.name} {obj.description}".casefold()
+                for term in ("shelf", "bookcase")
+            )
+        ]
+        bookcase_levels = self._dense_bookcase_story_levels(bookcases)
+        levels = sorted(set(bookcase_levels.values()))
+        if len(levels) < 2:
+            return 0
+
+        invalid_row_ids = self._physically_invalid_dense_book_row_ids(
+            self.scene,
+            self.cfg,
+        )
+        required_per_level = 12
+        removed = 0
+        for level in levels:
+            level_bookcases = sorted(
+                (
+                    bookcase
+                    for bookcase in bookcases
+                    if bookcase_levels.get(bookcase.object_id) == level
+                ),
+                key=lambda obj: str(obj.object_id),
+            )
+            rows_by_bookcase = {
+                bookcase.object_id: sorted(
+                    (
+                        row
+                        for row in self._dense_book_rows_on_furniture(
+                            self.scene,
+                            bookcase,
+                        )
+                        if row.object_id not in invalid_row_ids
+                    ),
+                    key=lambda row: str(row.object_id),
+                )
+                for bookcase in level_bookcases
+            }
+            level_rows = [row for rows in rows_by_bookcase.values() for row in rows]
+            if len(level_rows) <= required_per_level:
+                continue
+
+            retained_ids: set[UniqueID] = set()
+            grouped_bookcases = [
+                bookcase
+                for bookcase in level_bookcases
+                if (bookcase.metadata or {}).get("dense_library_grouped_run")
+                is not None
+                and len(rows_by_bookcase[bookcase.object_id]) >= 3
+            ]
+            for bookcase in grouped_bookcases[:3]:
+                retained_ids.update(
+                    row.object_id for row in rows_by_bookcase[bookcase.object_id][:3]
+                )
+
+            remaining = sorted(
+                (row for row in level_rows if row.object_id not in retained_ids),
+                key=lambda row: str(row.object_id),
+            )
+            retained_ids.update(
+                row.object_id
+                for row in remaining[: max(0, required_per_level - len(retained_ids))]
+            )
+            for row in level_rows:
+                if row.object_id in retained_ids:
+                    continue
+                self.scene.remove_object(row.object_id)
+                removed += 1
+
+        return removed
+
     def _get_final_scores_directory(self) -> Path:
         """Get the directory path for saving per-furniture manipuland placement state.
 
@@ -1974,6 +2063,12 @@ class StatefulManipulandAgent(BaseStatefulAgent, BaseManipulandAgent):
                 "Recovered %d dense book rows across additional compatible "
                 "same-story bookcases",
                 recovered_dense_book_rows,
+            )
+        removed_dense_book_rows = self._normalize_dense_library_book_row_surplus()
+        if removed_dense_book_rows:
+            console_logger.info(
+                "Pruned %d surplus dense book rows to the canonical per-story " "count",
+                removed_dense_book_rows,
             )
         invalid_dense_book_rows = self._physically_invalid_dense_book_row_ids(
             self.scene,

@@ -1620,6 +1620,105 @@ class TestGetCollidingObjectIds(PhysicalFeasibilityTestCase):
             self.assertIn(UniqueID("box_1"), colliding_ids)
             self.assertIn(UniqueID("box_2"), colliding_ids)
 
+    def test_owner_bound_book_row_contact_is_not_a_projection_collision(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            scene = RoomScene(
+                room_geometry=self.room_geometry,
+                scene_dir=Path(tmp_dir),
+                text_description="large multi-level library with thousands of books",
+            )
+            owner = SceneObject(
+                object_id=UniqueID("bookcase_0"),
+                object_type=ObjectType.FURNITURE,
+                name="bookcase",
+                description="library bookcase",
+                transform=RigidTransform(),
+            )
+            row = SceneObject(
+                object_id=UniqueID("book_row_0"),
+                object_type=ObjectType.MANIPULAND,
+                name="book_row",
+                description="row of books",
+                transform=RigidTransform(),
+                metadata={"dense_library_owner_bound": "bookcase_0"},
+            )
+            scene.add_object(owner)
+            scene.add_object(row)
+            collisions = [
+                CollisionPair(
+                    owner.name,
+                    str(owner.object_id),
+                    row.name,
+                    str(row.object_id),
+                    0.03,
+                )
+            ]
+
+            with patch(
+                "scenesmith.agent_utils.physical_feasibility."
+                "compute_scene_collisions",
+                return_value=collisions,
+            ):
+                colliding_ids = _get_colliding_object_ids(scene)
+
+            self.assertEqual(colliding_ids, set())
+
+    def test_static_owner_bound_scene_is_a_successful_projection_noop(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            scene = RoomScene(
+                room_geometry=self.room_geometry,
+                scene_dir=Path(tmp_dir),
+                text_description="large multi-level library with thousands of books",
+            )
+            scene.add_object(
+                SceneObject(
+                    object_id=UniqueID("bookcase_0"),
+                    object_type=ObjectType.FURNITURE,
+                    name="bookcase",
+                    description="library bookcase",
+                    transform=RigidTransform(),
+                )
+            )
+            scene.add_object(
+                SceneObject(
+                    object_id=UniqueID("book_row_0"),
+                    object_type=ObjectType.MANIPULAND,
+                    name="book_row",
+                    description="row of books",
+                    transform=RigidTransform(),
+                    metadata={"dense_library_owner_bound": "bookcase_0"},
+                )
+            )
+            scene.add_object(
+                SceneObject(
+                    object_id=UniqueID("wall_0"),
+                    object_type=ObjectType.WALL,
+                    name="wall",
+                    description="structural wall panel",
+                    transform=RigidTransform(),
+                )
+            )
+
+            with (
+                patch(
+                    "scenesmith.agent_utils.physical_feasibility."
+                    "_get_colliding_object_ids",
+                    return_value=set(),
+                ),
+                patch(
+                    "scenesmith.agent_utils.physical_feasibility."
+                    "_create_drake_plant_for_ik"
+                ) as create_plant,
+            ):
+                projected, success = apply_non_penetration_projection(
+                    scene,
+                    weld_furniture=True,
+                )
+
+            self.assertIs(projected, scene)
+            self.assertTrue(success)
+            create_plant.assert_not_called()
+
     def test_chain_collision_returns_all_involved(self) -> None:
         """A-B collision and B-C collision should return A, B, C."""
         with tempfile.TemporaryDirectory() as tmp_dir:

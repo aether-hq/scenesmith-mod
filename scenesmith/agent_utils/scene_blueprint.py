@@ -156,8 +156,11 @@ class SceneBlueprint(BlueprintModel):
                 raise ValueError(
                     f"opening {opening.opening_id} has an unknown destination"
                 )
-        connected_level_ids: set[str] = set()
+        spaces_by_id = {space.space_id: space for space in self.spaces}
+        level_elevations = {level.level_id: level.elevation_m for level in self.levels}
+        level_edges: dict[str, set[str]] = {level_id: set() for level_id in level_ids}
         for connector in self.connectors:
+            served_level_ids: set[str] = set()
             for endpoint in (connector.start, connector.end):
                 if endpoint.level_id not in level_ids:
                     raise ValueError(
@@ -167,17 +170,67 @@ class SceneBlueprint(BlueprintModel):
                     raise ValueError(
                         f"connector {connector.connector_id} references unknown space"
                     )
-                connected_level_ids.add(endpoint.level_id)
+                if spaces_by_id[endpoint.space_id].level_id != endpoint.level_id:
+                    raise ValueError(
+                        f"connector {connector.connector_id} endpoint space and "
+                        "level disagree"
+                    )
+                served_level_ids.add(endpoint.level_id)
             if connector.start.level_id == connector.end.level_id:
                 raise ValueError(
                     f"connector {connector.connector_id} does not connect two levels"
                 )
+            intermediate_landings = connector.parameters.get(
+                "intermediate_landings", []
+            )
+            if intermediate_landings is None:
+                intermediate_landings = []
+            if not isinstance(intermediate_landings, list):
+                raise ValueError(
+                    f"connector {connector.connector_id} intermediate_landings "
+                    "must be a list"
+                )
+            for landing in intermediate_landings:
+                if not isinstance(landing, dict):
+                    raise ValueError(
+                        f"connector {connector.connector_id} has an invalid "
+                        "intermediate landing"
+                    )
+                landing_level_id = str(landing.get("level_id", ""))
+                landing_space_id = str(landing.get("space_id", ""))
+                if landing_level_id not in level_ids:
+                    raise ValueError(
+                        f"connector {connector.connector_id} intermediate landing "
+                        "references unknown level"
+                    )
+                if landing_space_id not in space_ids:
+                    raise ValueError(
+                        f"connector {connector.connector_id} intermediate landing "
+                        "references unknown space"
+                    )
+                if spaces_by_id[landing_space_id].level_id != landing_level_id:
+                    raise ValueError(
+                        f"connector {connector.connector_id} intermediate landing "
+                        "space and level disagree"
+                    )
+                served_level_ids.add(landing_level_id)
+            ordered_levels = sorted(
+                served_level_ids,
+                key=level_elevations.__getitem__,
+            )
+            for lower, upper in zip(ordered_levels, ordered_levels[1:]):
+                level_edges[lower].add(upper)
+                level_edges[upper].add(lower)
         ground_level = min(self.levels, key=lambda level: level.elevation_m).level_id
+        reachable_level_ids = {ground_level}
+        frontier = [ground_level]
+        while frontier:
+            current = frontier.pop()
+            for adjacent in level_edges[current] - reachable_level_ids:
+                reachable_level_ids.add(adjacent)
+                frontier.append(adjacent)
         for level in self.levels:
-            if (
-                level.level_id != ground_level
-                and level.level_id not in connected_level_ids
-            ):
+            if level.level_id not in reachable_level_ids:
                 raise ValueError(f"elevated level {level.level_id} is unreachable")
         for group in self.furniture_groups:
             if group.space_id not in space_ids:
@@ -298,15 +351,16 @@ def _prompt_dimensions_m(
     prompt: str,
     *,
     default_dimensions_m: tuple[float, float],
-    maximum_dimension_m: float,
+    maximum_dimension_m: float | None,
 ) -> tuple[float, float]:
-    """Resolve qualitative room scale into bounded canonical dimensions."""
+    """Resolve qualitative room scale into canonical dimensions."""
 
-    maximum = float(maximum_dimension_m)
-    if maximum <= 0.0:
+    maximum = float(maximum_dimension_m) if maximum_dimension_m is not None else None
+    if maximum is not None and maximum <= 0.0:
         raise ValueError("maximum_dimension_m must be positive")
-    bounded_default = tuple(
-        min(maximum, float(dimension)) for dimension in default_dimensions_m
+    resolved_default = tuple(
+        min(maximum, float(dimension)) if maximum is not None else float(dimension)
+        for dimension in default_dimensions_m
     )
     folded = prompt.casefold()
     large_space = re.search(
@@ -317,9 +371,14 @@ def _prompt_dimensions_m(
     collection_scale = re.search(r"\b(?:hundreds|thousands) of books\b", folded)
     if large_space or collection_scale:
         return tuple(
-            min(maximum, max(12.0, dimension)) for dimension in bounded_default
+            (
+                min(maximum, max(12.0, dimension))
+                if maximum is not None
+                else max(12.0, dimension)
+            )
+            for dimension in resolved_default
         )
-    return bounded_default
+    return resolved_default
 
 
 def _prompt_window_openings(
@@ -386,7 +445,7 @@ def blueprint_from_prompt(
     *,
     mode: Literal["room", "house"] = "room",
     default_dimensions_m: tuple[float, float] = (7.0, 7.0),
-    maximum_dimension_m: float = 20.0,
+    maximum_dimension_m: float | None = None,
 ) -> SceneBlueprint:
     """Create a structurally valid deterministic blueprint from plain language."""
 
@@ -693,10 +752,17 @@ def floor_plan_submission_from_blueprint(blueprint: SceneBlueprint) -> dict[str,
         }
         for space in spaces
     ]
-    clear_height = max(level.clear_height_m for level in blueprint.levels)
+    lowest_elevation = min(level.elevation_m for level in blueprint.levels)
+    total_height = (
+        max(level.elevation_m + level.clear_height_m for level in blueprint.levels)
+        - lowest_elevation
+    )
     payload: dict[str, Any] = {
         "room_specs": room_specs,
-        "wall_height_meters": min(12.0, clear_height * len(blueprint.levels)),
+        "wall_height_meters": total_height,
+        # The accepted blueprint owns aperture count. Avoid inventing generic
+        # residential windows when none were authored.
+        "windows_per_room": 0,
     }
     requested_windows = [
         opening for opening in blueprint.openings if opening.kind == "window"

@@ -15,15 +15,32 @@
         "classical statues",
         "gorgeous Renaissance decor"
       ],
+      "artifact_contract": {
+        "require_semantic_certificate": true,
+        "require_closed_ledger": true,
+        "require_physics_verified": true,
+        "required_room_kit_ids": ["library-reading-hall-v1"]
+      },
+      "operational_guardrails": {
+        "baseline_duration_seconds": 1165.123,
+        "max_duration_seconds": 1500.0,
+        "max_duration_increase_ratio": 0.25,
+        "max_requests": 60,
+        "max_turns": 180,
+        "max_total_tokens": 1000000,
+        "max_api_equivalent_cost_usd": 2.0,
+        "max_failure_rate": 0.0
+      },
       "reference": {
-        "run_id": "20260821T125050-b28024e0",
+        "run_id": "20260822T023056-f6186269",
         "job_status": "completed",
         "semantic_status": "approved",
-        "topology": {"levels": 2, "spaces": 2, "openings": 3, "connectors": 1},
+        "duration_seconds": 102.357,
+        "topology": {"levels": 3, "spaces": 3, "openings": 6, "connectors": 1},
         "final_object_minimum": 90,
         "final_object_maximum": 100,
         "object_counts": [
-          {"pattern": "renaissance_bookcase", "minimum": 15},
+          {"pattern": "(?:renaissance|library)_(?:bookcase|bookshelf)", "minimum": 15},
           {"pattern": "classical_statue", "minimum": 3, "maximum": 3},
           {"pattern": "reading_table", "minimum": 5},
           {"pattern": "reading_chair", "minimum": 13},
@@ -34,19 +51,27 @@
         "usage": {"required": false},
         "visual_references": [
           {
-            "mode": "original-cutaway",
-            "sha256": "d1acc31c2ee6f65663c9f403fdb65e5bf79eb5db7677f79b2a6c26729dfb1a3e",
+            "mode": "original-one-way",
+            "sha256": "241fbbb5beb95740789c26870f4fe906b07f858ed61097f217b3f49494720c3d",
             "width": 1600,
             "height": 1000,
-            "source_path": "/tmp/aether-library-b280-casecut2-original.png",
-            "criteria": ["all three levels readable", "full arched window visible", "grand chandelier visible", "populated bookcase runs visible"]
+            "source_path": "/tmp/aether-library-current-original-oneway.png",
+            "criteria": ["all three levels readable", "full arched window visible", "spiral stair visibly connects the levels"]
+          },
+          {
+            "mode": "original-interior-detail",
+            "sha256": "2f17e9b068bd2d9c7a47970904d461d2ab4795eec7e40cdbd68854770f26c781",
+            "width": 1600,
+            "height": 1000,
+            "source_path": "/tmp/aether-library-current-interior-a.png",
+            "criteria": ["all three levels readable", "grand chandelier visible", "populated bookcase runs visible", "classical statues visible"]
           },
           {
             "mode": "full-room",
-            "sha256": "851dd9b34739f184c19828881fee7164426f2c67de80adb1751e7a2e8196efa5",
+            "sha256": "d481d6766a53520f0415e0401f8c8b7b82e89487ab6cc4b30942baf526fcc489",
             "width": 1600,
             "height": 1000,
-            "source_path": "/tmp/aether-library-b280-casecut2-full.png",
+            "source_path": "/tmp/aether-library-current-original-full.png",
             "criteria": ["full shell restored", "no presentation geometry missing"]
           }
         ],
@@ -55,9 +80,9 @@
     },
     {
       "case_id": "spaceship-repair-dock",
-      "category": "known-semantic-false-success",
+      "category": "protected-explicit-failure",
       "prompt": "A SPACEship dock with a huge space-fighter in the middle.  There are 10 repair bays, each big enough for a fighter, a giant opening into space, and then all the parts, machines, and so on are across the bay. There are massive doors into the rest of the station and many smaller doors to e.g. crew quarters, etc.",
-      "target_outcome": "complete",
+      "target_outcome": "explicit_failure",
       "target_obligations": [
         "exactly ten fighter-sized repair bays",
         "one huge central space fighter",
@@ -67,45 +92,19 @@
         "parts and repair machinery across the bay"
       ],
       "reference": {
-        "run_id": "20260821T162555-b7408e28",
-        "job_status": "completed",
+        "run_id": "20260822T024306-d733a6ba",
+        "job_status": "failed",
         "semantic_status": "known_failure",
-        "topology": {"levels": 1, "spaces": 1, "openings": 0, "connectors": 0},
-        "final_object_minimum": 18,
-        "final_object_maximum": 18,
-        "object_counts": [
-          {"pattern": "equipment_rack", "minimum": 1},
-          {"pattern": "repair_workbench", "minimum": 1},
-          {"pattern": "fighter", "minimum": 0, "maximum": 0},
-          {"pattern": "repair_bay", "minimum": 0, "maximum": 0},
-          {"pattern": "(?:book_row|candlestick)", "minimum": 3}
-        ],
-        "required_exports": ["scene.glb", "scene_textured.glb"],
-        "usage": {
-          "required": true,
-          "requests": 24,
-          "turns": 72,
-          "total_tokens": 401814,
-          "api_equivalent_cost_usd": 0.8217156999999999
-        },
-        "visual_references": [
-          {
-            "mode": "original",
-            "sha256": "a993d9af4b9a13c4bbbd9176e1a4783e9e916ea0b5f674e4254f50229672b44e",
-            "width": 1614,
-            "height": 1340,
-            "source_path": "/var/folders/6v/yk9bzvrn5zx0kxll7d4szzb80000gn/T/codex-clipboard-z322Nh.png",
-            "criteria": ["documents the generic-room false success", "contains no huge central fighter", "contains no ten-bay dock topology"]
-          }
-        ],
-        "known_semantic_gaps": [
-          "ten repair bays discarded",
-          "huge central fighter discarded",
-          "giant space opening discarded",
-          "massive station doors discarded",
-          "smaller crew doors discarded",
-          "library detail leaked from shared cache"
-        ]
+        "duration_seconds": 437.002,
+        "topology": {"levels": 1, "spaces": 1, "openings": 5, "connectors": 0},
+        "final_object_minimum": 0,
+        "final_object_maximum": 0,
+        "object_counts": [],
+        "required_exports": [],
+        "expected_error_patterns": ["opening into space.*missing constructed open_connection opening >= 4m × 4m"],
+        "usage": {"required": false},
+        "visual_references": [],
+        "known_semantic_gaps": []
       }
     },
     {
