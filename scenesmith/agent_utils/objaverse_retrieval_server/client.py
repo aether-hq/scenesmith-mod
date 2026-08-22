@@ -87,7 +87,7 @@ class ObjaverseRetrievalClient:
             raise ValueError("Requests list cannot be empty")
 
         if timeout_s is None:
-            from scenesmith.agent_utils.retrieval_policy import (
+            from scenesmith.agent_utils.assets.retrieval_policy import (
                 local_retrieval_timeout_seconds,
             )
 

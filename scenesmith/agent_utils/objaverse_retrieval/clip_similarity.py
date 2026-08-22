@@ -13,14 +13,14 @@ import numpy as np
 import open_clip
 import torch
 
-from scenesmith.agent_utils.execution_providers import (
-    release_torch_cache,
-    resolve_torch_device,
-)
 from scenesmith.agent_utils.objaverse_retrieval.data_loader import (
     ObjaversePreprocessedData,
 )
-from scenesmith.agent_utils.provider_model_cache import ProviderModelCache
+from scenesmith.agent_utils.runtime.execution_providers import (
+    release_torch_cache,
+    resolve_torch_device,
+)
+from scenesmith.agent_utils.runtime.provider_model_cache import ProviderModelCache
 
 console_logger = logging.getLogger(__name__)
 
@@ -122,9 +122,7 @@ def get_objaverse_text_embedding(text: str, device: str | None = None) -> np.nda
 def warm_objaverse_text_encoder(device: str | None = None) -> None:
     """Load and execute Objaverse's distinct ViT-L/14 text encoder once."""
     started_at = time.monotonic()
-    embedding = get_objaverse_text_embedding(
-        "retrieval service warmup", device=device
-    )
+    embedding = get_objaverse_text_embedding("retrieval service warmup", device=device)
     if embedding.shape != (768,):
         raise RuntimeError(
             f"Unexpected Objaverse CLIP warmup embedding shape: {embedding.shape}"
@@ -153,9 +151,7 @@ def get_objaverse_text_embeddings(
             )
             with torch.no_grad():
                 text_features = model.encode_text(text_tokens)
-                text_features = text_features / text_features.norm(
-                    dim=-1, keepdim=True
-                )
+                text_features = text_features / text_features.norm(dim=-1, keepdim=True)
             batches.append(text_features.cpu().numpy().astype(np.float32))
     return np.concatenate(batches, axis=0)
 

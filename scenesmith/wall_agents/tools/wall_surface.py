@@ -11,14 +11,14 @@ import numpy as np
 from pydrake.common.eigen_geometry import Quaternion
 from pydrake.math import RigidTransform, RotationMatrix
 
-from scenesmith.agent_utils.house import (
-    HouseLayout,
+from scenesmith.agent_utils.scene.house import HouseLayout
+from scenesmith.agent_utils.scene.house_parts.openings import (
     OpeningType,
-    RoomGeometry,
     Wall,
     WallDirection,
 )
-from scenesmith.agent_utils.room import UniqueID
+from scenesmith.agent_utils.scene.house_parts.room_geometry import RoomGeometry
+from scenesmith.agent_utils.scene.room_parts.room_models import UniqueID
 
 
 @dataclass
@@ -401,8 +401,12 @@ def _extract_structural_wall_surfaces(
 ) -> list[WallSurface]:
     """Adapt arbitrary authored attachment patches to the wall-agent contract."""
 
-    from scenesmith.agent_utils.structural_geometry import SurfaceRole
-    from scenesmith.agent_utils.structural_surfaces import load_surface_patches
+    from scenesmith.agent_utils.structure.geometry_models.surface_models import (
+        SurfaceRole,
+    )
+    from scenesmith.agent_utils.structure.structural_surfaces import (
+        load_surface_patches,
+    )
 
     sidecar_paths = [
         path

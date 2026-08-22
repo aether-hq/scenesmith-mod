@@ -17,7 +17,7 @@ from .dataclasses import (
     GeometryGenerationServerRequest,
     GeometryGenerationServerResponse,
 )
-from .server_manager import GeometryGenerationServer
+from .server.server_manager import GeometryGenerationServer
 
 # Lazy imports for model-specific modules.
 # These should only be imported in provider workers or when explicitly needed.
@@ -34,12 +34,12 @@ def __getattr__(name: str):
         return generate_geometry_from_image
 
     if name == "Hunyuan3DPipelineManager":
-        from .hunyuan3d_pipeline_manager import Hunyuan3DPipelineManager
+        from .pipelines.hunyuan3d_pipeline_manager import Hunyuan3DPipelineManager
 
         return Hunyuan3DPipelineManager
 
     if name == "SAM3DPipelineManager":
-        from .sam3d_pipeline_manager import SAM3DPipelineManager
+        from .pipelines.sam3d_pipeline_manager import SAM3DPipelineManager
 
         return SAM3DPipelineManager
 

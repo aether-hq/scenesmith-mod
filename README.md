@@ -794,7 +794,7 @@ parser.package_map().Add("scene", "/path/to/scene_000")
 
 Note that final scenes after all agent stages are saved to `outputs/YYYY-MM-DD/HH-MM-SS/scene_000/combined_house/`. This includes both a `house.blend` Blender file and a `house.dmd.yaml` Drake file. See below for converting this scene into alternative formats (MuJoCo or USD).
 
-The generated output directories can be huge. To remove all files that aren't used in the final scene, use `scripts/clean_scene_output.py`.
+The generated output directories can be huge. To remove all files that aren't used in the final scene, use `scripts/scene_maintenance/clean_scene_output.py`.
 
 ---
 

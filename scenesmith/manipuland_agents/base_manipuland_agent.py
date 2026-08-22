@@ -12,14 +12,15 @@ from abc import ABC, abstractmethod
 
 from omegaconf import DictConfig
 
-from scenesmith.agent_utils.asset_manager import AssetManager
+from scenesmith.agent_utils.assets.asset_manager import AssetManager
 from scenesmith.agent_utils.blender import BlenderServer
 from scenesmith.agent_utils.blender.process_provider import RenderAllocation
 from scenesmith.agent_utils.convex_decomposition_server import ConvexDecompositionServer
-from scenesmith.agent_utils.rendering_manager import RenderingManager
-from scenesmith.agent_utils.room import AgentType, RoomScene
-from scenesmith.agent_utils.scene_analyzer import SceneAnalyzer
-from scenesmith.agent_utils.vlm_service import VLMService
+from scenesmith.agent_utils.llm.vlm_service import VLMService
+from scenesmith.agent_utils.rendering.rendering_manager import RenderingManager
+from scenesmith.agent_utils.scene.room import RoomScene
+from scenesmith.agent_utils.scene.room_parts.room_models import AgentType
+from scenesmith.agent_utils.scene.scene_analyzer import SceneAnalyzer
 from scenesmith.prompts import prompt_registry
 from scenesmith.utils.logging import BaseLogger
 

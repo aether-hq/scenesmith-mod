@@ -11,7 +11,7 @@ from typing import TypeVar
 
 from pydantic import BaseModel
 
-from scenesmith.agent_utils.vlm_service import VLMService
+from scenesmith.agent_utils.llm.vlm_service import VLMService
 
 T = TypeVar("T", bound=BaseModel)
 

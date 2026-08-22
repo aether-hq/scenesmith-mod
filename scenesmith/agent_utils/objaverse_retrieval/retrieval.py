@@ -8,7 +8,7 @@ from dataclasses import dataclass
 import numpy as np
 import trimesh
 
-from scenesmith.agent_utils.asset_semantics import (
+from scenesmith.agent_utils.assets.asset_semantics import (
     candidate_metadata_text,
     catalog_candidate_is_compatible,
     semantic_families,
@@ -47,16 +47,16 @@ _SEARCH_SYNONYM_GROUPS = (
     {"screen", "television", "tv"},
 )
 _SEARCH_EXPANSIONS = {
-    token: group
-    for group in _SEARCH_SYNONYM_GROUPS
-    for token in group
+    token: group for group in _SEARCH_SYNONYM_GROUPS for token in group
 }
 
 
 def _search_tokens(value: str) -> set[str]:
     tokens = {
         token
-        for token in re.findall(r"[a-z]+", value.lower().replace("armchair", "arm chair"))
+        for token in re.findall(
+            r"[a-z]+", value.lower().replace("armchair", "arm chair")
+        )
         if token not in _SEARCH_STOP_WORDS
     }
     expanded = set(tokens)
@@ -252,9 +252,7 @@ class ObjaverseRetriever:
 
         console_logger.info(f"Processing {len(top_k_meshes)} CLIP-filtered candidates")
 
-        ranked_metadata: list[
-            tuple[str, float, ObjaverseMeshMetadata, float]
-        ] = []
+        ranked_metadata: list[tuple[str, float, ObjaverseMeshMetadata, float]] = []
 
         for uid, clip_score in top_k_meshes:
             metadata = self.preprocessed_data.get_metadata(uid)
@@ -317,7 +315,7 @@ class ObjaverseRetriever:
         query_tokens = _search_tokens(description)
 
         def ranking_score(
-            entry: tuple[str, float, ObjaverseMeshMetadata, float]
+            entry: tuple[str, float, ObjaverseMeshMetadata, float],
         ) -> float:
             _uid, clip_score, metadata, bbox_score = entry
             semantic_penalty = 1.0 - clip_score

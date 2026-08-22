@@ -20,25 +20,33 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Iterable, Sequence
 
-from scenesmith.agent_utils.house import HouseLayout, PlacedRoom, RoomSpec
-from scenesmith.agent_utils.atomic_output import rebuild_directory_atomically
-from scenesmith.agent_utils.semantic_environment_compiler import (
-    SEMANTIC_ENVIRONMENT_COMPILER_VERSION,
-)
-from scenesmith.agent_utils.semantic_environments import (
+from scenesmith.agent_utils.core.atomic_output import rebuild_directory_atomically
+from scenesmith.agent_utils.scene.house import HouseLayout
+from scenesmith.agent_utils.scene.house_parts.openings import PlacedRoom
+from scenesmith.agent_utils.scene.house_parts.rooms import RoomSpec
+from scenesmith.agent_utils.semantics.environment.models.chambers import (
     Bounds3D,
-    EnvironmentKind,
     EnvironmentRegionSpec,
+)
+from scenesmith.agent_utils.semantics.environment.models.common import EnvironmentKind
+from scenesmith.agent_utils.semantics.environment.models.environment_spec import (
+    SemanticEnvironmentSpec,
+)
+from scenesmith.agent_utils.semantics.environment.models.passages import (
     PassageCrossSectionSpec,
     PassageJunctionSpec,
     PassageNetworkSpec,
     PassageSegmentSpec,
-    SemanticEnvironmentSpec,
 )
-from scenesmith.agent_utils.structural_compiler import TriangleMesh
-from scenesmith.agent_utils.structural_geometry import (
+from scenesmith.agent_utils.semantics.environment.semantic_environment_compiler import (
+    SEMANTIC_ENVIRONMENT_COMPILER_VERSION,
+)
+from scenesmith.agent_utils.structure.compiler.models import TriangleMesh
+from scenesmith.agent_utils.structure.geometry_models.surface_models import (
     Footprint2D,
     LevelSpec,
+)
+from scenesmith.agent_utils.structure.geometry_models.topology_models import (
     PortalSpec,
     PortalType,
 )
@@ -598,12 +606,11 @@ def generate_scene(output_dir: Path) -> dict:
         "build": {
             "status": "compiled",
             "rebuilt_from_recipe": True,
-            "source_path": Path(__file__).resolve().relative_to(
-                Path(__file__).resolve().parents[2]
-            ).as_posix(),
-            "source_sha256": hashlib.sha256(
-                Path(__file__).read_bytes()
-            ).hexdigest(),
+            "source_path": Path(__file__)
+            .resolve()
+            .relative_to(Path(__file__).resolve().parents[2])
+            .as_posix(),
+            "source_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
             "provider": "semantic-compiler/cpu",
             "compiler_version": SEMANTIC_ENVIRONMENT_COMPILER_VERSION,
         },

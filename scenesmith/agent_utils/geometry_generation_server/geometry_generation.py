@@ -8,7 +8,7 @@ from typing import Literal
 
 from PIL import Image
 
-from scenesmith.agent_utils.geometry_generation_server.sam_provider import (
+from scenesmith.agent_utils.geometry_generation_server.pipelines.sam_provider import (
     generate_with_sam_provider,
 )
 
@@ -91,7 +91,7 @@ def _generate_with_hunyuan3d(
     """
     # Keep CUDA-backed imports behind backend dispatch so the MLX provider can
     # run on macOS without touching CUDA during module import.
-    from scenesmith.agent_utils.geometry_generation_server.hunyuan3d_pipeline_manager import (
+    from scenesmith.agent_utils.geometry_generation_server.pipelines.hunyuan3d_pipeline_manager import (
         Hunyuan3DPipelineManager,
     )
 

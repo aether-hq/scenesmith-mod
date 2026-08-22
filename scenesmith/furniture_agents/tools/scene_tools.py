@@ -9,9 +9,10 @@ from agents import function_tool
 from omegaconf import DictConfig
 from pydrake.all import RigidTransform, RollPitchYaw, RotationMatrix
 
-from scenesmith.agent_utils.action_logger import log_scene_action
-from scenesmith.agent_utils.physics_validation import compute_scene_collisions
-from scenesmith.agent_utils.room import RoomScene, SceneObject, UniqueID
+from scenesmith.agent_utils.core.action_logger import log_scene_action
+from scenesmith.agent_utils.physics.physics_validation import compute_scene_collisions
+from scenesmith.agent_utils.scene.room import RoomScene
+from scenesmith.agent_utils.scene.room_parts.room_models import SceneObject, UniqueID
 from scenesmith.furniture_agents.tools.response_dataclasses import (
     FacingCheckResult,
     FurnitureErrorType,
@@ -20,16 +21,18 @@ from scenesmith.furniture_agents.tools.response_dataclasses import (
     SimplifiedFurnitureInfo,
     SnapToObjectResult,
 )
-from scenesmith.furniture_agents.tools.snapping_helpers import (
-    resolve_collision_if_penetrating,
+from scenesmith.furniture_agents.tools.snap_selection import (
     select_and_execute_snap_algorithm,
 )
-from scenesmith.utils.geometry_utils import (
+from scenesmith.furniture_agents.tools.snapping_helpers import (
+    resolve_collision_if_penetrating,
+)
+from scenesmith.utils.geometry.geometry_utils import (
     closest_point_on_aabb,
     compute_optimal_facing_yaw,
     ray_rectangle_intersection_2d,
 )
-from scenesmith.utils.shape_analysis import is_circular_object
+from scenesmith.utils.geometry.shape_analysis import is_circular_object
 
 console_logger = logging.getLogger(__name__)
 

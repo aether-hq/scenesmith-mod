@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Mapping, Protocol
 
-from scenesmith.agent_utils.execution_providers import (
+from scenesmith.agent_utils.runtime.execution_providers import (
     ProviderUnavailableError,
     detect_cuda_device_ids,
 )

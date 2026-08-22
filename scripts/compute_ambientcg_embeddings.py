@@ -33,7 +33,7 @@ import yaml
 
 from tqdm import tqdm
 
-from scenesmith.agent_utils.clip_embeddings import get_single_image_embedding
+from scenesmith.agent_utils.llm.clip_embeddings import get_single_image_embedding
 
 console_logger = logging.getLogger(__name__)
 

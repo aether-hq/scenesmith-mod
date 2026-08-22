@@ -45,7 +45,7 @@ jobs:
         run: uv sync --extra portable
 
       - name: Enforce hardware architecture boundary
-        run: uv run --extra portable pytest -q tests/unit/test_hardware_provider_boundaries.py
+        run: uv run --extra portable pytest -q tests/unit/architecture/test_hardware_provider_boundaries.py
 
       - name: Validate host provider selection
         run: |
@@ -82,7 +82,7 @@ jobs:
         run: uv run --extra portable pytest tests/unit/ --testmon
 
       - name: Revalidate held-out LLM authoring evidence
-        run: uv run --extra portable python scripts/validate_llm_trials.py
+        run: uv run --extra portable python scripts/validation/validate_llm_trials.py
 
       - name: Save testmon cache
         uses: actions/cache/save@v4
@@ -131,7 +131,7 @@ jobs:
           assert resolve_torch_device(torch_module=torch).startswith("cuda:")
           print(torch.cuda.get_device_name())
           PY
-          uv run python -m unittest -q \
-            tests.unit.test_execution_providers \
-            tests.unit.test_geometry_execution_provider \
-            tests.unit.test_hardware_provider_boundaries
+          uv run pytest -q \
+            tests/unit/runtime/test_execution_providers.py \
+            tests/unit/geometry/test_geometry_execution_provider.py \
+            tests/unit/architecture/test_hardware_provider_boundaries.py

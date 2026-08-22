@@ -14,10 +14,13 @@ from threading import Thread
 import flask
 import numpy as np
 
-from scenesmith.agent_utils.asset_semantics import candidate_metadata_text
+from scenesmith.agent_utils.assets.asset_semantics import candidate_metadata_text
+from scenesmith.agent_utils.assets.retrieval_policy import stream_local_results
+from scenesmith.agent_utils.core.scheduler import (
+    QueuedRequest,
+    StrictRoundRobinScheduler,
+)
 from scenesmith.agent_utils.objaverse_retrieval.retrieval import ObjaverseRetriever
-from scenesmith.agent_utils.retrieval_policy import stream_local_results
-from scenesmith.agent_utils.scheduler import QueuedRequest, StrictRoundRobinScheduler
 
 from .dataclasses import (
     ObjaverseRetrievalResult,

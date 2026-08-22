@@ -74,21 +74,14 @@ that are not installed in this macOS environment. The reproducible local gate
 is:
 
 ```bash
-.venv/bin/python -m unittest -q \
-  tests.unit.test_structural_geometry \
-  tests.unit.test_structural_compiler \
-  tests.unit.test_semantic_environments \
-  tests.unit.test_semantic_environment_compiler \
-  tests.unit.test_semantic_environment_details \
-  tests.unit.test_semantic_environment_metamorphic \
-  tests.unit.test_scene_contract \
-  tests.unit.test_house \
-  tests.unit.test_floor_plan_tools \
-  tests.unit.test_structural_surfaces \
-  tests.unit.test_structural_topology \
-  tests.unit.test_structural_scenarios \
-  tests.unit.test_prison_escape_example
-.venv/bin/python scripts/validate_llm_trials.py
+.venv/bin/pytest -q \
+  tests/unit/structural \
+  tests/unit/semantic_environment \
+  tests/unit/scene/test_scene_contract.py \
+  tests/unit/house \
+  tests/unit/floor_plan_tools \
+  tests/unit/architecture/test_prison_escape_example.py
+.venv/bin/python scripts/validation/validate_llm_trials.py
 ```
 
 ## Matrix coverage

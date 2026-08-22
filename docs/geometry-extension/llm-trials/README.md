@@ -29,7 +29,7 @@ pass-rate claim.
 The repository currently retains two executed Claude Sonnet 5 trials: a
 degree-five branching/cyclic network that passed on its first response, and a
 dragon-scale cavern that passed after two typed diagnostic repair turns. Run
-`python scripts/validate_llm_trials.py` to authenticate each retained prompt,
+`python scripts/validation/validate_llm_trials.py` to authenticate each retained prompt,
 revalidate prompt-specific requirements, compile the recipes, audit their
 meshes, and authenticate their output bundles. `--update` is reserved for an
 intentional oracle change; ordinary CI fails if retained predicates drift.

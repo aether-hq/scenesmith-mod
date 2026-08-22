@@ -123,7 +123,7 @@ class GeometryGenerationClient:
             raise ValueError("Requests list cannot be empty")
 
         if timeout_s is None:
-            from scenesmith.agent_utils.retrieval_policy import (
+            from scenesmith.agent_utils.assets.retrieval_policy import (
                 geometry_operation_timeout_seconds,
             )
 
@@ -246,9 +246,7 @@ class GeometryGenerationClient:
                     timeout_s,
                     elapsed,
                 )
-                raise TimeoutError(
-                    f"Geometry batch exceeded {timeout_s:g}s"
-                ) from e
+                raise TimeoutError(f"Geometry batch exceeded {timeout_s:g}s") from e
 
     def health_check(self) -> bool:
         """Check if the geometry generation server is healthy and responsive.

@@ -61,10 +61,10 @@ The server can be used in two ways:
 For independent testing, debugging, or microservice deployment:
 ```bash
 # Hunyuan3D backend (default)
-python -m scenesmith.agent_utils.geometry_generation_server.standalone_server
+python -m scenesmith.agent_utils.geometry_generation_server.server.standalone_server
 
 # SAM3D backend
-python -m scenesmith.agent_utils.geometry_generation_server.standalone_server \
+python -m scenesmith.agent_utils.geometry_generation_server.server.standalone_server \
   --backend sam3d \
   --provider mlx \
   --sam3-checkpoint external/checkpoints/sam3.pt \

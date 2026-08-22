@@ -4,8 +4,8 @@ import logging
 
 import trimesh
 
-from scenesmith.agent_utils.room import SceneObject
-from scenesmith.utils.mesh_loading import load_collision_meshes_from_sdf
+from scenesmith.agent_utils.scene.room_parts.room_models import SceneObject
+from scenesmith.utils.geometry.mesh_loading import load_collision_meshes_from_sdf
 
 console_logger = logging.getLogger(__name__)
 

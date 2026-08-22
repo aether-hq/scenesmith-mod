@@ -13,26 +13,28 @@ import trimesh
 from omegaconf import DictConfig
 from pydrake.all import RigidTransform
 
-from scenesmith.agent_utils.asset_manager import AssetManager
-from scenesmith.agent_utils.room import (
+from scenesmith.agent_utils.assets.asset_manager import AssetManager
+from scenesmith.agent_utils.scene.room import RoomScene
+from scenesmith.agent_utils.scene.room_parts.room_models import (
     ObjectType,
     PlacementInfo,
-    RoomScene,
     SceneObject,
     SupportSurface,
     UniqueID,
-    serialize_rigid_transform,
 )
-from scenesmith.manipuland_agents.tools.fill_container import (
-    compute_composite_bbox_in_local_frame,
+from scenesmith.manipuland_agents.tools.fill.bounds import (
     compute_container_interior_bounds,
+)
+from scenesmith.manipuland_agents.tools.fill.orchestration import (
+    compute_composite_bbox_in_local_frame,
     run_fill_simulation_loop,
 )
 from scenesmith.manipuland_agents.tools.response_dataclasses import (
     FillContainerResult,
     ManipulandErrorType,
 )
-from scenesmith.utils.mesh_loading import load_collision_meshes_from_sdf
+from scenesmith.utils.geometry.mesh_loading import load_collision_meshes_from_sdf
+from scenesmith.utils.geometry.sdf_utils import serialize_rigid_transform
 
 console_logger = logging.getLogger(__name__)
 

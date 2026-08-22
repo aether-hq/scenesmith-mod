@@ -9,22 +9,24 @@ import logging
 
 from typing import TYPE_CHECKING
 
-from scenesmith.agent_utils.house import (
+from scenesmith.agent_utils.scene.house_parts.openings import (
     ConnectionType,
     Opening,
     OpeningType,
     WallDirection,
 )
 from scenesmith.floor_plan_agents.tools.ascii_generator import generate_ascii_floor_plan
-from scenesmith.floor_plan_agents.tools.room_placement import (
+from scenesmith.floor_plan_agents.tools.submission.placement.geometry import (
+    get_shared_edge,
+)
+from scenesmith.floor_plan_agents.tools.submission.placement.models import (
     PlacementConfig,
     PlacementError,
-    get_shared_edge,
-    place_rooms,
 )
+from scenesmith.floor_plan_agents.tools.submission.placement.search import place_rooms
 
 if TYPE_CHECKING:
-    from scenesmith.agent_utils.house import HouseLayout
+    from scenesmith.agent_utils.scene.house import HouseLayout
 
 console_logger = logging.getLogger(__name__)
 

@@ -27,7 +27,7 @@ from pathlib import Path
 import numpy as np
 import yaml
 
-from scenesmith.agent_utils.clip_embeddings import (
+from scenesmith.agent_utils.llm.clip_embeddings import (
     compute_clip_similarities,
     get_text_embedding,
 )

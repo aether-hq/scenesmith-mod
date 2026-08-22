@@ -22,27 +22,27 @@ import numpy as np
 from omegaconf import DictConfig
 from pydrake.math import RigidTransform, RotationMatrix
 
-from scenesmith.agent_utils.asset_manager import AssetManager
-from scenesmith.agent_utils.room import (
+from scenesmith.agent_utils.assets.asset_manager import AssetManager
+from scenesmith.agent_utils.scene.room import RoomScene
+from scenesmith.agent_utils.scene.room_parts.room_models import (
     ObjectType,
     PlacementInfo,
-    RoomScene,
     SceneObject,
     SupportSurface,
     UniqueID,
-    serialize_rigid_transform,
 )
-from scenesmith.manipuland_agents.tools.fill_container import (
-    FillSimulationResult,
+from scenesmith.manipuland_agents.tools.fill.bounds import FillSimulationResult
+from scenesmith.manipuland_agents.tools.fill.orchestration import (
     compute_composite_bbox_in_local_frame,
-    simulate_fill_physics,
 )
+from scenesmith.manipuland_agents.tools.fill.simulation import simulate_fill_physics
 from scenesmith.manipuland_agents.tools.response_dataclasses import (
     FillContainerResult,
     ManipulandErrorType,
 )
-from scenesmith.utils.collision_utils import compute_pairwise_collisions
-from scenesmith.utils.shape_analysis import is_circular_object
+from scenesmith.utils.geometry.collision_utils import compute_pairwise_collisions
+from scenesmith.utils.geometry.sdf_utils import serialize_rigid_transform
+from scenesmith.utils.geometry.shape_analysis import is_circular_object
 
 console_logger = logging.getLogger(__name__)
 

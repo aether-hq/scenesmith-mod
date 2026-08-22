@@ -14,7 +14,7 @@ from scenesmith.agent_utils.materials_retrieval_server.client import (
 from scenesmith.agent_utils.materials_retrieval_server.dataclasses import (
     MaterialsRetrievalServerRequest,
 )
-from scenesmith.utils.material import Material
+from scenesmith.utils.geometry.material import Material
 
 console_logger = logging.getLogger(__name__)
 

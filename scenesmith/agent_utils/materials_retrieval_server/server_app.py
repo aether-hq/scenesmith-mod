@@ -16,13 +16,16 @@ import flask
 
 from omegaconf import DictConfig
 
+from scenesmith.agent_utils.assets.retrieval_policy import stream_local_results
+from scenesmith.agent_utils.core.scheduler import (
+    QueuedRequest,
+    StrictRoundRobinScheduler,
+)
 from scenesmith.agent_utils.materials_retrieval_server.config import MaterialsConfig
 from scenesmith.agent_utils.materials_retrieval_server.retrieval import (
     MaterialsRetriever,
 )
-from scenesmith.agent_utils.retrieval_policy import stream_local_results
-from scenesmith.agent_utils.scheduler import QueuedRequest, StrictRoundRobinScheduler
-from scenesmith.utils.material import Material
+from scenesmith.utils.geometry.material import Material
 
 from .dataclasses import (
     MaterialRetrievalResult,

@@ -40,14 +40,14 @@ from typing import Any
 
 from pydrake.all import RollPitchYaw
 
-from scenesmith.agent_utils.response_datatypes import (
+from scenesmith.agent_utils.core.response_datatypes import (
     AssetInfo,
     BoundingBox3D,
     JSONSerializable,
     Position3D,
     Rotation3D,
 )
-from scenesmith.agent_utils.room import SceneObject
+from scenesmith.agent_utils.scene.room_parts.room_models import SceneObject
 
 # Re-export shared types for backwards compatibility.
 __all__ = ["AssetInfo", "BoundingBox3D"]
@@ -292,10 +292,10 @@ class FurnitureOperationResult(JSONSerializable):
 
 
 # GeneratedAsset and AssetGenerationResult are now imported from
-# scenesmith.agent_utils.response_datatypes (shared with manipuland agent)
+# scenesmith.agent_utils.core.response_datatypes (shared with manipuland agent)
 
 # TodoItem, TodoSummary, and TodoOperationResult have been moved to
-# scenesmith.agent_utils.workflow_tools (shared with manipuland agent)
+# scenesmith.agent_utils.runtime.workflow_tools (shared with manipuland agent)
 
 
 @dataclass

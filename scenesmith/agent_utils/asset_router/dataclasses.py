@@ -3,7 +3,7 @@
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from scenesmith.agent_utils.room import ObjectType
+from scenesmith.agent_utils.scene.room_parts.room_models import ObjectType
 
 
 @dataclass

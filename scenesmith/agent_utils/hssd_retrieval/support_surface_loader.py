@@ -13,17 +13,21 @@ import logging
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
 import trimesh
 
 from pydrake.math import RigidTransform, RollPitchYaw
 
-from scenesmith.agent_utils.room import SupportSurface
-from scenesmith.agent_utils.support_surface_filters import (
+from scenesmith.agent_utils.geometry.support_surface_filters import (
     filter_surface_by_area,
     filter_surface_by_inscribed_radius,
 )
+from scenesmith.agent_utils.scene.room_parts.room_models import SupportSurface
+
+if TYPE_CHECKING:
+    from scenesmith.agent_utils.scene.room import RoomScene
 
 console_logger = logging.getLogger(__name__)
 

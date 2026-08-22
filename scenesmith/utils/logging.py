@@ -13,7 +13,7 @@ import numpy as np
 
 from PIL import Image
 
-from scenesmith.agent_utils.room import RoomScene
+from scenesmith.agent_utils.scene.room import RoomScene
 
 console_logger = logging.getLogger(__name__)
 

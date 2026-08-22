@@ -12,7 +12,7 @@ import os
 from dataclasses import dataclass
 from typing import Callable, Mapping, MutableMapping, Protocol
 
-from scenesmith.agent_utils.execution_providers import (
+from scenesmith.agent_utils.runtime.execution_providers import (
     CudaVisibilityToken,
     ProviderUnavailableError,
     detect_cuda_device_ids,
@@ -124,7 +124,7 @@ def resolve_geometry_execution_provider(
         if sam3d_config is None:
             raise ValueError("sam3d_config is required for the SAM3D backend")
         if requested == "auto":
-            from scenesmith.agent_utils.geometry_generation_server.sam_provider import (
+            from scenesmith.agent_utils.geometry_generation_server.pipelines.sam_provider import (
                 resolve_sam_provider,
             )
 

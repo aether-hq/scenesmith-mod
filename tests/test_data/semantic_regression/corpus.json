@@ -80,9 +80,9 @@
     },
     {
       "case_id": "spaceship-repair-dock",
-      "category": "protected-explicit-failure",
+      "category": "approved-complex-interior",
       "prompt": "A SPACEship dock with a huge space-fighter in the middle.  There are 10 repair bays, each big enough for a fighter, a giant opening into space, and then all the parts, machines, and so on are across the bay. There are massive doors into the rest of the station and many smaller doors to e.g. crew quarters, etc.",
-      "target_outcome": "explicit_failure",
+      "target_outcome": "complete",
       "target_obligations": [
         "exactly ten fighter-sized repair bays",
         "one huge central space fighter",
@@ -91,18 +91,44 @@
         "multiple smaller crew doors",
         "parts and repair machinery across the bay"
       ],
+      "artifact_contract": {
+        "require_semantic_certificate": true,
+        "require_closed_ledger": true,
+        "require_physics_verified": true
+      },
+      "operational_guardrails": {
+        "baseline_duration_seconds": 348.393,
+        "max_duration_seconds": 600.0,
+        "max_duration_increase_ratio": 0.5,
+        "max_requests": 10,
+        "max_turns": 30,
+        "max_total_tokens": 300000,
+        "max_api_equivalent_cost_usd": 2.0,
+        "max_failure_rate": 0.0
+      },
       "reference": {
-        "run_id": "20260822T024306-d733a6ba",
-        "job_status": "failed",
-        "semantic_status": "known_failure",
-        "duration_seconds": 437.002,
-        "topology": {"levels": 1, "spaces": 1, "openings": 5, "connectors": 0},
-        "final_object_minimum": 0,
-        "final_object_maximum": 0,
-        "object_counts": [],
-        "required_exports": [],
-        "expected_error_patterns": ["opening into space.*missing constructed open_connection opening >= 4m × 4m"],
-        "usage": {"required": false},
+        "run_id": "20260822T042717-1a94a90b",
+        "job_status": "completed",
+        "semantic_status": "approved",
+        "duration_seconds": 348.393,
+        "topology": {"levels": 1, "spaces": 1, "openings": 9, "connectors": 0},
+        "final_object_minimum": 90,
+        "final_object_maximum": 110,
+        "object_counts": [
+          {"pattern": "hero_space_fighter", "minimum": 1, "maximum": 1},
+          {"pattern": "repair_bay", "minimum": 10, "maximum": 10},
+          {"pattern": "repair_machine", "minimum": 10, "maximum": 10},
+          {"pattern": "repair_parts_rack", "minimum": 20, "maximum": 20},
+          {"pattern": "misc_equipment_prop", "minimum": 15, "maximum": 15}
+        ],
+        "required_exports": ["scene.glb", "scene_textured.glb"],
+        "usage": {
+          "required": true,
+          "requests": 5,
+          "turns": 11,
+          "total_tokens": 117166,
+          "api_equivalent_cost_usd": 0.4160854000000001
+        },
         "visual_references": [],
         "known_semantic_gaps": []
       }

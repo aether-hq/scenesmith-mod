@@ -26,8 +26,8 @@ from pydrake.all import (
     SceneGraph,
 )
 
-from scenesmith.agent_utils.drake_utils import create_plant_from_dmd
-from scenesmith.utils.sdf_utils import extract_base_link_name_from_sdf
+from scenesmith.agent_utils.physics.drake_utils import create_plant_from_dmd
+from scenesmith.utils.geometry.sdf_utils import extract_base_link_name_from_sdf
 
 console_logger = logging.getLogger(__name__)
 

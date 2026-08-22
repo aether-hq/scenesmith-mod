@@ -19,7 +19,7 @@ from typing import Callable, Mapping, Protocol
 
 from .client import GeometryGenerationClient
 from .execution_provider import GeometryExecutionProvider
-from .server_manager import GeometryGenerationServer
+from .server.server_manager import GeometryGenerationServer
 
 console_logger = logging.getLogger(__name__)
 

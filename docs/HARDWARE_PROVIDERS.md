@@ -151,13 +151,13 @@ make hardware decisions.
 
 ```sh
 uv lock --check
-uv run python -m unittest -q \
-  tests.unit.test_execution_providers \
-  tests.unit.test_blender_render_provider \
-  tests.unit.test_blender_process_provider \
-  tests.unit.test_geometry_execution_provider \
-  tests.unit.test_geometry_service_provider \
-  tests.unit.test_hardware_provider_boundaries
+uv run pytest -q \
+  tests/unit/runtime/test_execution_providers.py \
+  tests/unit/blender/test_blender_render_provider.py \
+  tests/unit/blender/test_blender_process_provider.py \
+  tests/unit/geometry/test_geometry_execution_provider.py \
+  tests/unit/geometry/test_geometry_service_provider.py \
+  tests/unit/architecture/test_hardware_provider_boundaries.py
 ```
 
 GitHub Actions runs the unit suite on Linux and an Apple Silicon `macos-15`

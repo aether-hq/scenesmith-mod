@@ -32,17 +32,13 @@ from pydrake.multibody.plant import MultibodyPlant
 from scipy.spatial.transform import Rotation
 from tqdm import tqdm
 
-from scenesmith.agent_utils.articulated_physics_analyzer import (
-    PlacementOptions,
-    analyze_articulated_physics,
-)
+from scenesmith.agent_utils.assets.materials import get_friction
 from scenesmith.agent_utils.convex_decomposition_server import (
     ConvexDecompositionClient,
     ConvexDecompositionServer,
 )
-from scenesmith.agent_utils.materials import get_friction
-from scenesmith.agent_utils.mesh_utils import convert_objs_to_gltf
-from scenesmith.agent_utils.urdf_to_sdf import (
+from scenesmith.agent_utils.geometry.mesh_utils import convert_objs_to_gltf
+from scenesmith.agent_utils.geometry.urdf_to_sdf import (
     compute_articulated_bounding_box,
     compute_link_physics_from_meshes,
     compute_sdf_bounding_box,
@@ -52,7 +48,11 @@ from scenesmith.agent_utils.urdf_to_sdf import (
     update_sdf_model_pose,
     validate_urdf_meshes,
 )
-from scenesmith.agent_utils.vlm_service import VLMService
+from scenesmith.agent_utils.llm.vlm_service import VLMService
+from scenesmith.agent_utils.physics.articulated_physics_analyzer import (
+    PlacementOptions,
+    analyze_articulated_physics,
+)
 
 console_logger = logging.getLogger(__name__)
 

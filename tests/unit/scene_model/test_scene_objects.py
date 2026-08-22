@@ -1,0 +1,777 @@
+import tempfile
+import unittest
+import xml.etree.ElementTree as ET
+
+from pathlib import Path
+
+import numpy as np
+
+from pydrake.all import MultibodyPlant, RigidTransform, RollPitchYaw, SceneGraph
+
+from scenesmith.agent_utils.physics.drake_utils import (
+    create_drake_plant_and_scene_graph_from_scene,
+)
+from scenesmith.agent_utils.scene.house_parts.room_geometry import RoomGeometry
+from scenesmith.agent_utils.scene.room import RoomScene
+from scenesmith.agent_utils.scene.room_parts.room_models import (
+    ObjectType,
+    SceneObject,
+    SupportSurface,
+    UniqueID,
+)
+
+
+class TestScene(unittest.TestCase):
+    """Test cases for RoomScene class."""
+
+    def setUp(self):
+        """Set up test fixtures."""
+        self.test_data_dir = Path(__file__).parents[2] / "test_data"
+        self.floor_plan_path = self.test_data_dir / "simple_room_geometry.sdf"
+
+        # Create RoomGeometry from SDF file.
+        room_geometry_tree = ET.parse(self.floor_plan_path)
+        room_geometry = RoomGeometry(
+            sdf_tree=room_geometry_tree,
+            sdf_path=self.floor_plan_path,
+        )
+        self.scene = RoomScene(
+            room_geometry=room_geometry, scene_dir=self.test_data_dir
+        )
+
+        self.test_object = SceneObject(
+            object_id=UniqueID("test_object"),
+            object_type=ObjectType.FURNITURE,
+            name="Test Object",
+            description="A test object",
+            transform=RigidTransform(),
+            sdf_path=self.test_data_dir / "simple_box.sdf",
+        )
+
+    def test_creation(self):
+        """Test RoomScene creation with minimal fields."""
+        room_geometry_tree = ET.parse(self.floor_plan_path)
+        room_geometry = RoomGeometry(
+            sdf_tree=room_geometry_tree,
+            sdf_path=self.floor_plan_path,
+        )
+        scene = RoomScene(room_geometry=room_geometry, scene_dir=self.test_data_dir)
+
+        self.assertEqual(scene.room_geometry.sdf_path, self.floor_plan_path)
+        self.assertEqual(scene.objects, {})
+        self.assertEqual(scene.text_description, "")
+
+    def test_add_object(self):
+        """Test adding an object to the scene."""
+        self.scene.add_object(self.test_object)
+
+        self.assertIn(self.test_object.object_id, self.scene.objects)
+        self.assertEqual(
+            self.scene.objects[self.test_object.object_id], self.test_object
+        )
+
+    def test_remove_object(self):
+        """Test removing an object from the scene."""
+        self.scene.add_object(self.test_object)
+
+        result = self.scene.remove_object(self.test_object.object_id)
+
+        self.assertTrue(result)
+        self.assertNotIn(self.test_object.object_id, self.scene.objects)
+
+    def test_remove_nonexistent_object(self):
+        """Test removing a nonexistent object returns False."""
+        result = self.scene.remove_object(UniqueID.generate())
+        self.assertFalse(result)
+
+    def test_get_object(self):
+        """Test getting an object by ID."""
+        self.scene.add_object(self.test_object)
+
+        retrieved = self.scene.get_object(self.test_object.object_id)
+
+        self.assertEqual(retrieved, self.test_object)
+
+    def test_get_nonexistent_object(self):
+        """Test getting a nonexistent object returns None."""
+        result = self.scene.get_object(UniqueID.generate())
+        self.assertIsNone(result)
+
+    def test_move_object(self):
+        """Test moving an object to a new transform."""
+        self.scene.add_object(self.test_object)
+        new_transform = RigidTransform(
+            RollPitchYaw(0.1, 0.2, 0.3), np.array([1.0, 2.0, 3.0])
+        )
+
+        result = self.scene.move_object(self.test_object.object_id, new_transform)
+
+        self.assertTrue(result)
+        self.assertEqual(
+            self.scene.objects[self.test_object.object_id].transform, new_transform
+        )
+
+    def test_move_nonexistent_object(self):
+        """Test moving a nonexistent object returns False."""
+        result = self.scene.move_object(UniqueID.generate(), RigidTransform())
+        self.assertFalse(result)
+
+    def test_get_objects_by_type(self):
+        """Test getting all objects of a specific type."""
+        furniture_obj = SceneObject(
+            object_id=UniqueID("furniture"),
+            object_type=ObjectType.FURNITURE,
+            name="Furniture",
+            description="A furniture object",
+            transform=RigidTransform(),
+        )
+
+        manipuland_obj = SceneObject(
+            object_id=UniqueID("manipuland"),
+            object_type=ObjectType.MANIPULAND,
+            name="Manipuland",
+            description="A manipuland object",
+            transform=RigidTransform(),
+        )
+
+        self.scene.add_object(furniture_obj)
+        self.scene.add_object(manipuland_obj)
+
+        furniture_objects = self.scene.get_objects_by_type(ObjectType.FURNITURE)
+        manipuland_objects = self.scene.get_objects_by_type(ObjectType.MANIPULAND)
+
+        self.assertEqual(len(furniture_objects), 1)
+        self.assertEqual(len(manipuland_objects), 1)
+        self.assertEqual(furniture_objects[0], furniture_obj)
+        self.assertEqual(manipuland_objects[0], manipuland_obj)
+
+    def test_to_drake_directive_empty_scene(self):
+        """Test generating Drake directive for empty scene."""
+        directive = self.scene.to_drake_directive()
+
+        expected_lines = [
+            "directives:",
+            "- add_model:",
+            "    name: room_geometry",
+            f"    file: file://{self.floor_plan_path}",
+            "- add_weld:",
+            "    parent: world",
+            "    child: room_geometry::room_geometry_body_link",
+        ]
+
+        self.assertEqual(directive, "\n".join(expected_lines))
+
+    def test_to_drake_directive_with_furniture(self):
+        """Test generating Drake directive with furniture object."""
+        furniture_obj = SceneObject(
+            object_id=UniqueID("dining_table_0"),
+            object_type=ObjectType.FURNITURE,
+            name="Dining Table",
+            description="A wooden table",
+            transform=RigidTransform(
+                RollPitchYaw(0.1, 0.2, 0.3), np.array([1.0, 2.0, 3.0])
+            ),
+            sdf_path=Path("/path/to/table.sdf"),
+        )
+
+        self.scene.add_object(furniture_obj)
+        directive = self.scene.to_drake_directive()
+
+        self.assertIn("- add_model:", directive)
+        # Model name uses object_id directly.
+        self.assertIn("name: dining_table_0", directive)
+        self.assertIn("file: file:///path/to/table.sdf", directive)
+        self.assertIn("- add_weld:", directive)
+        self.assertIn("parent: world", directive)
+        # Child references model name with link.
+        self.assertIn("child: dining_table_0::base_link", directive)
+        self.assertIn("translation: [1.0, 2.0, 3.0]", directive)
+        self.assertIn("rotation: !AngleAxis", directive)
+
+    def test_to_drake_directive_with_manipuland(self):
+        """Test generating Drake directive with manipuland object."""
+        manipuland_obj = SceneObject(
+            object_id=UniqueID("cup"),
+            object_type=ObjectType.MANIPULAND,
+            name="Coffee Cup",
+            description="A ceramic cup",
+            transform=RigidTransform(np.array([0.5, 0.5, 1.0])),
+            sdf_path=Path("/path/to/cup.sdf"),
+        )
+
+        self.scene.add_object(manipuland_obj)
+        directive = self.scene.to_drake_directive()
+
+        self.assertIn("- add_model:", directive)
+        self.assertIn("name: coffee_cup", directive)
+        self.assertIn("file: file:///path/to/cup.sdf", directive)
+        self.assertIn("default_free_body_pose:", directive)
+        self.assertIn("base_link:", directive)
+        self.assertIn("translation: [0.5, 0.5, 1.0]", directive)
+        # Manipulands should not be welded (they are free bodies).
+        self.assertNotIn("child: coffee_cup", directive)
+
+    def test_owner_bound_decor_is_welded_for_dynamics_but_free_for_collision(self):
+        row = SceneObject(
+            object_id=UniqueID("book_row_0"),
+            object_type=ObjectType.MANIPULAND,
+            name="encyclopedia_book_row",
+            description="owner-bound books on an authored shelf tier",
+            transform=RigidTransform(np.array([0.2, 0.1, 1.0])),
+            sdf_path=Path("/path/to/book_row.sdf"),
+            metadata={"dense_library_owner_bound": "bookcase_0"},
+        )
+        self.scene.add_object(row)
+
+        dynamics = self.scene.to_drake_directive(weld_furniture=True)
+        collision_query = self.scene.to_drake_directive(
+            weld_furniture=True,
+            free_mounted_objects_for_collision=True,
+        )
+
+        self.assertIn("child: encyclopedia_book_row_0::base_link", dynamics)
+        self.assertNotIn("default_free_body_pose:", dynamics)
+        self.assertIn("default_free_body_pose:", collision_query)
+        self.assertNotIn("child: encyclopedia_book_row_0::base_link", collision_query)
+
+    def test_immutable_object_stays_anchored_in_free_and_collision_directives(self):
+        structure = SceneObject(
+            object_id=UniqueID("repair_bay_0"),
+            object_type=ObjectType.FURNITURE,
+            name="repair_bay",
+            description="Authored immutable repair bay",
+            transform=RigidTransform(np.array([12.0, -8.0, 0.0])),
+            sdf_path=Path("/path/to/repair_bay.sdf"),
+            immutable=True,
+        )
+        self.scene.add_object(structure)
+
+        free_furniture = self.scene.to_drake_directive(weld_furniture=False)
+        collision_query = self.scene.to_drake_directive(
+            weld_furniture=False,
+            free_mounted_objects_for_collision=True,
+        )
+
+        for directive in (free_furniture, collision_query):
+            self.assertIn("child: repair_bay_0::base_link", directive)
+            self.assertNotIn("default_free_body_pose:", directive)
+            self.assertIn("translation: [12.0, -8.0, 0.0]", directive)
+
+    def test_to_drake_directive_skips_objects_without_sdf(self):
+        """Test that objects without sdf_path are skipped in directive."""
+        obj_without_sdf = SceneObject(
+            object_id=UniqueID("no_sdf"),
+            object_type=ObjectType.FURNITURE,
+            name="No SDF Object",
+            description="An object without SDF",
+            transform=RigidTransform(),
+            sdf_path=None,
+        )
+
+        self.scene.add_object(obj_without_sdf)
+        directive = self.scene.to_drake_directive()
+
+        self.assertNotIn("no_sdf", directive)
+        self.assertNotIn("No SDF Object", directive)
+
+    def test_to_drake_directive_loadable_by_drake(self):
+        """Test that generated Drake directive can be loaded by Drake."""
+        # Create scene with test data.
+        test_data_dir = Path(__file__).parents[2] / "test_data"
+        floor_plan_path = test_data_dir / "simple_room_geometry.sdf"
+        box_sdf_path = test_data_dir / "simple_box.sdf"
+        sphere_sdf_path = test_data_dir / "simple_sphere.sdf"
+
+        room_geometry_tree = ET.parse(floor_plan_path)
+        room_geometry = RoomGeometry(
+            sdf_tree=room_geometry_tree,
+            sdf_path=floor_plan_path,
+        )
+        scene = RoomScene(room_geometry=room_geometry, scene_dir=test_data_dir)
+
+        # Add furniture object.
+        furniture_obj = SceneObject(
+            object_id=UniqueID("test_table"),
+            object_type=ObjectType.FURNITURE,
+            name="Test Table",
+            description="A test table",
+            transform=RigidTransform(np.array([1.0, 0.0, 0.5])),
+            sdf_path=box_sdf_path,
+        )
+
+        # Add manipuland object.
+        manipuland_obj = SceneObject(
+            object_id=UniqueID("test_sphere"),
+            object_type=ObjectType.MANIPULAND,
+            name="Test Sphere",
+            description="A test sphere",
+            transform=RigidTransform(np.array([0.0, 1.0, 1.0])),
+            sdf_path=sphere_sdf_path,
+        )
+
+        scene.add_object(furniture_obj)
+        scene.add_object(manipuland_obj)
+
+        # This should not raise an exception.
+        plant, scene_graph = create_drake_plant_and_scene_graph_from_scene(scene)
+
+        # Verify the plant was created successfully.
+        self.assertIsInstance(plant, MultibodyPlant)
+        self.assertIsInstance(scene_graph, SceneGraph)
+        self.assertTrue(plant.is_finalized())
+
+        # Should have floor plan + 2 objects = at least 3 model instances.
+        self.assertGreater(plant.num_model_instances(), 2)
+
+    def test_to_drake_directive_with_base_dir_uses_package_uris(self):
+        """Test that passing base_dir generates package://scene/ URIs."""
+        # Create scene with test data.
+        test_data_dir = Path(__file__).parents[2] / "test_data"
+        floor_plan_path = test_data_dir / "simple_room_geometry.sdf"
+        box_sdf_path = test_data_dir / "simple_box.sdf"
+
+        room_geometry_tree = ET.parse(floor_plan_path)
+        room_geometry = RoomGeometry(
+            sdf_tree=room_geometry_tree,
+            sdf_path=floor_plan_path,
+        )
+        scene = RoomScene(room_geometry=room_geometry, scene_dir=test_data_dir)
+
+        # Add furniture object.
+        furniture_obj = SceneObject(
+            object_id=UniqueID("test_table"),
+            object_type=ObjectType.FURNITURE,
+            name="Test Table",
+            description="A test table",
+            transform=RigidTransform(np.array([1.0, 0.0, 0.5])),
+            sdf_path=box_sdf_path,
+        )
+        scene.add_object(furniture_obj)
+
+        # Generate directive with base_dir to get package:// URIs.
+        directive = scene.to_drake_directive(base_dir=test_data_dir)
+
+        # Should NOT contain file:// prefix.
+        self.assertNotIn("file://", directive)
+
+        # Should contain package://scene/ URIs.
+        self.assertIn("file: package://scene/simple_room_geometry.sdf", directive)
+        self.assertIn("file: package://scene/simple_box.sdf", directive)
+
+    def test_to_drake_directive_includes_persisted_platform_geometry(self):
+        """Support sidecars include their adjacent collision SDF in physics."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            scene_dir = Path(tmp_dir)
+            platform_sidecar = scene_dir / "upper_floor.surfaces.json"
+            platform_sdf = scene_dir / "upper_floor.sdf"
+            platform_sidecar.write_text("{}", encoding="utf-8")
+            platform_sdf.write_text("<sdf version='1.7'/>", encoding="utf-8")
+            room_geometry = RoomGeometry(
+                sdf_tree=ET.parse(self.floor_plan_path),
+                sdf_path=self.floor_plan_path,
+                additional_structural_surface_paths=[platform_sidecar],
+            )
+            scene = RoomScene(room_geometry=room_geometry, scene_dir=scene_dir)
+
+            directive = scene.to_drake_directive()
+
+            self.assertIn(f"file: file://{platform_sdf}", directive)
+            self.assertIn("name: room_geometry_additional_support_0", directive)
+            self.assertIn(
+                "child: room_geometry_additional_support_0::structure_link",
+                directive,
+            )
+
+    def test_to_drake_directive_with_parent_frame(self):
+        """Test that welded furniture uses parent_frame instead of world."""
+        furniture_obj = SceneObject(
+            object_id=UniqueID("bed_abc"),
+            object_type=ObjectType.FURNITURE,
+            name="Bed",
+            description="A bed",
+            transform=RigidTransform(np.array([0.5, 0.5, 0.0])),
+            sdf_path=Path("/path/to/bed.sdf"),
+        )
+
+        self.scene.add_object(furniture_obj)
+        directive = self.scene.to_drake_directive(
+            parent_frame="room_bedroom_frame",
+        )
+
+        # Welded object should use room frame as parent.
+        self.assertIn("parent: room_bedroom_frame", directive)
+        # Should NOT reference world for the weld.
+        self.assertNotIn("parent: world", directive)
+        # Room-local coordinates (no offset).
+        self.assertIn("translation: [0.5, 0.5, 0.0]", directive)
+
+    def test_to_drake_directive_parent_frame_free_bodies_use_base_frame(self):
+        """Test that free bodies include base_frame when parent_frame is set."""
+        manipuland_obj = SceneObject(
+            object_id=UniqueID("cup_xyz"),
+            object_type=ObjectType.MANIPULAND,
+            name="Cup",
+            description="A cup",
+            transform=RigidTransform(np.array([0.3, 0.2, 0.8])),
+            sdf_path=Path("/path/to/cup.sdf"),
+        )
+
+        self.scene.add_object(manipuland_obj)
+        directive = self.scene.to_drake_directive(
+            parent_frame="room_bedroom_frame",
+        )
+
+        # Free body should include base_frame in default_free_body_pose.
+        self.assertIn("base_frame: room_bedroom_frame", directive)
+        # Room-local coordinates.
+        self.assertIn("translation: [0.3, 0.2, 0.8]", directive)
+
+    def test_to_drake_directive_default_parent_frame_uses_world(self):
+        """Test that default parent_frame='world' includes base_frame: world."""
+        manipuland_obj = SceneObject(
+            object_id=UniqueID("ball_456"),
+            object_type=ObjectType.MANIPULAND,
+            name="Ball",
+            description="A ball",
+            transform=RigidTransform(np.array([1.0, 2.0, 0.5])),
+            sdf_path=Path("/path/to/ball.sdf"),
+        )
+
+        self.scene.add_object(manipuland_obj)
+        directive = self.scene.to_drake_directive()
+
+        # Default parent_frame="world" should appear in base_frame.
+        self.assertIn("base_frame: world", directive)
+        self.assertIn("translation: [1.0, 2.0, 0.5]", directive)
+
+    def test_content_hash_identical_scenes_same_hash(self):
+        """Test that identical scenes produce identical content hashes."""
+        # Create two identical scenes.
+        scene1 = RoomScene(
+            room_geometry=self.scene.room_geometry, scene_dir=self.test_data_dir
+        )
+        scene2 = RoomScene(
+            room_geometry=self.scene.room_geometry, scene_dir=self.test_data_dir
+        )
+
+        # Both should have same hash.
+        hash1 = scene1.content_hash()
+        hash2 = scene2.content_hash()
+        self.assertEqual(hash1, hash2)
+
+        # Add identical objects to both scenes.
+        obj1 = SceneObject(
+            object_id=UniqueID("test_obj"),
+            object_type=ObjectType.FURNITURE,
+            name="Test Object",
+            description="A test object",
+            transform=RigidTransform(),
+        )
+        obj2 = SceneObject(
+            object_id=obj1.object_id,  # Same ID.
+            object_type=ObjectType.FURNITURE,
+            name="Test Object",
+            description="A test object",
+            transform=RigidTransform(),
+        )
+
+        scene1.add_object(obj1)
+        scene2.add_object(obj2)
+
+        hash1_with_obj = scene1.content_hash()
+        hash2_with_obj = scene2.content_hash()
+        self.assertEqual(hash1_with_obj, hash2_with_obj)
+
+    def test_content_hash_different_objects_different_hash(self):
+        """Test that scenes with different objects have different hashes."""
+        scene1 = RoomScene(
+            room_geometry=self.scene.room_geometry, scene_dir=self.test_data_dir
+        )
+        scene2 = RoomScene(
+            room_geometry=self.scene.room_geometry, scene_dir=self.test_data_dir
+        )
+
+        obj1 = SceneObject(
+            object_id=UniqueID("obj1"),
+            object_type=ObjectType.FURNITURE,
+            name="Object 1",
+            description="First object",
+            transform=RigidTransform(),
+        )
+
+        obj2 = SceneObject(
+            object_id=UniqueID("obj2"),
+            object_type=ObjectType.FURNITURE,
+            name="Object 2",
+            description="Second object",
+            transform=RigidTransform(),
+        )
+
+        scene1.add_object(obj1)
+        scene2.add_object(obj2)
+
+        hash1 = scene1.content_hash()
+        hash2 = scene2.content_hash()
+        self.assertNotEqual(hash1, hash2)
+
+    def test_content_hash_transform_change_different_hash(self):
+        """Test that moving objects changes the content hash."""
+        scene = RoomScene(
+            room_geometry=self.scene.room_geometry, scene_dir=self.test_data_dir
+        )
+        obj = SceneObject(
+            object_id=UniqueID("movable_obj"),
+            object_type=ObjectType.FURNITURE,
+            name="Movable Object",
+            description="An object that moves",
+            transform=RigidTransform(),
+        )
+        scene.add_object(obj)
+
+        hash_before = scene.content_hash()
+
+        # Move the object.
+        new_transform = RigidTransform(np.array([1.0, 2.0, 3.0]))
+        scene.move_object(obj.object_id, new_transform)
+
+        hash_after = scene.content_hash()
+        self.assertNotEqual(hash_before, hash_after)
+
+    def test_content_hash_text_description_affects_hash(self):
+        """Test that text description affects content hash."""
+        scene1 = RoomScene(
+            room_geometry=self.scene.room_geometry,
+            text_description="Description 1",
+            scene_dir=self.test_data_dir,
+        )
+        scene2 = RoomScene(
+            room_geometry=self.scene.room_geometry,
+            text_description="Description 2",
+            scene_dir=self.test_data_dir,
+        )
+
+        hash1 = scene1.content_hash()
+        hash2 = scene2.content_hash()
+        self.assertNotEqual(hash1, hash2)
+
+    def test_content_hash_deterministic_across_calls(self):
+        """Test that content hash is deterministic across multiple calls."""
+        scene = RoomScene(
+            room_geometry=self.scene.room_geometry, scene_dir=self.test_data_dir
+        )
+        obj = SceneObject(
+            object_id=UniqueID("consistent_obj"),
+            object_type=ObjectType.FURNITURE,
+            name="Consistent Object",
+            description="An object for consistency testing",
+            transform=RigidTransform(np.array([1.0, 2.0, 3.0])),
+        )
+        scene.add_object(obj)
+
+        # Hash should be same across multiple calls.
+        hash1 = scene.content_hash()
+        hash2 = scene.content_hash()
+        hash3 = scene.content_hash()
+
+        self.assertEqual(hash1, hash2)
+        self.assertEqual(hash2, hash3)
+
+    def test_content_hash_object_order_independence(self):
+        """Test that object addition order doesn't affect content hash."""
+        # Create two scenes and add objects in different orders.
+        scene1 = RoomScene(
+            room_geometry=self.scene.room_geometry, scene_dir=self.test_data_dir
+        )
+        scene2 = RoomScene(
+            room_geometry=self.scene.room_geometry, scene_dir=self.test_data_dir
+        )
+
+        obj_a = SceneObject(
+            object_id=UniqueID("obj_a_id"),  # Fixed IDs for determinism.
+            object_type=ObjectType.FURNITURE,
+            name="Object A",
+            description="First object",
+            transform=RigidTransform(np.array([1.0, 0.0, 0.0])),
+        )
+
+        obj_b = SceneObject(
+            object_id=UniqueID("obj_b_id"),  # Fixed IDs for determinism.
+            object_type=ObjectType.FURNITURE,
+            name="Object B",
+            description="Second object",
+            transform=RigidTransform(np.array([0.0, 1.0, 0.0])),
+        )
+
+        # Add in different orders.
+        scene1.add_object(obj_a)
+        scene1.add_object(obj_b)
+
+        scene2.add_object(obj_b)
+        scene2.add_object(obj_a)
+
+        hash1 = scene1.content_hash()
+        hash2 = scene2.content_hash()
+        self.assertEqual(hash1, hash2)
+
+    def test_content_hash_empty_scene_consistent(self):
+        """Test that empty scenes have consistent content hash."""
+        scene1 = RoomScene(
+            room_geometry=self.scene.room_geometry, scene_dir=self.test_data_dir
+        )
+        scene2 = RoomScene(
+            room_geometry=self.scene.room_geometry, scene_dir=self.test_data_dir
+        )
+
+        hash1 = scene1.content_hash()
+        hash2 = scene2.content_hash()
+        self.assertEqual(hash1, hash2)
+
+    def test_content_hash_missing_files_handled_gracefully(self):
+        """Test that missing SDF files don't crash content hashing."""
+        scene = RoomScene(
+            room_geometry=self.scene.room_geometry, scene_dir=self.test_data_dir
+        )
+        obj = SceneObject(
+            object_id=UniqueID("obj_with_missing_file"),
+            object_type=ObjectType.FURNITURE,
+            name="Object With Missing File",
+            description="An object with missing SDF",
+            transform=RigidTransform(),
+            sdf_path=Path("/nonexistent/path/to/file.sdf"),
+            geometry_path=Path("/nonexistent/path/to/geometry.obj"),
+        )
+        scene.add_object(obj)
+
+        # Should not raise exception.
+        hash_value = scene.content_hash()
+        self.assertIsInstance(hash_value, str)
+        self.assertEqual(len(hash_value), 64)  # SHA-256 hex length.
+
+    def test_content_hash_support_surfaces_affect_hash(self):
+        """Test that support surfaces affect content hash."""
+        scene1 = RoomScene(
+            room_geometry=self.scene.room_geometry, scene_dir=self.test_data_dir
+        )
+        scene2 = RoomScene(
+            room_geometry=self.scene.room_geometry, scene_dir=self.test_data_dir
+        )
+
+        support_surface = SupportSurface(
+            surface_id=UniqueID("test_surface"),
+            bounding_box_min=np.array([0.0, 0.0, 0.0]),
+            bounding_box_max=np.array([1.0, 1.0, 0.1]),
+            transform=RigidTransform(),
+        )
+
+        obj1 = SceneObject(
+            object_id=UniqueID("obj_with_surface"),
+            object_type=ObjectType.FURNITURE,
+            name="Object With Surface",
+            description="An object with support surface",
+            transform=RigidTransform(),
+            support_surfaces=[support_surface],
+        )
+
+        obj2 = SceneObject(
+            object_id=obj1.object_id,  # Same object but no support surfaces.
+            object_type=ObjectType.FURNITURE,
+            name="Object With Surface",
+            description="An object with support surface",
+            transform=RigidTransform(),
+            support_surfaces=[],  # No support surfaces.
+        )
+
+        scene1.add_object(obj1)
+        scene2.add_object(obj2)
+
+        hash1 = scene1.content_hash()
+        hash2 = scene2.content_hash()
+        self.assertNotEqual(hash1, hash2)
+
+    def test_to_state_dict(self):
+        """Test that to_state_dict returns correct scene state dictionary."""
+        # Test empty scene.
+        empty_scene = RoomScene(
+            room_geometry=self.scene.room_geometry,
+            text_description="Empty test scene",
+            scene_dir=self.test_data_dir,
+        )
+        state_dict = empty_scene.to_state_dict()
+
+        # Check structure.
+        self.assertIn("objects", state_dict)
+        self.assertIn("text_description", state_dict)
+
+        # Check empty scene values.
+        self.assertEqual(state_dict["objects"], {})
+        self.assertEqual(state_dict["text_description"], "Empty test scene")
+
+        # Test scene with objects.
+        self.scene.add_object(self.test_object)
+
+        state_dict = self.scene.to_state_dict()
+
+        # Check objects dict.
+        self.assertEqual(len(state_dict["objects"]), 1)
+        obj_id = str(self.test_object.object_id)
+        self.assertIn(obj_id, state_dict["objects"])
+
+        # Check object data serialization.
+        obj_data = state_dict["objects"][obj_id]
+        self.assertEqual(obj_data["name"], "Test Object")
+        self.assertEqual(obj_data["description"], "A test object")
+        self.assertEqual(obj_data["object_id"], obj_id)
+        self.assertEqual(obj_data["object_type"], ObjectType.FURNITURE.value)
+
+        # Check transform serialization.
+        self.assertIn("transform", obj_data)
+        transform_data = obj_data["transform"]
+        self.assertIsInstance(transform_data["translation"], list)
+        self.assertIsInstance(transform_data["rotation_wxyz"], list)
+        self.assertEqual(len(transform_data["translation"]), 3)
+        self.assertEqual(len(transform_data["rotation_wxyz"]), 4)  # Quaternion wxyz
+
+        # Check support surfaces serialization.
+        self.assertIsInstance(obj_data["support_surfaces"], list)
+
+        # Check metadata and paths.
+        self.assertEqual(obj_data["metadata"], {})
+        self.assertIsNone(obj_data["geometry_path"])
+        self.assertIsNone(obj_data["image_path"])
+        self.assertIsInstance(obj_data["sdf_path"], str)
+        self.assertEqual(obj_data["immutable"], False)
+
+        # Check text description.
+        self.assertEqual(state_dict["text_description"], "")
+
+    def test_to_state_dict_multiple_objects(self):
+        """Test to_state_dict with multiple objects."""
+        # Create second test object.
+        second_object = SceneObject(
+            object_id=UniqueID("second_object"),
+            name="Second Object",
+            description="Another test piece",
+            object_type=ObjectType.FURNITURE,
+            transform=RigidTransform(p=[5.0, 6.0, 7.0]),
+            sdf_path=None,
+        )
+
+        # Add both objects.
+        self.scene.add_object(self.test_object)
+        self.scene.add_object(second_object)
+
+        state_dict = self.scene.to_state_dict()
+
+        # Check objects dict has both objects.
+        self.assertEqual(len(state_dict["objects"]), 2)
+
+        # Verify both objects are present with correct IDs.
+        obj_ids = set(state_dict["objects"].keys())
+        expected_ids = {str(self.test_object.object_id), str(second_object.object_id)}
+        self.assertEqual(obj_ids, expected_ids)
+
+        # Verify object names in serialized data.
+        obj1_data = state_dict["objects"][str(self.test_object.object_id)]
+        obj2_data = state_dict["objects"][str(second_object.object_id)]
+        self.assertEqual(obj1_data["name"], "Test Object")
+        self.assertEqual(obj2_data["name"], "Second Object")

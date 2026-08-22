@@ -8,8 +8,13 @@ import logging
 
 from dataclasses import dataclass
 
-from scenesmith.agent_utils.house import OpeningType, PlacedRoom, Wall, WallDirection
-from scenesmith.floor_plan_agents.tools.door_window_mixin import (
+from scenesmith.agent_utils.scene.house_parts.openings import (
+    OpeningType,
+    PlacedRoom,
+    Wall,
+    WallDirection,
+)
+from scenesmith.floor_plan_agents.tools.submission.door_window_mixin import (
     SEGMENT_LEFT_END,
     SEGMENT_RIGHT_START,
 )

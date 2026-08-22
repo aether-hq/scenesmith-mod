@@ -13,17 +13,18 @@ from typing import TYPE_CHECKING, Any
 from agents import ToolOutputImage, ToolOutputText, function_tool
 from omegaconf import DictConfig
 
-from scenesmith.agent_utils.physics_tools import check_physics_violations
-from scenesmith.agent_utils.reachability import (
+from scenesmith.agent_utils.physics.physics_tools import check_physics_violations
+from scenesmith.agent_utils.physics.reachability import (
     compute_reachability,
     format_reachability_result,
 )
-from scenesmith.agent_utils.rendering_manager import RenderingManager
-from scenesmith.agent_utils.room import AgentType, RoomScene
+from scenesmith.agent_utils.rendering.rendering_manager import RenderingManager
+from scenesmith.agent_utils.scene.room import RoomScene
+from scenesmith.agent_utils.scene.room_parts.room_models import AgentType
 from scenesmith.utils.openai import encode_image_to_base64
 
 if TYPE_CHECKING:
-    from scenesmith.agent_utils.blender.server_manager import BlenderServer
+    from scenesmith.agent_utils.blender.server.server_manager import BlenderServer
 
 console_logger = logging.getLogger(__name__)
 

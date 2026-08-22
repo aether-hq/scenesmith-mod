@@ -24,7 +24,7 @@ from scenesmith.robot_eval.policy_interface.policy_agent import (
 )
 
 if TYPE_CHECKING:
-    from scenesmith.agent_utils.blender.server_manager import BlenderServer
+    from scenesmith.agent_utils.blender.server.server_manager import BlenderServer
 
 console_logger = logging.getLogger(__name__)
 

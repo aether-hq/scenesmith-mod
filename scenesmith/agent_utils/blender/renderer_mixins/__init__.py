@@ -1,0 +1,1 @@
+"""Composable Blender renderer capabilities."""

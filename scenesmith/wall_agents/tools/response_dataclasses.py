@@ -26,7 +26,7 @@ Tools convert domain models to DTOs when returning responses:
 from dataclasses import dataclass
 from enum import Enum
 
-from scenesmith.agent_utils.response_datatypes import (
+from scenesmith.agent_utils.core.response_datatypes import (
     AssetInfo,
     BoundingBox3D,
     JSONSerializable,

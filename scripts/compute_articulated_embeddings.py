@@ -49,8 +49,10 @@ from scenesmith.agent_utils.blender.renderer import (
     ARTICULATED_LIGHT_ENERGY,
     BlenderRenderer,
 )
-from scenesmith.agent_utils.clip_embeddings import get_multiview_image_embedding
-from scenesmith.agent_utils.sdf_mesh_utils import combine_sdf_meshes_at_joint_angles
+from scenesmith.agent_utils.geometry.sdf_mesh_utils import (
+    combine_sdf_meshes_at_joint_angles,
+)
+from scenesmith.agent_utils.llm.clip_embeddings import get_multiview_image_embedding
 
 console_logger = logging.getLogger(__name__)
 

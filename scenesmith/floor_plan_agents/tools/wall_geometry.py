@@ -16,10 +16,10 @@ from PIL import Image
 from trimesh.visual.material import PBRMaterial as TrimeshPBRMaterial
 from trimesh.visual.texture import TextureVisuals
 
-from scenesmith.agent_utils.house import OpeningType, WindowShape
+from scenesmith.agent_utils.scene.house_parts.openings import OpeningType, WindowShape
 from scenesmith.floor_plan_agents.tools.window_geometry import create_arched_prism
-from scenesmith.utils.gltf_generation import get_zup_to_yup_matrix
-from scenesmith.utils.material import Material
+from scenesmith.utils.geometry.gltf_generation import get_zup_to_yup_matrix
+from scenesmith.utils.geometry.material import Material
 
 console_logger = logging.getLogger(__name__)
 

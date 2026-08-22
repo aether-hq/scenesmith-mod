@@ -21,31 +21,39 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 if str(REPOSITORY_ROOT) not in sys.path:
     sys.path.insert(0, str(REPOSITORY_ROOT))
 
-from scenesmith.agent_utils.semantic_environment_compiler import (
+from scenesmith.agent_utils.core.atomic_output import rebuild_directory_atomically
+from scenesmith.agent_utils.semantics.environment.models.environment_spec import (
+    SemanticEnvironmentSpec,
+)
+from scenesmith.agent_utils.semantics.environment.semantic_environment_compiler import (
     SEMANTIC_ENVIRONMENT_COMPILER_VERSION,
     SemanticCompileOptions,
     compile_semantic_environment,
 )
-from scenesmith.agent_utils.atomic_output import rebuild_directory_atomically
-from scenesmith.agent_utils.semantic_environment_details import (
+from scenesmith.agent_utils.semantics.environment.semantic_environment_details import (
     DETAIL_SAMPLER_VERSION,
     compile_environment_details,
 )
-from scenesmith.agent_utils.semantic_environments import SemanticEnvironmentSpec
-from scenesmith.agent_utils.structural_compiler import (
+from scenesmith.agent_utils.structure.compiler.models import (
     CompiledStructure,
     CompiledStructurePaths,
     CompiledSurfacePatch,
     TriangleMesh,
-    compile_polygon_space,
-    write_compiled_structure,
 )
-from scenesmith.agent_utils.structural_geometry import (
+from scenesmith.agent_utils.structure.compiler.polygon_spaces import (
+    compile_polygon_space,
+)
+from scenesmith.agent_utils.structure.compiler.writing import write_compiled_structure
+from scenesmith.agent_utils.structure.geometry_models.surface_models import (
     Footprint2D,
-    PortalSpec,
-    PortalType,
     StructuralSurface,
     SurfaceRole,
+)
+from scenesmith.agent_utils.structure.geometry_models.topology_models import (
+    PortalSpec,
+    PortalType,
+)
+from scenesmith.agent_utils.structure.geometry_models.validation import (
     require_safe_identifier,
     validate_global_identifiers,
 )
@@ -401,7 +409,7 @@ def _compile_trial(
         "summary_metrics": _summary_metrics(metrics),
         "source_kind": "heldout_llm_semantic_environment",
         "compiler": (
-            "scenesmith.agent_utils.semantic_environment_compiler."
+            "scenesmith.agent_utils.semantics.environment.semantic_environment_compiler."
             "compile_semantic_environment"
         ),
         "representation": "compiled_semantic_geometry",
@@ -627,7 +635,7 @@ def _compile_bar_control(
         ],
         "source_kind": source["kind"],
         "compiler": (
-            "scenesmith.agent_utils.structural_compiler.compile_polygon_space"
+            "scenesmith.agent_utils.structure.compiler.polygon_spaces.compile_polygon_space"
         ),
         "representation": "semantic_proxy_diagnostic",
         "semantic_hash": source_hash,

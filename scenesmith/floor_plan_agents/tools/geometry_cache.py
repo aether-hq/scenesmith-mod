@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
-from scenesmith.utils.material import Material
+from scenesmith.utils.geometry.material import Material
 
 console_logger = logging.getLogger(__name__)
 

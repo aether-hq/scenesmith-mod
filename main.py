@@ -37,7 +37,7 @@ if hasattr(signal, "SIGUSR1"):
 
 def configure_llm_provider(cfg: DictConfig) -> None:
     """Configure and capability-check SceneSmith's provider-neutral LLM harness."""
-    from scenesmith.agent_utils.llm_harness import (
+    from scenesmith.agent_utils.llm.llm_harness import (
         LLMHarnessConfig,
         install_agents_runtime,
     )

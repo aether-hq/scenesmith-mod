@@ -10,10 +10,12 @@ from pathlib import Path
 
 from omegaconf import DictConfig
 
-from scenesmith.agent_utils.house import HouseLayout
+from scenesmith.agent_utils.scene.house import HouseLayout
 from scenesmith.floor_plan_agents.tools.floor_plan_tools import DoorWindowConfig
 from scenesmith.floor_plan_agents.tools.materials_resolver import MaterialsConfig
-from scenesmith.floor_plan_agents.tools.room_placement import ScoringWeights
+from scenesmith.floor_plan_agents.tools.submission.placement.models import (
+    ScoringWeights,
+)
 from scenesmith.prompts import prompt_registry
 from scenesmith.utils.logging import BaseLogger
 

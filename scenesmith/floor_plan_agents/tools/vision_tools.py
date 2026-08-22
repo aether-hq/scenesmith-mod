@@ -19,12 +19,14 @@ from pydrake.all import ApplyCameraConfig, CameraConfig, RenderEngineGltfClientP
 from pydrake.common.schema import Transform
 from pydrake.math import RigidTransform as DrakeRigidTransform
 
-from scenesmith.agent_utils.blender.annotations import load_annotation_font
-from scenesmith.agent_utils.blender.server_manager import BlenderServer
-from scenesmith.agent_utils.drake_utils import create_plant_from_dmd
-from scenesmith.agent_utils.house import HouseLayout
+from scenesmith.agent_utils.blender.overlays.image_annotations import (
+    load_annotation_font,
+)
+from scenesmith.agent_utils.blender.server.server_manager import BlenderServer
+from scenesmith.agent_utils.physics.drake_utils import create_plant_from_dmd
+from scenesmith.agent_utils.scene.house import HouseLayout
 from scenesmith.floor_plan_agents.tools.ascii_generator import generate_ascii_floor_plan
-from scenesmith.utils.material import Material
+from scenesmith.utils.geometry.material import Material
 from scenesmith.utils.openai import encode_image_to_base64
 
 console_logger = logging.getLogger(__name__)

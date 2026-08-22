@@ -27,11 +27,11 @@ from pydrake.all import (
     Transform,
 )
 
-from scenesmith.agent_utils.drake_utils import create_plant_from_dmd
+from scenesmith.agent_utils.physics.drake_utils import create_plant_from_dmd
 from scenesmith.robot_eval.dmd_scene import DMDScene
 
 if TYPE_CHECKING:
-    from scenesmith.agent_utils.blender.server_manager import BlenderServer
+    from scenesmith.agent_utils.blender.server.server_manager import BlenderServer
 
 console_logger = logging.getLogger(__name__)
 

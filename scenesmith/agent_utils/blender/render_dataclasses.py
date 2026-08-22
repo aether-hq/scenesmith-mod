@@ -2,8 +2,12 @@
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from mathutils import Vector
+
+if TYPE_CHECKING:
+    import bpy
 
 
 @dataclass

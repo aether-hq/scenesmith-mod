@@ -18,12 +18,13 @@ from agents import Agent, FunctionTool
 from agents.tracing import custom_span
 from omegaconf import DictConfig
 
-from scenesmith.agent_utils.base_stateful_agent import BaseStatefulAgent
 from scenesmith.agent_utils.blender.process_provider import RenderAllocation
-from scenesmith.agent_utils.placement_noise import PlacementNoiseMode
-from scenesmith.agent_utils.room import AgentType, RoomScene
-from scenesmith.agent_utils.scoring import CeilingCritiqueWithScores
-from scenesmith.agent_utils.workflow_tools import WorkflowTools
+from scenesmith.agent_utils.design.placement_noise import PlacementNoiseMode
+from scenesmith.agent_utils.runtime.base_stateful_agent import BaseStatefulAgent
+from scenesmith.agent_utils.runtime.scoring import CeilingCritiqueWithScores
+from scenesmith.agent_utils.runtime.workflow_tools import WorkflowTools
+from scenesmith.agent_utils.scene.room import RoomScene
+from scenesmith.agent_utils.scene.room_parts.room_models import AgentType
 from scenesmith.ceiling_agents.base_ceiling_agent import BaseCeilingAgent
 from scenesmith.ceiling_agents.tools.ceiling_tools import CeilingTools
 from scenesmith.ceiling_agents.tools.vision_tools import CeilingVisionTools

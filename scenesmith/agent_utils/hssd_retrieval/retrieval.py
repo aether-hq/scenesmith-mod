@@ -13,13 +13,13 @@ from scenesmith.agent_utils.hssd_retrieval.alignment import (
 from scenesmith.agent_utils.hssd_retrieval.clip_similarity import (
     get_top_k_similar_meshes,
 )
-from scenesmith.agent_utils.clip_embeddings import warm_clip_text_encoder
 from scenesmith.agent_utils.hssd_retrieval.config import HssdConfig
 from scenesmith.agent_utils.hssd_retrieval.data_loader import (
     HssdMeshMetadata,
     construct_hssd_mesh_path,
     load_preprocessed_data,
 )
+from scenesmith.agent_utils.llm.clip_embeddings import warm_clip_text_encoder
 
 console_logger = logging.getLogger(__name__)
 

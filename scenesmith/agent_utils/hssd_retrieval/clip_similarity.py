@@ -2,11 +2,11 @@
 
 import logging
 
-from scenesmith.agent_utils.clip_embeddings import (
+from scenesmith.agent_utils.hssd_retrieval.data_loader import HssdPreprocessedData
+from scenesmith.agent_utils.llm.clip_embeddings import (
     compute_clip_similarities,
     get_text_embedding,
 )
-from scenesmith.agent_utils.hssd_retrieval.data_loader import HssdPreprocessedData
 
 console_logger = logging.getLogger(__name__)
 

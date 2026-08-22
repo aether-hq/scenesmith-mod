@@ -13,7 +13,7 @@ from scenesmith.agent_utils.articulated_retrieval_server.data_loader import (
     ArticulatedPreprocessedData,
     load_preprocessed_data_multi_source,
 )
-from scenesmith.agent_utils.clip_embeddings import (
+from scenesmith.agent_utils.llm.clip_embeddings import (
     compute_clip_similarities,
     get_text_embedding,
     warm_clip_text_encoder,

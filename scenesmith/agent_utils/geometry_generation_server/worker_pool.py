@@ -33,7 +33,7 @@ from scenesmith.agent_utils.geometry_generation_server.execution_provider import
     GeometryWorkerTarget,
     resolve_geometry_execution_provider,
 )
-from scenesmith.agent_utils.geometry_generation_server.gpu_worker import (
+from scenesmith.agent_utils.geometry_generation_server.pipelines.gpu_worker import (
     ShutdownRequest,
     WorkerReady,
     WorkerStartupFailed,

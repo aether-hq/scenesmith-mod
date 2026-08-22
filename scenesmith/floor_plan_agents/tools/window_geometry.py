@@ -13,7 +13,7 @@ import trimesh
 
 from trimesh.visual.material import PBRMaterial
 
-from scenesmith.utils.gltf_generation import get_zup_to_yup_matrix
+from scenesmith.utils.geometry.gltf_generation import get_zup_to_yup_matrix
 
 console_logger = logging.getLogger(__name__)
 
